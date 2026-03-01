@@ -179,16 +179,6 @@ export default function OnboardingPage() {
           setLoading(false);
           return;
         }
-        const { error: signError } = await supabase.auth.signUp({
-          email: userEmail.trim(),
-          password: userPassword,
-          options: { emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined },
-        });
-        if (signError) {
-          setError(signError.message);
-          setLoading(false);
-          return;
-        }
       }
 
       const res = await fetch("/api/onboarding", {
@@ -211,6 +201,10 @@ export default function OnboardingPage() {
           municipio: company.municipio || undefined,
           opencnpj_raw: company.opencnpj_raw,
           queue_name: queueName,
+          ...(!isLoggedIn && {
+            user_email: userEmail.trim(),
+            user_password: userPassword,
+          }),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -221,6 +215,19 @@ export default function OnboardingPage() {
       }
       const s = data.company?.slug ?? company.slug;
       const link = typeof window !== "undefined" ? `${window.location.origin}/${s}` : `/${s}`;
+
+      if (!isLoggedIn) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: userEmail.trim(),
+          password: userPassword,
+        });
+        if (signInError) {
+          setError("Empresa criada, mas falha ao entrar: " + signInError.message);
+          setLoading(false);
+          return;
+        }
+      }
+
       setResult({ slug: s, link });
     } catch {
       setError("Erro de conexão");

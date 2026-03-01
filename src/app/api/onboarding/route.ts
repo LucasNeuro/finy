@@ -20,6 +20,8 @@ type OnboardingBody = {
   telefones?: unknown;
   opencnpj_raw?: unknown;
   queue_name?: string;
+  user_email?: string;
+  user_password?: string;
 };
 
 function str(v: unknown): string | undefined {
@@ -31,17 +33,42 @@ function toDigits(s: string): string {
 }
 
 export async function POST(request: Request) {
+  let userId: string;
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
   let body: OnboardingBody;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (user) {
+    userId = user.id;
+  } else {
+    const userEmail = str(body?.user_email);
+    const userPassword = typeof body?.user_password === "string" ? body.user_password : "";
+    if (!userEmail || userPassword.length < 6) {
+      return NextResponse.json(
+        { error: "Usuário não autenticado. Informe e-mail e senha (mín. 6 caracteres) para criar a conta." },
+        { status: 401 }
+      );
+    }
+    const admin = createServiceRoleClient();
+    const { data: newUser, error: createUserError } = await admin.auth.admin.createUser({
+      email: userEmail,
+      password: userPassword,
+      email_confirm: true,
+    });
+    if (createUserError || !newUser?.user) {
+      return NextResponse.json(
+        { error: createUserError?.message ?? "Falha ao criar usuário. E-mail já cadastrado?" },
+        { status: 400 }
+      );
+    }
+    userId = newUser.user.id;
   }
 
   const name = str(body?.name) ?? "";
@@ -97,7 +124,7 @@ export async function POST(request: Request) {
   }
 
   const { error: profileError } = await admin.from("profiles").insert({
-    user_id: user.id,
+    user_id: userId,
     company_id: company.id,
     role: "admin",
   });
