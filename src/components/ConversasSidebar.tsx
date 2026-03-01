@@ -119,7 +119,7 @@ export function ConversasSidebar() {
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
                     {(c.customer_name ?? c.customer_phone).slice(0, 1).toUpperCase()}
                   </span>
-                  <span className="inline-block h-4 w-4 shrink-0 rounded-full bg-[#22C55E]" title="WhatsApp" />
+                  <span className="inline-block h-4 w-4 shrink-0 rounded-full bg-clicvend-orange" title="WhatsApp" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-[#1E293B]">
                       {c.customer_name || c.customer_phone}

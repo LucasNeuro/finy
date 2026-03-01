@@ -39,7 +39,7 @@ const FEATURES = [
     icon: MessageSquare,
     title: "Conversas centralizadas",
     desc: "Veja todas as conversas por fila, atribua atendentes e acompanhe o histórico em um só lugar.",
-    gradient: "from-blue-500/20 to-blue-600/5",
+    gradient: "from-clicvend-blue/20 to-clicvend-blue/5",
     iconColor: "text-blue-600",
   },
   {
@@ -112,12 +112,12 @@ function FloatingMockup() {
       transition={{ duration: 0.8, delay: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
       className="relative hidden md:block"
     >
-      <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-blue-500/10 via-transparent to-violet-500/10 blur-2xl" />
-      <div className="relative rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-2xl shadow-blue-500/10">
+      <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-clicvend-blue/10 via-transparent to-violet-500/10 blur-2xl" />
+      <div className="relative rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-2xl shadow-clicvend-blue/10">
         <div className="mb-3 flex items-center gap-2 border-b border-[#F1F5F9] pb-3">
           <div className="h-3 w-3 rounded-full bg-[#EF4444]" />
           <div className="h-3 w-3 rounded-full bg-[#F59E0B]" />
-          <div className="h-3 w-3 rounded-full bg-[#22C55E]" />
+          <div className="h-3 w-3 rounded-full bg-clicvend-orange" />
           <span className="ml-2 text-xs font-medium text-[#94A3B8]">ClicVend - Conversas</span>
         </div>
         <div className="flex gap-3">
@@ -132,12 +132,12 @@ function FloatingMockup() {
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.6 + i * 0.15 }}
-                className={`flex items-center gap-2 rounded-lg p-2 ${c.active ? "bg-blue-50" : "hover:bg-slate-50"}`}
+                className={`flex items-center gap-2 rounded-lg p-2 ${c.active ? "bg-clicvend-blue/5" : "hover:bg-slate-50"}`}
               >
-                <div className={`h-7 w-7 shrink-0 rounded-full ${c.active ? "bg-gradient-to-br from-blue-400 to-blue-600" : "bg-slate-200"}`} />
+                <div className={`h-7 w-7 shrink-0 rounded-full ${c.active ? "bg-gradient-to-br from-clicvend-blue to-clicvend-blue/80" : "bg-slate-200"}`} />
                 <div className="min-w-0 flex-1">
                   <div className={`h-1.5 w-full rounded ${c.active ? "bg-blue-300" : "bg-slate-200"}`} />
-                  <div className={`mt-1 h-1 w-2/3 rounded ${c.active ? "bg-blue-200" : "bg-slate-100"}`} />
+                  <div className={`mt-1 h-1 w-2/3 rounded ${c.active ? "bg-clicvend-blue/20" : "bg-slate-100"}`} />
                 </div>
               </motion.div>
             ))}
@@ -174,7 +174,7 @@ function FloatingMockup() {
               className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 p-2"
             >
               <div className="h-1.5 flex-1 rounded bg-slate-200" />
-              <div className="h-6 w-6 rounded-md bg-blue-500" />
+              <div className="h-6 w-6 rounded-md bg-clicvend-orange" />
             </motion.div>
           </div>
         </div>
@@ -196,20 +196,20 @@ export default function HomePage() {
         className="sticky top-0 z-50 border-b border-[#E2E8F0]/60 bg-white/80 backdrop-blur-xl"
       >
         <div className="mx-auto flex w-[90%] max-w-6xl items-center justify-between py-3.5">
-          <Link href="/" className="rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-            <ClicVendLogo size="md" />
+          <Link href="/" className="rounded focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2">
+            <ClicVendLogo size="lg" />
           </Link>
           <nav className="flex items-center gap-2 sm:gap-3">
             <Link
               href="/login"
-              className="group inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#475569] transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              className="group inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-clicvend-blue transition-all hover:border-clicvend-blue/40 hover:bg-clicvend-blue/5 hover:text-clicvend-blue"
             >
               <LogIn className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
               <span>Já tenho conta</span>
             </Link>
             <Link
               href="/onboarding"
-              className="group inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition-all hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-600/30 active:scale-[0.98]"
+              className="group inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-semibold text-white shadow-md shadow-clicvend-orange/25 transition-all hover:bg-clicvend-orange-dark hover:shadow-lg hover:shadow-blue-600/30 active:scale-[0.98]"
             >
               <span>Cadastre-se</span>
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
@@ -228,10 +228,10 @@ export default function HomePage() {
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
-                className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3.5 py-1.5 text-xs font-semibold text-blue-700 shadow-sm"
+                className="inline-flex items-center gap-2 rounded-full border border-clicvend-blue/30 bg-clicvend-blue/5 px-3.5 py-1.5 text-xs font-semibold text-blue-700 shadow-sm"
               >
                 <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-75" />
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-clicvend-orange opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-600" />
                 </span>
                 Atendimento WhatsApp integrado
@@ -244,7 +244,7 @@ export default function HomePage() {
                 className="mt-6 text-4xl font-extrabold tracking-tight text-[#0F172A] md:text-5xl lg:text-[3.5rem] lg:leading-[1.1]"
               >
                 Atendimento WhatsApp{" "}
-                <span className="bg-gradient-to-r from-blue-600 to-blue-500 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-clicvend-orange to-clicvend-orange-dark bg-clip-text text-transparent">
                   em um só lugar
                 </span>
               </motion.h1>
@@ -267,14 +267,14 @@ export default function HomePage() {
               >
                 <Link
                   href="/onboarding"
-                  className="group inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98]"
+                  className="group inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-clicvend-orange/25 transition-all hover:bg-clicvend-orange-dark hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98]"
                 >
                   <span>Cadastre-se grátis</span>
                   <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
                 </Link>
                 <Link
                   href="/login"
-                  className="group inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-6 py-3.5 text-base font-semibold text-[#475569] shadow-sm transition-all hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                  className="group inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-6 py-3.5 text-base font-semibold text-clicvend-blue shadow-sm transition-all hover:border-clicvend-blue/40 hover:bg-clicvend-blue/5 hover:text-clicvend-blue"
                 >
                   <LogIn className="h-5 w-5 transition-transform group-hover:-translate-x-0.5" />
                   <span>Já tenho conta</span>
@@ -294,7 +294,7 @@ export default function HomePage() {
                 ].map(({ icon: Icon, label }) => (
                   <div key={label} className="flex items-center gap-2.5 text-[#64748B]">
                     <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-slate-100 to-slate-50 shadow-sm">
-                      <Icon className="h-4 w-4 text-[#475569]" />
+                      <Icon className="h-4 w-4 text-clicvend-blue" />
                     </span>
                     <span className="text-sm font-medium">{label}</span>
                   </div>
@@ -383,9 +383,9 @@ export default function HomePage() {
             {STEPS.map(({ icon: Icon, title, desc }, i) => (
               <motion.div key={title} variants={fadeUp} custom={i} className="relative text-center">
                 {i < STEPS.length - 1 && (
-                  <div className="absolute left-1/2 top-8 hidden h-px w-full bg-gradient-to-r from-blue-200 to-transparent md:block" />
+                  <div className="absolute left-1/2 top-8 hidden h-px w-full bg-gradient-to-r from-clicvend-blue/20 to-transparent md:block" />
                 )}
-                <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/30">
+                <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-clicvend-orange to-clicvend-orange-dark text-white shadow-lg shadow-clicvend-blue/30">
                   <Icon className="h-7 w-7" />
                   <span className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-bold text-blue-600 shadow">
                     {i + 1}
@@ -405,7 +405,7 @@ export default function HomePage() {
         whileInView="visible"
         viewport={{ once: true, margin: "-60px" }}
         variants={stagger}
-        className="bg-gradient-to-r from-[#0F172A] to-[#1E293B] py-14 md:py-20"
+        className="bg-gradient-to-r from-clicvend-blue to-[#1E293B] py-14 md:py-20"
       >
         <div className="mx-auto w-[90%] max-w-6xl">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-4 md:gap-12">
@@ -470,7 +470,7 @@ export default function HomePage() {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#475569]">
+              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-clicvend-blue">
                 <p className="mb-4">
                   Ao utilizar o ClicVend, você concorda com estes Termos de Uso. O serviço destina-se a empresas e profissionais que desejam centralizar o atendimento via WhatsApp.
                 </p>
@@ -522,7 +522,7 @@ export default function HomePage() {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#475569]">
+              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-clicvend-blue">
                 <p className="mb-4">
                   O ClicVend respeita sua privacidade e está em conformidade com a Lei Geral de Proteção de Dados (LGPD). Esta política descreve como coletamos, usamos e protegemos suas informações.
                 </p>

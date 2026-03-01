@@ -216,7 +216,7 @@ export default function ConexoesPage() {
           <button
             type="button"
             onClick={openModal}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#22C55E] px-4 py-2 text-sm font-medium text-white hover:bg-[#16A34A] transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark transition-colors"
           >
             <Plus className="h-4 w-4" />
             Nova conexão WhatsApp
@@ -240,7 +240,7 @@ export default function ConexoesPage() {
       </div>
 
       {globalWebhookMessage && (
-        <p className={`text-sm ${globalWebhookMessage.startsWith("Webhook global") ? "text-[#16A34A]" : "text-[#DC2626]"}`}>
+        <p className={`text-sm ${globalWebhookMessage.startsWith("Webhook global") ? "text-clicvend-orange-dark" : "text-[#DC2626]"}`}>
           {globalWebhookMessage}
         </p>
       )}
@@ -254,7 +254,7 @@ export default function ConexoesPage() {
           <button
             type="button"
             onClick={openModal}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#22C55E] px-4 py-2 text-sm font-medium text-white hover:bg-[#16A34A] transition-colors"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark transition-colors"
           >
             <Plus className="h-4 w-4" />
             Nova conexão WhatsApp
@@ -269,11 +269,11 @@ export default function ConexoesPage() {
                 className="flex items-center gap-4 rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm"
               >
                 <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#DCFCE7]">
-                  <Smartphone className="h-6 w-6 text-[#22C55E]" />
+                  <Smartphone className="h-6 w-6 text-clicvend-orange" />
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-[#1E293B]">{ch.name}</p>
-                  <p className="text-sm text-[#22C55E]">Conectado</p>
+                  <p className="text-sm text-clicvend-orange">Conectado</p>
                   <p className="text-xs text-[#64748B]">{ch.uazapi_instance_id}</p>
                 </div>
                 <button
@@ -328,13 +328,13 @@ export default function ConexoesPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ex: Atendimento"
-                    className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-[#22C55E] focus:outline-none focus:ring-1 focus:ring-[#22C55E]"
+                    className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
                   />
                   <label className="block text-sm font-medium text-[#334155] mb-1">Fila (opcional)</label>
                   <select
                     value={queueId}
                     onChange={(e) => setQueueId(e.target.value)}
-                    className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-[#22C55E] focus:outline-none focus:ring-1 focus:ring-[#22C55E]"
+                    className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
                   >
                     <option value="">Nenhuma</option>
                     {queues.map((q) => (
@@ -356,7 +356,7 @@ export default function ConexoesPage() {
                       type="button"
                       onClick={createAndConnect}
                       disabled={connecting}
-                      className="inline-flex items-center gap-2 rounded-lg bg-[#22C55E] px-4 py-2 text-sm font-medium text-white hover:bg-[#16A34A] disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
                     >
                       {connecting ? (
                         <>
@@ -375,12 +375,12 @@ export default function ConexoesPage() {
                 <>
                   {webhookDone ? (
                     <div className="py-4 text-center">
-                      <p className="text-[#22C55E] font-medium">Conectado com sucesso!</p>
+                      <p className="text-clicvend-orange font-medium">Conectado com sucesso!</p>
                       <p className="mt-1 text-sm text-[#64748B]">Webhook configurado. Você já pode receber e enviar mensagens.</p>
                       <button
                         type="button"
                         onClick={closeModal}
-                        className="mt-4 rounded-lg bg-[#22C55E] px-4 py-2 text-sm font-medium text-white hover:bg-[#16A34A]"
+                        className="mt-4 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark"
                       >
                         Fechar
                       </button>
@@ -406,7 +406,7 @@ export default function ConexoesPage() {
                       )}
                       {!qrcode && !paircode && connecting && (
                         <div className="flex justify-center py-8">
-                          <Loader2 className="h-8 w-8 animate-spin text-[#22C55E]" />
+                          <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
                         </div>
                       )}
                       <p className="text-center text-sm text-[#64748B]">

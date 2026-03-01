@@ -21,7 +21,7 @@ export function AppHeader() {
   if (!base) return null;
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between bg-[#1E293B] px-4 text-white">
+    <header className="flex h-14 shrink-0 items-center justify-between bg-clicvend-blue px-4 text-white">
       <Link href={base} className="font-semibold">
         ClicVend
       </Link>
@@ -57,7 +57,7 @@ export function AppHeader() {
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#312E81] text-sm font-medium">
             U
           </span>
-          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#1E293B] bg-[#22C55E]" />
+          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-clicvend-blue bg-clicvend-orange" />
         </div>
       </nav>
     </header>

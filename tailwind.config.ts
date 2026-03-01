@@ -7,7 +7,15 @@ export default {
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        clicvend: {
+          blue: "#1A376B",
+          orange: "#F88A1D",
+          "orange-dark": "#E07A0C",
+        },
+      },
+    },
   },
   plugins: [],
 } satisfies Config;

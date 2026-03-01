@@ -230,10 +230,10 @@ export default function OnboardingPage() {
   };
 
   const inputClass =
-    "mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[#1E293B] placeholder-[#94A3B8] focus:border-[#2563EB] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 transition-all";
+    "mt-1.5 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-clicvend-blue/20 transition-all";
   const labelClass = "block text-sm font-semibold text-[#1E293B]";
   const btnPrimary =
-    "inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-5 py-3 font-semibold text-white shadow-lg shadow-[#2563EB]/25 hover:bg-[#1D4ED8] disabled:bg-[#94A3B8] disabled:shadow-none transition-all";
+    "inline-flex items-center gap-2 rounded-xl bg-clicvend-orange px-5 py-3 font-semibold text-white shadow-lg shadow-clicvend-orange/25 hover:bg-clicvend-orange-dark disabled:bg-[#94A3B8] disabled:shadow-none transition-all";
   const btnSecondary = "inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-5 py-3 font-medium text-[#1E293B] hover:bg-[#F8FAFC] transition-all";
 
   if (!authChecked) {
@@ -248,12 +248,12 @@ export default function OnboardingPage() {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-[#F8FAFC] p-8">
         <div className="w-full max-w-md rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-xl">
-          <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:ring-offset-2 rounded">
+          <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
             <ClicVendLogo size="md" />
           </Link>
           <h1 className="mt-6 text-xl font-bold text-[#0F172A]">Empresa criada</h1>
           <p className="mt-2 text-[#64748B]">Seu link de acesso:</p>
-          <p className="mt-2 break-all font-mono text-sm font-medium text-[#2563EB]">{result.link}</p>
+          <p className="mt-2 break-all font-mono text-sm font-medium text-clicvend-blue">{result.link}</p>
           <p className="mt-4 text-sm text-[#64748B]">Use este link para acessar o painel e configurar canais e filas.</p>
           <a href={result.link} className={`mt-6 inline-block ${btnPrimary}`}>
             Acessar painel
@@ -266,7 +266,7 @@ export default function OnboardingPage() {
   return (
     <main className="min-h-screen bg-[#F8FAFC] py-10 px-4">
       <div className="mx-auto max-w-4xl">
-        <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:ring-offset-2 rounded">
+        <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
           <ClicVendLogo size="lg" />
         </Link>
 
@@ -281,23 +281,23 @@ export default function OnboardingPage() {
                   onClick={() => setStep(s.id)}
                   className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full font-bold text-sm transition-all ${
                     step === s.id
-                      ? "bg-[#2563EB] text-white shadow-lg shadow-[#2563EB]/30 ring-4 ring-[#2563EB]/20"
+                      ? "bg-clicvend-orange text-white shadow-lg shadow-clicvend-orange/30 ring-4 ring-clicvend-orange/20"
                       : step > s.id
-                        ? "bg-[#2563EB] text-white"
+                        ? "bg-clicvend-orange text-white"
                         : "bg-[#E2E8F0] text-[#64748B] hover:bg-[#CBD5E1]"
                   }`}
                 >
                   {step > s.id ? <Check className="h-5 w-5" strokeWidth={2.5} /> : s.id}
                 </button>
                 {idx < STEPS.length - 1 ? (
-                  <div className={`flex-1 h-0.5 min-w-[4px] mx-0.5 ${step > s.id ? "bg-[#2563EB]" : "bg-[#E2E8F0]"}`} />
+                  <div className={`flex-1 h-0.5 min-w-[4px] mx-0.5 ${step > s.id ? "bg-clicvend-orange" : "bg-[#E2E8F0]"}`} />
                 ) : (
                   <div className="flex-1" />
                 )}
               </div>
               <span
                 className={`mt-3 w-full text-center text-[11px] font-semibold leading-tight sm:text-xs ${
-                  step === s.id ? "text-[#2563EB]" : step > s.id ? "text-[#64748B]" : "text-[#94A3B8]"
+                  step === s.id ? "text-clicvend-blue" : step > s.id ? "text-[#64748B]" : "text-[#94A3B8]"
                 }`}
               >
                 {s.title}
@@ -329,7 +329,7 @@ export default function OnboardingPage() {
                   className={inputClass}
                 />
                 <p className="mt-1 text-xs text-[#64748B]">Digite e clique fora do campo para preencher automaticamente.</p>
-                {loadingCnpj && <p className="mt-1 text-xs text-[#2563EB]">Buscando…</p>}
+                {loadingCnpj && <p className="mt-1 text-xs text-clicvend-blue">Buscando…</p>}
               </div>
               <div className="col-span-2">
                 <label className={labelClass}>Razão social *</label>
@@ -473,7 +473,7 @@ export default function OnboardingPage() {
                     placeholder="00000-000"
                     className={inputClass}
                   />
-                  {loadingCep && <p className="mt-1 text-xs text-[#2563EB]">Buscando…</p>}
+                  {loadingCep && <p className="mt-1 text-xs text-clicvend-blue">Buscando…</p>}
                 </div>
                 <div className="col-span-2">
                   <label className={labelClass}>Logradouro</label>
@@ -587,7 +587,7 @@ export default function OnboardingPage() {
 
         <p className="mt-6 text-center text-xs text-[#64748B]">Sem cartão de crédito • Sem compromisso</p>
         <p className="mt-2 text-center text-sm text-[#64748B]">
-          Já tem conta? <Link href="/login" className="font-semibold text-[#2563EB] hover:underline">Faça login aqui</Link>
+          Já tem conta? <Link href="/login" className="font-semibold text-clicvend-blue hover:underline">Faça login aqui</Link>
         </p>
       </div>
     </main>

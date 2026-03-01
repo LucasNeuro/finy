@@ -5,6 +5,10 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* ClicVend marca */
+  --clicvend-blue: #1A376B;
+  --clicvend-orange: #F88A1D;
+  --clicvend-orange-dark: #E07A0C;
 }
 
 @media (prefers-color-scheme: dark) {

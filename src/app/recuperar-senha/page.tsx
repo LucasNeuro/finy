@@ -8,7 +8,7 @@ export default function RecuperarSenhaPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-[#F8FAFC] px-4 py-12">
       <div className="w-full max-w-[400px]">
-        <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:ring-offset-2 rounded">
+        <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
           <ClicVendLogo size="lg" />
         </Link>
 
@@ -21,7 +21,7 @@ export default function RecuperarSenhaPage() {
 
         <Link
           href="/login"
-          className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-[#2563EB] hover:underline"
+          className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-clicvend-blue hover:underline"
         >
           <ArrowLeft className="h-4 w-4" />
           Voltar ao login

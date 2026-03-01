@@ -20,7 +20,7 @@ export default function LoginPage() {
   const isValid = email.trim().length > 0 && password.length > 0;
 
   const inputClass =
-    "w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[#1E293B] placeholder-[#94A3B8] focus:border-[#2563EB] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 transition-all";
+    "w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-clicvend-blue/20 transition-all";
 
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 py-12">
@@ -31,8 +31,8 @@ export default function LoginPage() {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_40%_30%_at_20%_90%,rgba(59,130,246,0.06),transparent)]" />
 
       <div className="relative w-full max-w-[420px]">
-        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-xl shadow-[#2563EB]/5 sm:p-10">
-          <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:ring-offset-2 rounded">
+        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-xl shadow-clicvend-blue/5 sm:p-10">
+          <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
             <ClicVendLogo size="lg" />
           </Link>
 
@@ -74,7 +74,7 @@ export default function LoginPage() {
           </div>
 
           <div className="flex justify-end">
-            <Link href="/recuperar-senha" className="text-sm font-medium text-[#64748B] hover:text-[#2563EB] transition-colors">
+            <Link href="/recuperar-senha" className="text-sm font-medium text-[#64748B] hover:text-clicvend-blue transition-colors">
               Esqueci minha senha
             </Link>
           </div>
@@ -84,7 +84,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={!isValid || loading}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 font-semibold text-white shadow-lg shadow-[#2563EB]/25 transition-all disabled:cursor-not-allowed disabled:bg-[#94A3B8] disabled:shadow-none enabled:bg-[#2563EB] enabled:hover:bg-[#1D4ED8]"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 font-semibold text-white shadow-lg shadow-clicvend-blue/25 transition-all disabled:cursor-not-allowed disabled:bg-[#94A3B8] disabled:shadow-none enabled:bg-clicvend-orange enabled:hover:bg-clicvend-orange-dark"
           >
             <LogIn className="h-4 w-4" />
             {loading ? "Entrando…" : "Entrar"}
@@ -99,7 +99,7 @@ export default function LoginPage() {
 
           <p className="mt-4 text-center text-sm text-[#64748B]">
             Não tem conta?{" "}
-            <Link href="/onboarding" className="font-semibold text-[#2563EB] hover:underline">
+            <Link href="/onboarding" className="font-semibold text-clicvend-blue hover:underline">
               Cadastre-se
             </Link>
           </p>
@@ -108,9 +108,9 @@ export default function LoginPage() {
         <footer className="mt-8 flex flex-wrap items-center justify-center gap-2 text-center text-sm text-[#64748B]">
           <span>ClicVend © 2026</span>
           <span className="text-[#CBD5E1]">|</span>
-          <Link href="#" className="hover:text-[#2563EB] transition-colors">Termos de uso</Link>
+          <Link href="#" className="hover:text-clicvend-blue transition-colors">Termos de uso</Link>
           <span className="text-[#CBD5E1]">|</span>
-          <Link href="#" className="hover:text-[#2563EB] transition-colors">Política de Privacidade</Link>
+          <Link href="#" className="hover:text-clicvend-blue transition-colors">Política de Privacidade</Link>
         </footer>
       </div>
     </main>

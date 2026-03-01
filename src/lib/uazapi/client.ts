@@ -51,10 +51,10 @@ async function uazapiFetch<T = unknown>(
     }
   }
   if (!res.ok) {
+    const errData = data as { error?: string } | undefined;
     const errMsg =
-      (data && typeof (data as { error?: string }).error === "string"
-        ? (data as { error: string }).error
-        : text) || res.statusText;
+      (errData && typeof errData.error === "string" ? errData.error : text) ||
+      res.statusText;
     return { ok: false, status: res.status, error: errMsg, data };
   }
   return { ok: true, status: res.status, data };
