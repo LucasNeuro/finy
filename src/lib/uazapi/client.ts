@@ -195,6 +195,281 @@ export async function getInstanceStatus(token: string): Promise<{
 }
 
 /**
+ * Desconecta a instância do WhatsApp (exige novo QR para reconectar).
+ */
+export async function disconnectInstance(token: string): Promise<{
+  ok: boolean;
+  instance?: InstanceResponse;
+  error?: string;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<{ instance?: InstanceResponse }>("/instance/disconnect", {
+    method: "POST",
+    token,
+  });
+  return {
+    ok,
+    instance: data?.instance,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Deleta a instância da UAZAPI (remove do servidor).
+ */
+export async function deleteInstance(token: string): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  const { ok, error, status } = await uazapiFetch("/instance", {
+    method: "DELETE",
+    token,
+  });
+  return {
+    ok,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Atualiza o nome da instância na UAZAPI.
+ */
+export async function updateInstanceName(
+  token: string,
+  name: string
+): Promise<{ ok: boolean; instance?: InstanceResponse; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ instance?: InstanceResponse }>("/instance/updateInstanceName", {
+    method: "POST",
+    token,
+    body: { name: name.trim() },
+  });
+  return {
+    ok,
+    instance: data?.instance,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Atualiza o nome do perfil do WhatsApp (exibido para contatos).
+ */
+export async function updateProfileName(
+  token: string,
+  name: string
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/profile/name", {
+    method: "POST",
+    token,
+    body: { name: name.trim().slice(0, 25) },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Atualiza a imagem do perfil do WhatsApp (URL, base64 ou "remove").
+ */
+export async function updateProfileImage(
+  token: string,
+  image: string
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/profile/image", {
+    method: "POST",
+    token,
+    body: { image },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Obtém configuração de proxy da instância.
+ */
+export async function getProxyConfig(token: string): Promise<{
+  ok: boolean;
+  data?: { enabled?: boolean; proxy_url?: string; last_test_at?: number; last_test_error?: string; validation_error?: boolean };
+  error?: string;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<{
+    enabled?: boolean;
+    proxy_url?: string;
+    last_test_at?: number;
+    last_test_error?: string;
+    validation_error?: boolean;
+  }>("/instance/proxy", { token });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Configura proxy da instância.
+ */
+export async function updateProxyConfig(
+  token: string,
+  options: { enable: boolean; proxy_url?: string }
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch("/instance/proxy", {
+    method: "POST",
+    token,
+    body: options,
+  });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Remove proxy configurado (volta ao padrão).
+ */
+export async function deleteProxyConfig(token: string): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/instance/proxy", {
+    method: "DELETE",
+    token,
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Obtém configurações de privacidade da instância.
+ */
+export async function getInstancePrivacy(token: string): Promise<{
+  ok: boolean;
+  data?: Record<string, string>;
+  error?: string;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<Record<string, string>>("/instance/privacy", { token });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Atualiza configurações de privacidade.
+ * Campos: groupadd, last, status, profile, readreceipts, online, calladd
+ */
+export async function setInstancePrivacy(
+  token: string,
+  settings: Record<string, string>
+): Promise<{ ok: boolean; data?: Record<string, string>; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<Record<string, string>>("/instance/privacy", {
+    method: "POST",
+    token,
+    body: settings,
+  });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Atualiza presença global (available | unavailable).
+ */
+export async function updateInstancePresence(
+  token: string,
+  presence: "available" | "unavailable"
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/instance/presence", {
+    method: "POST",
+    token,
+    body: { presence },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Configura delay entre mensagens na fila (msg_delay_min, msg_delay_max em segundos).
+ */
+export async function updateDelaySettings(
+  token: string,
+  msg_delay_min: number,
+  msg_delay_max: number
+): Promise<{ ok: boolean; instance?: InstanceResponse; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ instance?: InstanceResponse }>("/instance/updateDelaySettings", {
+    method: "POST",
+    token,
+    body: { msg_delay_min: Math.max(0, msg_delay_min), msg_delay_max: Math.max(0, msg_delay_max) },
+  });
+  return {
+    ok,
+    instance: data?.instance,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Atualiza configurações do chatbot da instância.
+ */
+export async function updateChatbotSettings(
+  token: string,
+  settings: {
+    openai_apikey?: string;
+    chatbot_enabled?: boolean;
+    chatbot_ignoreGroups?: boolean;
+    chatbot_stopConversation?: string;
+    chatbot_stopMinutes?: number;
+    chatbot_stopWhenYouSendMsg?: number;
+  }
+): Promise<{ ok: boolean; instance?: InstanceResponse; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ instance?: InstanceResponse }>("/instance/updatechatbotsettings", {
+    method: "POST",
+    token,
+    body: settings,
+  });
+  return {
+    ok,
+    instance: data?.instance,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Atualiza o mapa de campos (labels) customizados para leads (lead_field01–20).
+ */
+export async function updateFieldsMap(
+  token: string,
+  fields: Record<string, string>
+): Promise<{ ok: boolean; instance?: InstanceResponse; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ instance?: InstanceResponse }>("/instance/updateFieldsMap", {
+    method: "POST",
+    token,
+    body: fields,
+  });
+  return {
+    ok,
+    instance: data?.instance,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Obtém webhooks configurados na instância.
+ */
+export async function getWebhook(token: string): Promise<{
+  ok: boolean;
+  data?: Array<{ id?: string; url?: string; events?: string[]; enabled?: boolean; excludeMessages?: string[] }>;
+  error?: string;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<Array<{
+    id?: string;
+    url?: string;
+    events?: string[];
+    enabled?: boolean;
+    excludeMessages?: string[];
+  }>>("/webhook", { token });
+  return {
+    ok,
+    data: ok ? (Array.isArray(data) ? data : []) : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
  * Configura webhook da instância (recomendado: excludeMessages: ["wasSentByApi"]).
  */
 export async function setWebhook(
