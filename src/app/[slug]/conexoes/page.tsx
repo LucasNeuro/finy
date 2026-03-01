@@ -16,6 +16,7 @@ type Queue = { id: string; name: string; slug: string };
 
 const POLL_INTERVAL_MS = 2500;
 const POLL_TIMEOUT_MS = 120000; // 2 min
+const MAX_CHANNELS_PER_COMPANY = 3;
 
 export default function ConexoesPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -32,8 +33,8 @@ export default function ConexoesPage() {
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState("");
   const [webhookDone, setWebhookDone] = useState(false);
-  const [globalWebhookLoading, setGlobalWebhookLoading] = useState(false);
-  const [globalWebhookMessage, setGlobalWebhookMessage] = useState("");
+
+  const canAddChannel = channels.length < MAX_CHANNELS_PER_COMPANY;
 
   const perPage = 15;
   const total = channels.length;
@@ -80,13 +81,7 @@ export default function ConexoesPage() {
         if (data.paircode) setPaircode(data.paircode);
         if (data.connected || data.loggedIn) {
           setConnecting(false);
-          // Configurar webhook e finalizar
-          const wh = await fetch("/api/uazapi/webhook", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ channel_id: channelId }),
-          });
-          if (wh.ok) setWebhookDone(true);
+          setWebhookDone(true);
           return;
         }
       } catch {
@@ -102,6 +97,7 @@ export default function ConexoesPage() {
   }, [step, channelId, connecting]);
 
   const openModal = () => {
+    if (!canAddChannel) return;
     setStep(1);
     setName("");
     setQueueId("");
@@ -165,12 +161,7 @@ export default function ConexoesPage() {
       setQrcode(connectData.qrcode ?? null);
       setPaircode(connectData.paircode ?? null);
       if (connectData.connected) {
-        const wh = await fetch("/api/uazapi/webhook", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ channel_id: cid }),
-        });
-        if (wh.ok) setWebhookDone(true);
+        setWebhookDone(true);
         setConnecting(false);
         return;
       }
@@ -181,23 +172,6 @@ export default function ConexoesPage() {
     }
   };
 
-  const configureGlobalWebhook = async () => {
-    setGlobalWebhookMessage("");
-    setGlobalWebhookLoading(true);
-    try {
-      const r = await fetch("/api/uazapi/global-webhook", { method: "POST" });
-      const data = await r.json();
-      if (r.ok) {
-        setGlobalWebhookMessage("Webhook global configurado. Novas conexões usarão essa URL automaticamente.");
-      } else {
-        setGlobalWebhookMessage(data?.error ?? "Falha ao configurar webhook global.");
-      }
-    } catch {
-      setGlobalWebhookMessage("Erro de rede.");
-    } finally {
-      setGlobalWebhookLoading(false);
-    }
-  };
   return (
     <div className="flex flex-col gap-4 p-6">
       <div className="flex items-center justify-between">
@@ -205,18 +179,10 @@ export default function ConexoesPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={configureGlobalWebhook}
-            disabled={globalWebhookLoading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC] transition-colors disabled:opacity-60"
-            title="Configure uma vez; todas as instâncias enviarão eventos para essa URL (recomendado com Edge Function)."
-          >
-            {globalWebhookLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Webhook global
-          </button>
-          <button
-            type="button"
             onClick={openModal}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark transition-colors"
+            disabled={!canAddChannel}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            title={!canAddChannel ? "Limite de 3 números por empresa" : undefined}
           >
             <Plus className="h-4 w-4" />
             Nova conexão WhatsApp
@@ -239,22 +205,18 @@ export default function ConexoesPage() {
         </div>
       </div>
 
-      {globalWebhookMessage && (
-        <p className={`text-sm ${globalWebhookMessage.startsWith("Webhook global") ? "text-clicvend-orange-dark" : "text-[#DC2626]"}`}>
-          {globalWebhookMessage}
-        </p>
-      )}
-
       {loading ? (
         <p className="text-[#64748B]">Carregando…</p>
       ) : pageItems.length === 0 ? (
         <div className="rounded-xl border border-[#E2E8F0] bg-white p-8 text-center">
           <Smartphone className="mx-auto h-12 w-12 text-[#94A3B8]" />
           <p className="mt-2 text-[#64748B]">Nenhum canal cadastrado.</p>
+          <p className="mt-1 text-xs text-[#94A3B8]">Cada empresa pode conectar até {MAX_CHANNELS_PER_COMPANY} números.</p>
           <button
             type="button"
             onClick={openModal}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark transition-colors"
+            disabled={!canAddChannel}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Plus className="h-4 w-4" />
             Nova conexão WhatsApp
@@ -262,6 +224,9 @@ export default function ConexoesPage() {
         </div>
       ) : (
         <>
+          <p className="text-sm text-[#64748B]">
+            {channels.length} de {MAX_CHANNELS_PER_COMPANY} números conectados
+          </p>
           <div className="grid gap-4 sm:grid-cols-2">
             {pageItems.map((ch) => (
               <div
@@ -376,7 +341,7 @@ export default function ConexoesPage() {
                   {webhookDone ? (
                     <div className="py-4 text-center">
                       <p className="text-clicvend-orange font-medium">Conectado com sucesso!</p>
-                      <p className="mt-1 text-sm text-[#64748B]">Webhook configurado. Você já pode receber e enviar mensagens.</p>
+                      <p className="mt-1 text-sm text-[#64748B]">Você já pode receber e enviar mensagens.</p>
                       <button
                         type="button"
                         onClick={closeModal}

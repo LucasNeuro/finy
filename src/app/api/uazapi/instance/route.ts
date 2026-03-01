@@ -31,6 +31,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
+  const supabase = await createClient();
+  if (body.createChannel) {
+    const { count } = await supabase
+      .from("channels")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+    if ((count ?? 0) >= 3) {
+      return NextResponse.json(
+        { error: "Limite de 3 números por empresa atingido." },
+        { status: 403 }
+      );
+    }
+  }
+
   const result = await createInstance({
     name,
     adminField01: companyId,
@@ -47,7 +61,6 @@ export async function POST(request: Request) {
   const token = result.token;
 
   if (body.createChannel) {
-    const supabase = await createClient();
     const { data: queue } = body.queue_id
       ? await supabase.from("queues").select("id").eq("company_id", companyId).eq("id", body.queue_id).single()
       : { data: null };
