@@ -1,12 +1,12 @@
 "use client";
 
-import { useLogin } from "@/lib/auth/use-login";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
 import { Globe, Eye, EyeOff, LogIn } from "lucide-react";
+import { useLogin } from "@/lib/auth/use-login";
 
-export default function LoginPage() {
+function LoginForm() {
   const { login, error, loading } = useLogin();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,7 +23,7 @@ export default function LoginPage() {
     "w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-clicvend-blue/20 transition-all";
 
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 py-12">
+    <>
       {/* Background */}
       <div className="absolute inset-0 bg-[#F8FAFC]" />
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_0%,rgba(37,99,235,0.12),transparent_60%)]" />
@@ -113,6 +113,20 @@ export default function LoginPage() {
           <Link href="#" className="hover:text-clicvend-blue transition-colors">Política de Privacidade</Link>
         </footer>
       </div>
+    </>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 py-12">
+      <Suspense fallback={
+        <div className="flex min-h-[400px] items-center justify-center">
+          <div className="text-[#64748B]">Carregando…</div>
+        </div>
+      }>
+        <LoginForm />
+      </Suspense>
     </main>
   );
 }

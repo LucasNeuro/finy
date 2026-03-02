@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
-import { Eye, EyeOff, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { Eye, EyeOff, ChevronLeft, ChevronRight, Check, Copy, CheckCircle2, Plus, Trash2 } from "lucide-react";
 
 const STEPS = [
   { id: 1, title: "Dados da empresa" },
@@ -64,8 +64,8 @@ const emptyCompany: CompanyData = {
 export default function OnboardingPage() {
   const [step, setStep] = useState(1);
   const [company, setCompany] = useState<CompanyData>(emptyCompany);
-  const [role, setRole] = useState<"admin" | "supervisor" | "agent">("admin");
-  const [queueName, setQueueName] = useState("Padrão");
+  const [sectors, setSectors] = useState<string[]>(["Padrão"]);
+  const [newSectorName, setNewSectorName] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [userPassword, setUserPassword] = useState("");
   const [userPasswordConfirm, setUserPasswordConfirm] = useState("");
@@ -75,7 +75,8 @@ export default function OnboardingPage() {
   const [loadingCnpj, setLoadingCnpj] = useState(false);
   const [loadingCep, setLoadingCep] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ slug: string; link: string } | null>(null);
+  const [result, setResult] = useState<{ slug: string; link: string; slug_adjusted?: boolean } | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
@@ -200,7 +201,7 @@ export default function OnboardingPage() {
           uf: company.uf || undefined,
           municipio: company.municipio || undefined,
           opencnpj_raw: company.opencnpj_raw,
-          queue_name: queueName,
+          queue_names: sectors.filter((s) => s.trim()).length ? sectors.filter((s) => s.trim()) : ["Padrão"],
           ...(!isLoggedIn && {
             user_email: userEmail.trim(),
             user_password: userPassword,
@@ -228,7 +229,7 @@ export default function OnboardingPage() {
         }
       }
 
-      setResult({ slug: s, link });
+      setResult({ slug: s, link, slug_adjusted: data.company?.slug_adjusted });
     } catch {
       setError("Erro de conexão");
     } finally {
@@ -251,6 +252,14 @@ export default function OnboardingPage() {
     );
   }
 
+  const copyLink = () => {
+    if (!result) return;
+    navigator.clipboard.writeText(result.link).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    });
+  };
+
   if (result) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center bg-[#F8FAFC] p-8">
@@ -259,10 +268,40 @@ export default function OnboardingPage() {
             <ClicVendLogo size="md" />
           </Link>
           <h1 className="mt-6 text-xl font-bold text-[#0F172A]">Empresa criada</h1>
-          <p className="mt-2 text-[#64748B]">Seu link de acesso:</p>
-          <p className="mt-2 break-all font-mono text-sm font-medium text-clicvend-blue">{result.link}</p>
+          {result.slug_adjusted && (
+            <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              O link desejado já estava em uso. Seu acesso foi criado com um link alternativo.
+            </p>
+          )}
+          <p className="mt-4 text-sm font-medium text-[#64748B]">Seu link de acesso:</p>
+          <div className="mt-2 flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+            <a
+              href={result.link}
+              className="min-w-0 flex-1 break-all font-mono text-sm font-medium text-clicvend-blue hover:underline"
+            >
+              {result.link}
+            </a>
+            <button
+              type="button"
+              onClick={copyLink}
+              className="flex shrink-0 items-center gap-2 rounded-lg p-2 text-sm font-medium transition-colors hover:bg-[#E2E8F0]"
+              title={linkCopied ? "Copiado!" : "Copiar link"}
+            >
+              {linkCopied ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                  <span className="text-emerald-600">Copiado!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4 text-[#64748B]" />
+                  <span className="text-[#64748B]">Copiar</span>
+                </>
+              )}
+            </button>
+          </div>
           <p className="mt-4 text-sm text-[#64748B]">Use este link para acessar o painel e configurar canais e filas.</p>
-          <a href={result.link} className={`mt-6 inline-block ${btnPrimary}`}>
+          <a href={result.link} className={`mt-6 inline-block w-full text-center ${btnPrimary}`}>
             Acessar painel
           </a>
         </div>
@@ -384,7 +423,7 @@ export default function OnboardingPage() {
 
           {step === 2 && (
             <div className="mt-8 grid grid-cols-2 gap-5 md:grid-cols-4">
-              <div className="col-span-2">
+              <div className={isLoggedIn ? "col-span-4" : "col-span-2"}>
                 <label className={labelClass}>E-mail *</label>
                 <input
                   type="email"
@@ -394,19 +433,7 @@ export default function OnboardingPage() {
                   className={inputClass}
                   autoComplete="email"
                 />
-              </div>
-              <div className="col-span-2">
-                <label className={labelClass}>Cargo *</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as "admin" | "supervisor" | "agent")}
-                  className={inputClass}
-                >
-                  <option value="admin">Administrador</option>
-                  <option value="supervisor">Supervisor</option>
-                  <option value="agent">Atendente</option>
-                </select>
-                <p className="mt-1 text-xs text-[#64748B]">Você será o primeiro usuário da empresa com este cargo.</p>
+                <p className="mt-1 text-xs text-[#64748B]">Este será o acesso do administrador da empresa.</p>
               </div>
               {!isLoggedIn && (
                 <>
@@ -461,7 +488,6 @@ export default function OnboardingPage() {
             <div className="mt-8">
               <div className="mb-6 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-5">
                 <h3 className="text-sm font-bold uppercase tracking-wide text-[#64748B]">Endereço da empresa</h3>
-                <p className="mt-0.5 text-xs text-[#94A3B8]">Digite o CEP e clique fora para preencher automaticamente via ViaCEP</p>
               </div>
               <div className="grid grid-cols-2 gap-5 md:grid-cols-4">
                 <div>
@@ -511,17 +537,70 @@ export default function OnboardingPage() {
           )}
 
           {step === 4 && (
-            <div className="mt-8 grid grid-cols-2 gap-5 md:grid-cols-4">
-              <div className="col-span-2 md:col-span-2 md:col-start-2">
-                <label className={labelClass}>Nome da fila padrão</label>
-                <input
-                  type="text"
-                  value={queueName}
-                  onChange={(e) => setQueueName(e.target.value)}
-                  placeholder="Padrão"
-                  className={inputClass}
-                />
-                <p className="mt-1 text-xs text-[#64748B]">Conversas do WhatsApp serão organizadas nesta fila até você criar outras.</p>
+            <div className="mt-8">
+              <div className="mb-6 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-5">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-[#64748B]">Setores de atendimento</h3>
+                <p className="mt-0.5 text-xs text-[#94A3B8]">Crie os setores que você terá no seu atendimento. Opcional — pode ser feito depois no painel.</p>
+              </div>
+              <div className="space-y-3">
+                {sectors.map((name, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) =>
+                        setSectors((prev) => {
+                          const next = [...prev];
+                          next[idx] = e.target.value;
+                          return next;
+                        })
+                      }
+                      placeholder="Ex: Vendas, Suporte"
+                      className={inputClass + " flex-1"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSectors((prev) => prev.filter((_, i) => i !== idx))}
+                      className="rounded-xl p-3 text-[#64748B] hover:bg-red-50 hover:text-red-600 transition-colors"
+                      title="Remover setor"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newSectorName}
+                    onChange={(e) => setNewSectorName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const n = newSectorName.trim();
+                        if (n && !sectors.includes(n)) {
+                          setSectors((prev) => [...prev, n]);
+                          setNewSectorName("");
+                        }
+                      }
+                    }}
+                    placeholder="Adicionar setor..."
+                    className={inputClass + " flex-1"}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const n = newSectorName.trim();
+                      if (n && !sectors.includes(n)) {
+                        setSectors((prev) => [...prev, n]);
+                        setNewSectorName("");
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3 font-medium text-[#64748B] hover:bg-[#F8FAFC] transition-colors"
+                  >
+                    <Plus className="h-5 w-5" />
+                    Adicionar
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -536,8 +615,7 @@ export default function OnboardingPage() {
               </div>
               <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
                 <h3 className="text-xs font-bold uppercase tracking-wide text-[#64748B] mb-3">Acesso</h3>
-                <p><span className="text-[#64748B]">E-mail:</span> {userEmail || "—"}</p>
-                <p><span className="text-[#64748B]">Cargo:</span> {role === "admin" ? "Administrador" : role === "supervisor" ? "Supervisor" : "Atendente"}</p>
+                <p><span className="text-[#64748B]">E-mail (admin):</span> {userEmail || "—"}</p>
               </div>
               {(company.logradouro || company.cep || company.municipio) && (
                 <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
@@ -551,8 +629,8 @@ export default function OnboardingPage() {
                 </div>
               )}
               <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
-                <h3 className="text-xs font-bold uppercase tracking-wide text-[#64748B] mb-3">Configuração</h3>
-                <p><span className="text-[#64748B]">Fila padrão:</span> {queueName}</p>
+                <h3 className="text-xs font-bold uppercase tracking-wide text-[#64748B] mb-3">Setores</h3>
+                <p><span className="text-[#64748B]">Setores de atendimento:</span> {sectors.filter((s) => s.trim()).join(", ") || "Padrão"}</p>
               </div>
             </div>
           )}

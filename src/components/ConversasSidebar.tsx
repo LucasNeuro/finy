@@ -70,14 +70,14 @@ export function ConversasSidebar() {
             placeholder="Pesquisar por nome ou número…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] pl-9 pr-3 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-[#6366F1] focus:outline-none focus:ring-1 focus:ring-[#6366F1]"
+            className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] pl-9 pr-3 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
           />
         </div>
       </div>
       <div className="flex border-b border-[#E2E8F0] px-2 pb-1">
         <Link
           href={`${base}/conversas`}
-          className="border-b-2 border-[#6366F1] px-3 py-2 text-sm font-medium text-[#6366F1]"
+          className="border-b-2 border-clicvend-orange px-3 py-2 text-sm font-medium text-clicvend-orange"
         >
           Chats
         </Link>
@@ -97,7 +97,7 @@ export function ConversasSidebar() {
         </select>
         <button
           type="button"
-          className="rounded-lg bg-[#6366F1] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#4F46E5] transition-colors"
+          className="rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white hover:bg-clicvend-orange-dark transition-colors"
           aria-label="Criar novo"
         >
           <Plus className="h-4 w-4" />
@@ -114,7 +114,7 @@ export function ConversasSidebar() {
               <li key={c.id}>
                 <Link
                   href={`${base}/conversas/${c.id}`}
-                  className={`flex items-center gap-3 p-3 hover:bg-[#F8FAFC] ${currentId === c.id ? "bg-[#EEF2FF]" : ""}`}
+                  className={`flex items-center gap-3 p-3 hover:bg-[#F8FAFC] ${currentId === c.id ? "bg-clicvend-green/10" : ""}`}
                 >
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
                     {(c.customer_name ?? c.customer_phone).slice(0, 1).toUpperCase()}

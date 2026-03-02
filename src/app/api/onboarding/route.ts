@@ -20,6 +20,7 @@ type OnboardingBody = {
   telefones?: unknown;
   opencnpj_raw?: unknown;
   queue_name?: string;
+  queue_names?: string[];
   user_email?: string;
   user_password?: string;
 };
@@ -82,9 +83,17 @@ export async function POST(request: Request) {
 
   const admin = createServiceRoleClient();
 
-  const existingSlug = await admin.from("companies").select("id").eq("slug", slug).single();
-  if (existingSlug.data) {
-    return NextResponse.json({ error: "Slug already in use" }, { status: 409 });
+  // Encontrar slug disponível: se o desejado existe, tenta slug-2, slug-3, etc.
+  let finalSlug = slug;
+  let attempt = 1;
+  while (true) {
+    const { data: existing } = await admin.from("companies").select("id").eq("slug", finalSlug).single();
+    if (!existing) break;
+    attempt += 1;
+    finalSlug = `${slug}-${attempt}`;
+    if (attempt > 100) {
+      return NextResponse.json({ error: "Não foi possível gerar um link único. Tente outro nome de exibição." }, { status: 409 });
+    }
   }
 
   const cnpjClean = body.cnpj ? toDigits(body.cnpj) : null;
@@ -97,7 +106,8 @@ export async function POST(request: Request) {
 
   const companyInsert: Record<string, unknown> = {
     name,
-    slug,
+    slug: finalSlug,
+    is_active: true,
     ...(cnpjClean && cnpjClean.length === 14 && { cnpj: cnpjClean }),
     ...(str(body.razao_social) && { razao_social: str(body.razao_social) }),
     ...(str(body.nome_fantasia) && { nome_fantasia: str(body.nome_fantasia) }),
@@ -132,16 +142,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
 
-  const queueName = str(body.queue_name) || "Padrão";
-  const queueSlug = queueName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || "default";
-  const { data: queue } = await admin
+  const queueNamesRaw = Array.isArray(body.queue_names)
+    ? (body.queue_names as string[]).map((s) => (typeof s === "string" ? s.trim() : "")).filter(Boolean)
+    : [];
+  const queueNames = queueNamesRaw.length > 0 ? queueNamesRaw : [str(body.queue_name) || "Padrão"];
+
+  const slugFromQueueName = (n: string) =>
+    n.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || "default";
+
+  const seenSlugs = new Set<string>();
+  for (const qName of queueNames) {
+    let slug = slugFromQueueName(qName);
+    let attempt = 0;
+    while (seenSlugs.has(slug)) {
+      attempt += 1;
+      slug = `${slugFromQueueName(qName)}-${attempt}`;
+    }
+    seenSlugs.add(slug);
+    await admin.from("queues").insert({ company_id: company.id, name: qName, slug });
+  }
+
+  const { data: firstQueue } = await admin
     .from("queues")
-    .insert({ company_id: company.id, name: queueName, slug: queueSlug })
     .select("id")
+    .eq("company_id", company.id)
+    .limit(1)
     .single();
 
   return NextResponse.json({
-    company: { id: company.id, name: company.name, slug: company.slug },
-    queue: queue ? { id: queue.id } : null,
+    company: {
+      id: company.id,
+      name: company.name,
+      slug: company.slug as string,
+      slug_adjusted: finalSlug !== slug,
+    },
+    queue: firstQueue ? { id: firstQueue.id } : null,
   });
 }

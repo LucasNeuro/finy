@@ -1,11 +1,13 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 export function useLogin() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnUrl = searchParams.get("returnUrl");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -18,7 +20,10 @@ export function useLogin() {
       password,
     });
     if (signError) {
-      setError(signError.message);
+      const msg = signError.message.toLowerCase().includes("invalid login credentials")
+        ? "E-mail ou senha incorretos. Verifique os dados ou use \"Esqueci minha senha\" para redefinir."
+        : signError.message;
+      setError(msg);
       setLoading(false);
       return;
     }
@@ -38,13 +43,13 @@ export function useLogin() {
         ? (profiles[0].companies as unknown as { slug: string }).slug
         : null;
     setLoading(false);
-    if (slug) {
-      router.push(`/${slug}`);
-      router.refresh();
-    } else {
-      router.push("/sem-empresa");
-      router.refresh();
-    }
+    const target = returnUrl && returnUrl.startsWith("/") && !returnUrl.startsWith("//")
+      ? returnUrl
+      : slug
+        ? `/${slug}`
+        : "/sem-empresa";
+    router.push(target);
+    router.refresh();
   }
 
   return { login, error, loading };

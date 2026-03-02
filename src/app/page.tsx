@@ -17,8 +17,10 @@ import {
   Headphones,
   Building2,
   Clock,
-  LogIn,
   X,
+  KeyRound,
+  Loader2,
+  ExternalLink,
 } from "lucide-react";
 
 const fadeUp = {
@@ -39,43 +41,43 @@ const FEATURES = [
     icon: MessageSquare,
     title: "Conversas centralizadas",
     desc: "Veja todas as conversas por fila, atribua atendentes e acompanhe o histórico em um só lugar.",
-    gradient: "from-clicvend-blue/20 to-clicvend-blue/5",
-    iconColor: "text-blue-600",
+    gradient: "from-clicvend-green/20 to-clicvend-green/5",
+    iconColor: "text-clicvend-green",
   },
   {
     icon: Users,
     title: "Filas e equipes",
     desc: "Organize por Vendas, Suporte ou setor. Defina filas e distribua as conversas entre a equipe.",
-    gradient: "from-slate-500/20 to-slate-600/5",
-    iconColor: "text-slate-600",
+    gradient: "from-clicvend-green-dark/20 to-clicvend-green-dark/5",
+    iconColor: "text-clicvend-green-dark",
   },
   {
     icon: Zap,
     title: "Respostas rápidas",
     desc: "Crie modelos de mensagem e responda em um clique para agilizar o atendimento.",
-    gradient: "from-sky-500/20 to-sky-600/5",
-    iconColor: "text-sky-600",
+    gradient: "from-clicvend-green/20 to-clicvend-green-dark/5",
+    iconColor: "text-clicvend-green",
   },
   {
     icon: Smartphone,
     title: "Multi-canais",
     desc: "Conecte mais de um número WhatsApp por empresa e gerencie tudo no mesmo painel.",
-    gradient: "from-emerald-500/20 to-emerald-600/5",
-    iconColor: "text-emerald-600",
+    gradient: "from-clicvend-green-dark/20 to-clicvend-green/5",
+    iconColor: "text-clicvend-green-dark",
   },
   {
     icon: Link2,
     title: "Link por empresa",
     desc: "Cada empresa acessa apenas seu painel pelo próprio link. Dados isolados e seguros.",
-    gradient: "from-violet-500/20 to-violet-600/5",
-    iconColor: "text-violet-600",
+    gradient: "from-clicvend-green/20 to-clicvend-green-dark/5",
+    iconColor: "text-clicvend-green",
   },
   {
     icon: ShieldCheck,
     title: "Sem complicação",
     desc: "Cadastro com CNPJ, onboarding em etapas e painel pronto para conectar seu número.",
-    gradient: "from-amber-500/20 to-amber-600/5",
-    iconColor: "text-amber-600",
+    gradient: "from-clicvend-green-dark/20 to-clicvend-green/5",
+    iconColor: "text-clicvend-green-dark",
   },
 ];
 
@@ -112,12 +114,12 @@ function FloatingMockup() {
       transition={{ duration: 0.8, delay: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
       className="relative hidden md:block"
     >
-      <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-clicvend-blue/10 via-transparent to-violet-500/10 blur-2xl" />
-      <div className="relative rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-2xl shadow-clicvend-blue/10">
+      <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-clicvend-green/10 via-transparent to-clicvend-green-dark/10 blur-2xl" />
+      <div className="relative rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-2xl shadow-clicvend-green/10">
         <div className="mb-3 flex items-center gap-2 border-b border-[#F1F5F9] pb-3">
           <div className="h-3 w-3 rounded-full bg-[#EF4444]" />
           <div className="h-3 w-3 rounded-full bg-[#F59E0B]" />
-          <div className="h-3 w-3 rounded-full bg-clicvend-orange" />
+          <div className="h-3 w-3 rounded-full bg-clicvend-green" />
           <span className="ml-2 text-xs font-medium text-[#94A3B8]">ClicVend - Conversas</span>
         </div>
         <div className="flex gap-3">
@@ -132,12 +134,12 @@ function FloatingMockup() {
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.6 + i * 0.15 }}
-                className={`flex items-center gap-2 rounded-lg p-2 ${c.active ? "bg-clicvend-blue/5" : "hover:bg-slate-50"}`}
+                className={`flex items-center gap-2 rounded-lg p-2 ${c.active ? "bg-clicvend-green/5" : "hover:bg-slate-50"}`}
               >
-                <div className={`h-7 w-7 shrink-0 rounded-full ${c.active ? "bg-gradient-to-br from-clicvend-blue to-clicvend-blue/80" : "bg-slate-200"}`} />
+                <div className={`h-7 w-7 shrink-0 rounded-full ${c.active ? "bg-gradient-to-br from-clicvend-green to-clicvend-green-dark" : "bg-slate-200"}`} />
                 <div className="min-w-0 flex-1">
-                  <div className={`h-1.5 w-full rounded ${c.active ? "bg-blue-300" : "bg-slate-200"}`} />
-                  <div className={`mt-1 h-1 w-2/3 rounded ${c.active ? "bg-clicvend-blue/20" : "bg-slate-100"}`} />
+                  <div className={`h-1.5 w-full rounded ${c.active ? "bg-clicvend-green/40" : "bg-slate-200"}`} />
+                  <div className={`mt-1 h-1 w-2/3 rounded ${c.active ? "bg-clicvend-green/20" : "bg-slate-100"}`} />
                 </div>
               </motion.div>
             ))}
@@ -174,7 +176,7 @@ function FloatingMockup() {
               className="flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 p-2"
             >
               <div className="h-1.5 flex-1 rounded bg-slate-200" />
-              <div className="h-6 w-6 rounded-md bg-clicvend-orange" />
+              <div className="h-6 w-6 rounded-md bg-clicvend-green" />
             </motion.div>
           </div>
         </div>
@@ -184,7 +186,42 @@ function FloatingMockup() {
 }
 
 export default function HomePage() {
-  const [modal, setModal] = useState<"termos" | "privacidade" | null>(null);
+  const [modal, setModal] = useState<"termos" | "privacidade" | "pedir-acesso" | null>(null);
+  const [pedirCnpj, setPedirCnpj] = useState("");
+  const [pedirLoading, setPedirLoading] = useState(false);
+  const [pedirResult, setPedirResult] = useState<{ slug: string; name?: string } | null>(null);
+  const [pedirError, setPedirError] = useState<string | null>(null);
+
+  const handlePedirAcesso = async () => {
+    const cnpj = pedirCnpj.replace(/\D/g, "");
+    if (cnpj.length !== 14) {
+      setPedirError("Informe um CNPJ válido (14 dígitos).");
+      return;
+    }
+    setPedirError(null);
+    setPedirResult(null);
+    setPedirLoading(true);
+    try {
+      const res = await fetch(`/api/lookup-company?cnpj=${encodeURIComponent(cnpj)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setPedirError(data?.error ?? "Empresa não encontrada.");
+        return;
+      }
+      setPedirResult({ slug: data.slug, name: data.name });
+    } catch {
+      setPedirError("Erro ao buscar. Tente novamente.");
+    } finally {
+      setPedirLoading(false);
+    }
+  };
+
+  const closePedirModal = () => {
+    setModal(null);
+    setPedirCnpj("");
+    setPedirResult(null);
+    setPedirError(null);
+  };
 
   return (
     <main className="min-h-screen bg-[#F8FAFC]">
@@ -196,20 +233,21 @@ export default function HomePage() {
         className="sticky top-0 z-50 border-b border-[#E2E8F0]/60 bg-white/80 backdrop-blur-xl"
       >
         <div className="mx-auto flex w-[90%] max-w-6xl items-center justify-between py-3.5">
-          <Link href="/" className="rounded focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2">
+          <Link href="/" className="rounded focus:outline-none focus:ring-2 focus:ring-clicvend-green focus:ring-offset-2">
             <ClicVendLogo size="lg" />
           </Link>
           <nav className="flex items-center gap-2 sm:gap-3">
-            <Link
-              href="/login"
-              className="group inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-clicvend-blue transition-all hover:border-clicvend-blue/40 hover:bg-clicvend-blue/5 hover:text-clicvend-blue"
+            <button
+              type="button"
+              onClick={() => setModal("pedir-acesso")}
+              className="group inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-clicvend-green transition-all hover:border-clicvend-green/40 hover:bg-clicvend-green/5"
             >
-              <LogIn className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
-              <span>Já tenho conta</span>
-            </Link>
+              <KeyRound className="h-4 w-4" />
+              <span>Meu acesso</span>
+            </button>
             <Link
               href="/onboarding"
-              className="group inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-semibold text-white shadow-md shadow-clicvend-orange/25 transition-all hover:bg-clicvend-orange-dark hover:shadow-lg hover:shadow-blue-600/30 active:scale-[0.98]"
+              className="group inline-flex items-center gap-1.5 rounded-lg bg-clicvend-green px-4 py-2 text-sm font-semibold text-white shadow-md shadow-clicvend-green/25 transition-all hover:bg-clicvend-green-dark hover:shadow-lg hover:shadow-clicvend-green-dark/30 active:scale-[0.98]"
             >
               <span>Cadastre-se</span>
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
@@ -220,7 +258,7 @@ export default function HomePage() {
 
       {/* Hero */}
       <section className="relative overflow-hidden py-20 md:py-28">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(37,99,235,0.08),transparent)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(0,167,143,0.08),transparent)]" />
         <div className="relative mx-auto w-[90%] max-w-6xl">
           <div className="grid items-center gap-12 md:grid-cols-2 md:gap-16">
             <div>
@@ -228,11 +266,11 @@ export default function HomePage() {
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
-                className="inline-flex items-center gap-2 rounded-full border border-clicvend-blue/30 bg-clicvend-blue/5 px-3.5 py-1.5 text-xs font-semibold text-blue-700 shadow-sm"
+                className="inline-flex items-center gap-2 rounded-full border border-clicvend-green/30 bg-clicvend-green/5 px-3.5 py-1.5 text-xs font-semibold text-clicvend-green-dark shadow-sm"
               >
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-clicvend-orange opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-600" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-clicvend-green" />
                 </span>
                 Atendimento WhatsApp integrado
               </motion.div>
@@ -265,20 +303,23 @@ export default function HomePage() {
                 transition={{ duration: 0.6, delay: 0.3 }}
                 className="mt-8 flex flex-wrap items-center gap-3"
               >
-                <Link
-                  href="/onboarding"
-                  className="group inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-clicvend-orange/25 transition-all hover:bg-clicvend-orange-dark hover:shadow-xl hover:shadow-blue-600/30 active:scale-[0.98]"
-                >
-                  <span>Cadastre-se grátis</span>
-                  <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-                </Link>
-                <Link
-                  href="/login"
-                  className="group inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white px-6 py-3.5 text-base font-semibold text-clicvend-blue shadow-sm transition-all hover:border-clicvend-blue/40 hover:bg-clicvend-blue/5 hover:text-clicvend-blue"
-                >
-                  <LogIn className="h-5 w-5 transition-transform group-hover:-translate-x-0.5" />
-                  <span>Já tenho conta</span>
-                </Link>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModal("pedir-acesso")}
+                    className="group inline-flex items-center gap-2 rounded-xl border-2 border-clicvend-green px-6 py-3.5 text-base font-semibold text-clicvend-green transition-all hover:bg-clicvend-green/5"
+                  >
+                    <KeyRound className="h-5 w-5" />
+                    <span>Meu acesso</span>
+                  </button>
+                  <Link
+                    href="/onboarding"
+                    className="group inline-flex items-center gap-2 rounded-xl bg-[#0a0a0a] px-6 py-3.5 text-base font-semibold text-white shadow-lg shadow-black/25 transition-all hover:bg-[#1a1a1a] hover:shadow-xl active:scale-[0.98]"
+                  >
+                    <span>Cadastre-se grátis</span>
+                    <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                  </Link>
+                </div>
               </motion.div>
 
               <motion.div
@@ -294,7 +335,7 @@ export default function HomePage() {
                 ].map(({ icon: Icon, label }) => (
                   <div key={label} className="flex items-center gap-2.5 text-[#64748B]">
                     <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-slate-100 to-slate-50 shadow-sm">
-                      <Icon className="h-4 w-4 text-clicvend-blue" />
+                      <Icon className="h-4 w-4 text-clicvend-green" />
                     </span>
                     <span className="text-sm font-medium">{label}</span>
                   </div>
@@ -338,7 +379,7 @@ export default function HomePage() {
                 key={title}
                 variants={fadeUp}
                 custom={i}
-                className="group relative overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white p-6 transition-all hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/5"
+                className="group relative overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white p-6 transition-all hover:border-clicvend-green/30 hover:shadow-lg hover:shadow-clicvend-green/5"
               >
                 <div className={`absolute inset-0 bg-gradient-to-br ${gradient} opacity-0 transition-opacity group-hover:opacity-100`} />
                 <div className="relative">
@@ -383,11 +424,11 @@ export default function HomePage() {
             {STEPS.map(({ icon: Icon, title, desc }, i) => (
               <motion.div key={title} variants={fadeUp} custom={i} className="relative text-center">
                 {i < STEPS.length - 1 && (
-                  <div className="absolute left-1/2 top-8 hidden h-px w-full bg-gradient-to-r from-clicvend-blue/20 to-transparent md:block" />
+                  <div className="absolute left-1/2 top-8 hidden h-px w-full bg-gradient-to-r from-clicvend-green/20 to-transparent md:block" />
                 )}
-                <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-clicvend-orange to-clicvend-orange-dark text-white shadow-lg shadow-clicvend-blue/30">
+                <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-clicvend-green to-clicvend-green-dark text-white shadow-lg shadow-clicvend-green/30">
                   <Icon className="h-7 w-7" />
-                  <span className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-bold text-blue-600 shadow">
+                  <span className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-white text-xs font-bold text-clicvend-green-dark shadow">
                     {i + 1}
                   </span>
                 </div>
@@ -405,14 +446,14 @@ export default function HomePage() {
         whileInView="visible"
         viewport={{ once: true, margin: "-60px" }}
         variants={stagger}
-        className="bg-gradient-to-r from-clicvend-blue to-[#1E293B] py-14 md:py-20"
+        className="bg-[#0a0a0a] py-14 md:py-20"
       >
         <div className="mx-auto w-[90%] max-w-6xl">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-4 md:gap-12">
             {METRICS.map(({ icon: Icon, value, label }, i) => (
               <motion.div key={value} variants={fadeUp} custom={i} className="text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white/10">
-                  <Icon className="h-6 w-6 text-blue-400" />
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-clicvend-green">
+                  <Icon className="h-6 w-6 text-white" />
                 </div>
                 <p className="text-2xl font-extrabold text-white md:text-3xl">{value}</p>
                 <p className="mt-1 text-sm text-[#94A3B8]">{label}</p>
@@ -427,11 +468,11 @@ export default function HomePage() {
         <div className="mx-auto flex w-[90%] max-w-6xl flex-wrap items-center justify-center gap-2 py-3.5 text-center text-sm text-[#64748B]">
           <span>ClicVend &copy; 2026</span>
           <span className="text-[#CBD5E1]">|</span>
-          <button type="button" onClick={() => setModal("termos")} className="transition-colors hover:text-blue-600">
+          <button type="button" onClick={() => setModal("termos")} className="transition-colors hover:text-clicvend-green">
             Termos de uso
           </button>
           <span className="text-[#CBD5E1]">|</span>
-          <button type="button" onClick={() => setModal("privacidade")} className="transition-colors hover:text-blue-600">
+          <button type="button" onClick={() => setModal("privacidade")} className="transition-colors hover:text-clicvend-green">
             Política de Privacidade
           </button>
         </div>
@@ -470,7 +511,7 @@ export default function HomePage() {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-clicvend-blue">
+              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#0a0a0a]">
                 <p className="mb-4">
                   Ao utilizar o ClicVend, você concorda com estes Termos de Uso. O serviço destina-se a empresas e profissionais que desejam centralizar o atendimento via WhatsApp.
                 </p>
@@ -487,6 +528,107 @@ export default function HomePage() {
                   Podemos atualizar estes termos periodicamente. O uso continuado do serviço após alterações constitui aceite das novas condições. Em caso de dúvidas, entre em contato conosco.
                 </p>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Meu acesso */}
+      <AnimatePresence>
+        {modal === "pedir-acesso" && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={closePedirModal}
+          >
+            <div className="absolute inset-0 bg-[#0F172A]/60 backdrop-blur-sm" />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ duration: 0.2 }}
+              className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-[#0F172A]">Meu acesso</h2>
+                <button
+                  type="button"
+                  onClick={closePedirModal}
+                  className="rounded-lg p-2 text-[#64748B] transition-colors hover:bg-[#F1F5F9] hover:text-[#0F172A]"
+                  aria-label="Fechar"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="mb-4 text-sm text-[#64748B]">
+                Informe o CNPJ da empresa cadastrada para acessar o link do seu painel.
+              </p>
+              {!pedirResult ? (
+                <>
+                  <input
+                    type="text"
+                    placeholder="00.000.000/0001-00"
+                    value={pedirCnpj.length >= 14 ? pedirCnpj.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5") : pedirCnpj}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 14);
+                      setPedirCnpj(digits);
+                      setPedirError(null);
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && handlePedirAcesso()}
+                    className="mb-3 w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[#0a0a0a] placeholder-[#94A3B8] focus:border-clicvend-green focus:outline-none focus:ring-2 focus:ring-clicvend-green/20"
+                  />
+                  {pedirError && (
+                    <p className="mb-3 text-sm text-[#DC2626]">{pedirError}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handlePedirAcesso}
+                    disabled={pedirLoading || pedirCnpj.replace(/\D/g, "").length !== 14}
+                    className="w-full rounded-xl bg-clicvend-green px-4 py-3 font-semibold text-white transition-colors hover:bg-clicvend-green-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {pedirLoading ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Buscando…
+                      </span>
+                    ) : (
+                      "Verificar CNPJ"
+                    )}
+                  </button>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  {pedirResult.name && (
+                    <p className="text-sm font-medium text-[#0F172A]">{pedirResult.name}</p>
+                  )}
+                  <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                    <p className="mb-1 text-xs text-[#64748B]">Link do seu painel</p>
+                    <p className="break-all font-mono text-sm font-medium text-clicvend-green">
+                      {typeof window !== "undefined" ? `${window.location.origin}/${pedirResult.slug}` : `/${pedirResult.slug}`}
+                    </p>
+                  </div>
+                  <a
+                    href={typeof window !== "undefined" ? `${window.location.origin}/${pedirResult.slug}` : `/${pedirResult.slug}`}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0a0a0a] px-4 py-3 font-semibold text-white transition-colors hover:bg-[#1a1a1a]"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Acessar meu painel
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPedirResult(null);
+                      setPedirCnpj("");
+                    }}
+                    className="w-full text-sm text-[#64748B] hover:text-clicvend-green"
+                  >
+                    Consultar outro CNPJ
+                  </button>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -522,7 +664,7 @@ export default function HomePage() {
                   <X className="h-5 w-5" />
                 </button>
               </div>
-              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-clicvend-blue">
+              <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#0a0a0a]">
                 <p className="mb-4">
                   O ClicVend respeita sua privacidade e está em conformidade com a Lei Geral de Proteção de Dados (LGPD). Esta política descreve como coletamos, usamos e protegemos suas informações.
                 </p>

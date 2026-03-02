@@ -4,9 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:turbo": "next dev --turbo",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "clean": "node -e \"const fs=require('fs');['.next','node_modules/.cache'].forEach(p=>{if(fs.existsSync(p)){fs.rmSync(p,{recursive:true});console.log('Removed '+p)}})\"",
+    "dev:clean": "npm run clean && next dev"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

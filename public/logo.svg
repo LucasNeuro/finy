@@ -1,6 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" fill="none">
-  <path d="M8 4h20c1.5 0 2.8 1.2 2.8 2.6v26.8c0 1.4-1.3 2.6-2.8 2.6H8L24 20 8 4z" fill="#2563EB"/>
+  <defs>
+    <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00C4A7"/>
+      <stop offset="100%" style="stop-color:#008F7A"/>
+    </linearGradient>
+  </defs>
+  <path d="M8 4h20c1.5 0 2.8 1.2 2.8 2.6v26.8c0 1.4-1.3 2.6-2.8 2.6H8L24 20 8 4z" fill="url(#logoGrad)"/>
   <text x="38" y="28" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="700">
-    <tspan fill="#EA580C">Clic</tspan><tspan fill="#1E293B">Vend</tspan>
+    <tspan fill="#00A78F">Clic</tspan><tspan fill="#0a0a0a">Vend</tspan>
   </text>
 </svg>

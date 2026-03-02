@@ -8,11 +8,20 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+      },
       colors: {
         clicvend: {
+          green: "#00A78F",
+          "green-dark": "#008F7A",
+          "green-light": "#00C4A7",
+          white: "#FFFFFF",
+          black: "#0a0a0a",
+          /* mantidos para compatibilidade */
           blue: "#1A376B",
-          orange: "#F88A1D",
-          "orange-dark": "#E07A0C",
+          orange: "#00A78F",
+          "orange-dark": "#008F7A",
         },
       },
     },

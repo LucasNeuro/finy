@@ -47,17 +47,18 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    const { data: company } = await supabase
-      .from("companies")
-      .select("id")
+    const { data: link } = await supabase
+      .from("company_links")
+      .select("company_id")
       .eq("slug", firstSegment)
+      .eq("is_active", true)
       .single();
 
-    if (!company) {
+    if (!link) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
 
-    response.cookies.set("clicvend_company_id", company.id, { path: "/" });
+    response.cookies.set("clicvend_company_id", link.company_id, { path: "/" });
     response.cookies.set("clicvend_slug", firstSegment, { path: "/" });
   }
 

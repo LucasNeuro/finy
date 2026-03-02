@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Filter, RefreshCw, MoreVertical, Smartphone, Plus, X, Loader2, Settings, Wifi, WifiOff, Link2, Trash2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { RefreshCw, Smartphone, Plus, Loader2, Settings, Wifi, WifiOff, Link2, Trash2, MessageSquare, Users } from "lucide-react";
 import { SideOver } from "@/components/SideOver";
 import { ChannelConfigSideOver } from "./ChannelConfigSideOver";
 
@@ -18,45 +18,30 @@ type Queue = { id: string; name: string; slug: string };
 
 type ChannelStatus = "connected" | "connecting" | "disconnected" | null;
 
-const POLL_INTERVAL_MS = 2500;
-const POLL_TIMEOUT_MS = 120000;
 const MAX_CHANNELS_PER_COMPANY = 3;
 
 export default function ConexoesPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [queues, setQueues] = useState<Queue[]>([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
   const [sideOverOpen, setSideOverOpen] = useState(false);
-  const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [queueId, setQueueId] = useState("");
-  const [channelId, setChannelId] = useState<string | null>(null);
-  const [qrcode, setQrcode] = useState<string | null>(null);
-  const [paircode, setPaircode] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState(false);
-  const [connectError, setConnectError] = useState("");
-  const [webhookDone, setWebhookDone] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   const [configSideOverOpen, setConfigSideOverOpen] = useState(false);
   const [configChannelId, setConfigChannelId] = useState<string | null>(null);
   const [configChannelName, setConfigChannelName] = useState("");
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [channelStatuses, setChannelStatuses] = useState<Record<string, ChannelStatus>>({});
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [channelStats, setChannelStats] = useState<Record<string, { conversations_count: number; messages_count: number; open_conversations: number }>>({});
 
   const canAddChannel = channels.length < MAX_CHANNELS_PER_COMPANY;
 
-  const perPage = 15;
-  const total = channels.length;
-  const start = (page - 1) * perPage;
-  const end = Math.min(start + perPage, total);
-  const pageItems = channels.slice(start, end);
-
   const fetchChannels = useCallback(() => {
     setLoading(true);
-    fetch("/api/channels")
+    return fetch("/api/channels")
       .then((r) => r.json())
       .then((data) => setChannels(Array.isArray(data) ? data : []))
       .catch(() => setChannels([]))
@@ -78,14 +63,34 @@ export default function ConexoesPage() {
     return null;
   }, []);
 
+  const fetchStats = useCallback(() => {
+    fetch("/api/channels/stats")
+      .then((r) => r.json())
+      .then((data: Array<{ channel_id: string; conversations_count: number; messages_count: number; open_conversations: number }>) => {
+        const map: Record<string, { conversations_count: number; messages_count: number; open_conversations: number }> = {};
+        (data ?? []).forEach((s) => {
+          map[s.channel_id] = {
+            conversations_count: s.conversations_count ?? 0,
+            messages_count: s.messages_count ?? 0,
+            open_conversations: s.open_conversations ?? 0,
+          };
+        });
+        setChannelStats(map);
+      })
+      .catch(() => setChannelStats({}));
+  }, []);
+
   useEffect(() => {
     fetchChannels();
   }, [fetchChannels]);
 
   useEffect(() => {
-    const ids = channels.slice((page - 1) * perPage, page * perPage).map((c) => c.id);
-    ids.forEach((id) => fetchStatus(id));
-  }, [page, channels, perPage, fetchStatus]);
+    channels.forEach((c) => fetchStatus(c.id));
+  }, [channels, fetchStatus]);
+
+  useEffect(() => {
+    if (channels.length) fetchStats();
+  }, [channels, fetchStats]);
 
   useEffect(() => {
     if (sideOverOpen) {
@@ -96,68 +101,21 @@ export default function ConexoesPage() {
     }
   }, [sideOverOpen]);
 
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(null);
-      }
-    };
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (step !== 2 || !channelId || connecting) return;
-    let cancelled = false;
-    const deadline = Date.now() + POLL_TIMEOUT_MS;
-
-    const poll = async () => {
-      if (cancelled || Date.now() > deadline) return;
-      try {
-        const r = await fetch(`/api/uazapi/instance/status?channel_id=${encodeURIComponent(channelId)}`);
-        const data = await r.json();
-        if (cancelled) return;
-        if (data.qrcode) setQrcode(data.qrcode);
-        if (data.paircode) setPaircode(data.paircode);
-        if (data.connected || data.loggedIn) {
-          setConnecting(false);
-          setWebhookDone(true);
-          fetchChannels();
-          return;
-        }
-      } catch {
-        // ignore
-      }
-      setTimeout(poll, POLL_INTERVAL_MS);
-    };
-
-    poll();
-    return () => {
-      cancelled = true;
-    };
-  }, [step, channelId, connecting, fetchChannels]);
-
   const openSideOver = () => {
     if (!canAddChannel) return;
-    setStep(1);
     setName("");
     setQueueId("");
-    setChannelId(null);
-    setQrcode(null);
-    setPaircode(null);
-    setConnectError("");
-    setWebhookDone(false);
+    setCreateError("");
     setSideOverOpen(true);
   };
 
   const closeSideOver = () => {
     setSideOverOpen(false);
-    setConnecting(false);
+    setCreating(false);
     fetchChannels();
   };
 
   const openConfig = (ch: Channel) => {
-    setMenuOpen(null);
     setConfigChannelId(ch.id);
     setConfigChannelName(ch.name);
     setConfigSideOverOpen(true);
@@ -170,14 +128,14 @@ export default function ConexoesPage() {
     fetchChannels();
   };
 
-  const createAndConnect = async () => {
+  const createInstance = async () => {
     const n = name.trim();
     if (!n) {
-      setConnectError("Informe o nome da conexão.");
+      setCreateError("Informe o nome da conexão.");
       return;
     }
-    setConnectError("");
-    setConnecting(true);
+    setCreateError("");
+    setCreating(true);
     try {
       const createRes = await fetch("/api/uazapi/instance", {
         method: "POST",
@@ -190,45 +148,28 @@ export default function ConexoesPage() {
       });
       const createData = await createRes.json();
       if (!createRes.ok) {
-        setConnectError(createData?.error ?? "Falha ao criar instância");
-        setConnecting(false);
+        setCreateError(createData?.error ?? "Falha ao criar instância");
+        setCreating(false);
         return;
       }
-      const cid = createData.channel?.id;
-      if (!cid) {
-        setConnectError("Canal não foi criado. Tente novamente.");
-        setConnecting(false);
+      if (!createData.channel?.id) {
+        setCreateError("Canal não foi criado. Tente novamente.");
+        setCreating(false);
         return;
       }
-      setChannelId(cid);
-
-      const connectRes = await fetch("/api/uazapi/instance/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel_id: cid }),
+      fetchChannels().then(() => {
+        fetchStats();
+        fetchStatus(createData.channel.id);
+        setSideOverOpen(false);
       });
-      const connectData = await connectRes.json();
-      if (!connectRes.ok) {
-        setConnectError(connectData?.error ?? "Falha ao iniciar conexão");
-        setConnecting(false);
-        return;
-      }
-      setQrcode(connectData.qrcode ?? null);
-      setPaircode(connectData.paircode ?? null);
-      if (connectData.connected) {
-        setWebhookDone(true);
-        setConnecting(false);
-        return;
-      }
-      setStep(2);
-    } catch (e) {
-      setConnectError("Erro de rede. Tente novamente.");
-      setConnecting(false);
+    } catch {
+      setCreateError("Erro de rede. Tente novamente.");
+    } finally {
+      setCreating(false);
     }
   };
 
   const handleConnect = async (ch: Channel) => {
-    setMenuOpen(null);
     setActionLoading(ch.id);
     try {
       const r = await fetch("/api/uazapi/instance/connect", {
@@ -249,7 +190,6 @@ export default function ConexoesPage() {
   };
 
   const handleDisconnect = async (ch: Channel) => {
-    setMenuOpen(null);
     setActionLoading(ch.id);
     try {
       const r = await fetch("/api/uazapi/instance/disconnect", {
@@ -269,7 +209,6 @@ export default function ConexoesPage() {
   };
 
   const handleDelete = async (ch: Channel) => {
-    setMenuOpen(null);
     if (!confirm(`Excluir a conexão "${ch.name}"? Esta ação não pode ser desfeita.`)) return;
     setActionLoading(ch.id);
     try {
@@ -324,14 +263,7 @@ export default function ConexoesPage() {
           </button>
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC] transition-colors"
-          >
-            <Filter className="h-4 w-4" />
-            Exibir Filtros
-          </button>
-          <button
-            type="button"
-            onClick={fetchChannels}
+            onClick={() => { fetchChannels(); fetchStats(); channels.forEach((c) => fetchStatus(c.id)); }}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F1F5F9] text-[#64748B] hover:bg-[#E2E8F0] transition-colors"
             aria-label="Atualizar"
           >
@@ -341,8 +273,13 @@ export default function ConexoesPage() {
       </div>
 
       {loading ? (
-        <p className="text-[#64748B]">Carregando…</p>
-      ) : pageItems.length === 0 ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-clicvend-orange border-t-transparent" />
+            <span className="text-sm text-[#64748B]">Carregando…</span>
+          </div>
+        </div>
+      ) : channels.length === 0 ? (
         <div className="rounded-xl border border-[#E2E8F0] bg-white p-8 text-center">
           <Smartphone className="mx-auto h-12 w-12 text-[#94A3B8]" />
           <p className="mt-2 text-[#64748B]">Nenhum canal cadastrado.</p>
@@ -358,208 +295,181 @@ export default function ConexoesPage() {
           </button>
         </div>
       ) : (
-        <>
-          <p className="text-sm text-[#64748B]">
-            {channels.length} de {MAX_CHANNELS_PER_COMPANY} números conectados
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {pageItems.map((ch) => {
-              const status = channelStatuses[ch.id] ?? null;
-              const loading = actionLoading === ch.id;
-              return (
-                <div
-                  key={ch.id}
-                  className="flex items-center gap-4 rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm"
-                >
-                  <span className={`flex h-12 w-12 items-center justify-center rounded-full ${getStatusColor(status)}`}>
-                    {status === "connected" ? (
-                      <Wifi className="h-6 w-6 text-[#16A34A]" />
-                    ) : status === "connecting" ? (
-                      <Loader2 className="h-6 w-6 animate-spin text-[#CA8A04]" />
-                    ) : (
-                      <WifiOff className="h-6 w-6 text-[#DC2626]" />
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-[#1E293B]">{ch.name}</p>
-                    <p className={`text-sm font-medium ${getStatusColor(status).split(" ")[0]}`}>
-                      {getStatusLabel(status)}
-                    </p>
-                    <p className="text-xs text-[#64748B]">{ch.uazapi_instance_id}</p>
-                  </div>
-                  <div className="relative" ref={menuRef}>
-                    <button
-                      type="button"
-                      onClick={() => setMenuOpen(menuOpen === ch.id ? null : ch.id)}
-                      disabled={loading}
-                      className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] disabled:opacity-50"
-                      aria-label="Menu"
-                    >
-                      {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <MoreVertical className="h-5 w-5" />}
-                    </button>
-                    {menuOpen === ch.id && (
-                      <div className="absolute right-0 top-full z-10 mt-1 w-48 rounded-lg border border-[#E2E8F0] bg-white py-1 shadow-lg">
-                        {status !== "connected" && (
-                          <button
-                            type="button"
-                            onClick={() => handleConnect(ch)}
-                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[#334155] hover:bg-[#F8FAFC]"
-                          >
-                            <Link2 className="h-4 w-4" />
-                            Conectar
-                          </button>
-                        )}
-                        {status === "connected" && (
-                          <button
-                            type="button"
-                            onClick={() => handleDisconnect(ch)}
-                            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[#334155] hover:bg-[#F8FAFC]"
-                          >
-                            <WifiOff className="h-4 w-4" />
-                            Desconectar
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => openConfig(ch)}
-                          className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[#334155] hover:bg-[#F8FAFC]"
-                        >
-                          <Settings className="h-4 w-4" />
-                          Configurar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(ch)}
-                          className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Excluir
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+        <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
+          {/* Resumo total */}
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
+            <p className="text-sm text-[#64748B]">
+              {channels.length} de {MAX_CHANNELS_PER_COMPANY} números conectados
+            </p>
+            <div className="flex items-center gap-4 text-sm">
+              <span className="flex items-center gap-1.5 text-[#64748B]">
+                <Users className="h-4 w-4 text-clicvend-orange" />
+                Total: <strong className="text-[#1E293B]">{channels.reduce((s, c) => s + (channelStats[c.id]?.conversations_count ?? 0), 0)}</strong> conversas
+              </span>
+              <span className="flex items-center gap-1.5 text-[#64748B]">
+                <MessageSquare className="h-4 w-4 text-clicvend-blue" />
+                <strong className="text-[#1E293B]">{channels.reduce((s, c) => s + (channelStats[c.id]?.messages_count ?? 0), 0)}</strong> mensagens
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-[#E2E8F0] pt-4 text-sm text-[#64748B]">
-            <span>
-              Mostrando {total === 0 ? 0 : start + 1}-{end} de {total} resultados
-            </span>
-            <select
-              value={perPage}
-              className="rounded border border-[#E2E8F0] bg-white px-2 py-1 text-[#1E293B]"
-            >
-              <option value={15}>15 por página</option>
-            </select>
+          {/* Tabela */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px]">
+              <thead>
+                <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Nome</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Status</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Conversas</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Mensagens</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Abertas</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {channels.map((ch) => {
+                  const status = channelStatuses[ch.id] ?? null;
+                  const loading = actionLoading === ch.id;
+                  const stats = channelStats[ch.id];
+                  const conv = stats?.conversations_count ?? 0;
+                  const msgs = stats?.messages_count ?? 0;
+                  const open = stats?.open_conversations ?? 0;
+                  return (
+                    <tr
+                      key={ch.id}
+                      className="border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC]"
+                    >
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-semibold text-[#1E293B]">{ch.name}</p>
+                          <p className="font-mono text-xs text-[#94A3B8]" title={ch.uazapi_instance_id}>
+                            {ch.uazapi_instance_id.length > 16 ? `${ch.uazapi_instance_id.slice(0, 12)}…` : ch.uazapi_instance_id}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(status)}`}>
+                          {status === "connected" ? (
+                            <Wifi className="h-3.5 w-3.5" />
+                          ) : status === "connecting" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <WifiOff className="h-3.5 w-3.5" />
+                          )}
+                          {getStatusLabel(status)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center font-medium text-[#1E293B]">{conv}</td>
+                      <td className="px-4 py-3 text-center font-medium text-[#1E293B]">{msgs}</td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-sm font-medium text-[#16A34A]">{open}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          {loading ? (
+                            <span className="rounded-lg p-2 text-[#64748B]">
+                              <Loader2 className="h-5 w-5 animate-spin" />
+                            </span>
+                          ) : (
+                            <>
+                              {status !== "connected" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleConnect(ch)}
+                                  title="Conectar"
+                                  className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-blue transition-colors"
+                                >
+                                  <Link2 className="h-5 w-5" />
+                                </button>
+                              )}
+                              {status === "connected" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDisconnect(ch)}
+                                  title="Desconectar"
+                                  className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-amber-600 transition-colors"
+                                >
+                                  <WifiOff className="h-5 w-5" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => openConfig(ch)}
+                                title="Configurar"
+                                className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors"
+                              >
+                                <Settings className="h-5 w-5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDelete(ch)}
+                                title="Excluir"
+                                className="rounded-lg p-2 text-[#64748B] hover:bg-red-50 hover:text-red-600 transition-colors"
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        </>
+        </div>
       )}
 
-      {/* SideOver Nova conexão */}
-      <SideOver open={sideOverOpen} onClose={closeSideOver} title={step === 1 ? "Nova conexão WhatsApp" : "Conectar WhatsApp"} width={440}>
-        {step === 1 && (
-          <>
-            <label className="mb-1 block text-sm font-medium text-[#334155]">Nome da conexão</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ex: Atendimento"
-              className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-            />
-            <label className="mb-1 block text-sm font-medium text-[#334155]">Fila (opcional)</label>
-            <select
-              value={queueId}
-              onChange={(e) => setQueueId(e.target.value)}
-              className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-            >
-              <option value="">Nenhuma</option>
-              {queues.map((q) => (
-                <option key={q.id} value={q.id}>{q.name}</option>
-              ))}
-            </select>
-            {connectError && <p className="mb-3 text-sm text-red-600">{connectError}</p>}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeSideOver}
-                className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={createAndConnect}
-                disabled={connecting}
-                className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
-              >
-                {connecting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Criando…
-                  </>
-                ) : (
-                  "Criar e conectar"
-                )}
-              </button>
-            </div>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            {webhookDone ? (
-              <div className="py-4 text-center">
-                <p className="font-medium text-clicvend-orange">Conectado com sucesso!</p>
-                <p className="mt-1 text-sm text-[#64748B]">Você já pode receber e enviar mensagens.</p>
-                <button
-                  type="button"
-                  onClick={closeSideOver}
-                  className="mt-4 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark"
-                >
-                  Fechar
-                </button>
-              </div>
-            ) : (
+      {/* SideOver Nova conexão - apenas cria a instância; conectar via Config */}
+      <SideOver open={sideOverOpen} onClose={closeSideOver} title="Nova conexão WhatsApp" width={440}>
+        <p className="mb-4 text-sm text-[#64748B]">
+          Crie a instância primeiro. Depois, clique em <strong>Configurar</strong> na tabela para gerar o QR Code e conectar o WhatsApp.
+        </p>
+        <label className="mb-1 block text-sm font-medium text-[#334155]">Nome da conexão</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ex: Atendimento"
+          className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+        />
+        <label className="mb-1 block text-sm font-medium text-[#334155]">Setor (opcional)</label>
+        <select
+          value={queueId}
+          onChange={(e) => setQueueId(e.target.value)}
+          className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+        >
+          <option value="">Nenhum</option>
+          {queues.map((q) => (
+            <option key={q.id} value={q.id}>{q.name}</option>
+          ))}
+        </select>
+        {createError && <p className="mb-3 text-sm text-red-600">{createError}</p>}
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={closeSideOver}
+            className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={createInstance}
+            disabled={creating}
+            className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+          >
+            {creating ? (
               <>
-                <p className="mb-4 text-sm text-[#64748B]">
-                  Abra o WhatsApp no celular, vá em <strong>Aparelhos conectados</strong> e escaneie o QR Code abaixo ou use o código de pareamento.
-                </p>
-                {qrcode && (
-                  <div className="mb-4 flex justify-center">
-                    <img
-                      src={qrcode}
-                      alt="QR Code WhatsApp"
-                      className="max-h-64 w-auto rounded-lg border border-[#E2E8F0]"
-                    />
-                  </div>
-                )}
-                {paircode && (
-                  <p className="mb-4 text-center text-lg font-mono font-semibold text-[#1E293B]">
-                    {paircode}
-                  </p>
-                )}
-                {!qrcode && !paircode && connecting && (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
-                  </div>
-                )}
-                <p className="text-center text-sm text-[#64748B]">Aguardando leitura do QR code…</p>
-                <div className="mt-4 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={closeSideOver}
-                    className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
-                  >
-                    Fechar
-                  </button>
-                </div>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Criando…
               </>
+            ) : (
+              "Criar"
             )}
-          </>
-        )}
+          </button>
+        </div>
       </SideOver>
 
       {/* SideOver Configuração do canal */}
@@ -571,6 +481,7 @@ export default function ConexoesPage() {
           channelName={configChannelName}
           onSaved={() => {
             fetchChannels();
+            fetchStats();
           }}
         />
       )}
