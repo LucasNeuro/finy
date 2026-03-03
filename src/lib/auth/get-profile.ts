@@ -5,6 +5,7 @@ export type ProfileRow = {
   user_id: string;
   company_id: string;
   role: string;
+  is_owner: boolean;
   companies: { slug: string; name: string } | null;
 };
 
@@ -15,7 +16,7 @@ export async function getCurrentUserProfiles(): Promise<ProfileRow[]> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, company_id, role, companies(slug, name)")
+    .select("id, user_id, company_id, role, is_owner, companies(slug, name)")
     .eq("user_id", user.id);
 
   if (error) return [];
@@ -38,6 +39,6 @@ export async function getProfileForCompany(companyId: string): Promise<ProfileRo
 export async function requireAdmin(companyId: string): Promise<{ error: string; status: number } | null> {
   const profile = await getProfileForCompany(companyId);
   if (!profile) return { error: "Unauthorized", status: 401 };
-  if (profile.role !== "admin") return { error: "Forbidden", status: 403 };
+  if (profile.role !== "admin" && !profile.is_owner) return { error: "Forbidden", status: 403 };
   return null;
 }

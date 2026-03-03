@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { SideOver } from "@/components/SideOver";
-import { Loader2, User, Shield, Bot, Radio, Upload, ImageIcon, Link2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Loader2, User, Shield, Bot, Radio, Upload, ImageIcon, Link2, Star, Trash2 } from "lucide-react";
 
 type TabId = "conectar" | "perfil" | "privacidade" | "chatbot" | "presenca";
 
@@ -19,6 +20,9 @@ type ChannelConfigSideOverProps = {
   onClose: () => void;
   channelId: string;
   channelName: string;
+  channelQueueId?: string | null;
+  queues?: { id: string; name: string; slug: string }[];
+  companySlug?: string;
   onSaved?: () => void;
 };
 
@@ -27,6 +31,9 @@ export function ChannelConfigSideOver({
   onClose,
   channelId,
   channelName,
+  channelQueueId,
+  queues = [],
+  companySlug = "",
   onSaved,
 }: ChannelConfigSideOverProps) {
   const [activeTab, setActiveTab] = useState<TabId>("perfil");
@@ -48,18 +55,84 @@ export function ChannelConfigSideOver({
   const [chatbotStopMinutes, setChatbotStopMinutes] = useState(30);
   const [chatbotStopWhenSend, setChatbotStopWhenSend] = useState(5);
 
+  // Chatbot – Triggers e QuickReplies
+  type Trigger = {
+    id?: string;
+    active?: boolean;
+    type?: "agent" | "quickreply" | "flow" | string;
+    agent_id?: string;
+    quickreply_id?: string;
+    flow_id?: string;
+    wordsToStart?: string;
+    priority?: number;
+    ignoreGroups?: boolean;
+  };
+
+  type QuickReply = {
+    id?: string;
+    shortCut: string;
+    text?: string;
+    type?: string;
+    onWhatsApp?: boolean;
+  };
+
+  const [triggers, setTriggers] = useState<Trigger[]>([]);
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [chatbotLoading, setChatbotLoading] = useState(false);
+  const [chatbotInnerSaving, setChatbotInnerSaving] = useState(false);
+  const [newTrigger, setNewTrigger] = useState<{
+    wordsToStart: string;
+    quickreplyId: string;
+    priority: number;
+  }>({ wordsToStart: "", quickreplyId: "", priority: 0 });
+  const [newQuickReply, setNewQuickReply] = useState<{
+    shortCut: string;
+    text: string;
+  }>({ shortCut: "", text: "" });
+
   // Presença
   const [presence, setPresence] = useState<"available" | "unavailable">("available");
 
   // Conectar
   const [connectStatus, setConnectStatus] = useState<"connected" | "connecting" | "disconnected" | null>(null);
+  const onSavedRef = useRef(onSaved);
+  const onCloseRef = useRef(onClose);
+  onSavedRef.current = onSaved;
+  onCloseRef.current = onClose;
   const [qrcode, setQrcode] = useState<string | null>(null);
   const [paircode, setPaircode] = useState<string | null>(null);
   const [connectLoading, setConnectLoading] = useState(false);
 
+  const [queueId, setQueueId] = useState<string>(channelQueueId ?? "");
+  const [removeQueueConfirm, setRemoveQueueConfirm] = useState<{ queue_id: string; queue_name: string } | null>(null);
+  const apiHeaders = companySlug ? { "X-Company-Slug": companySlug } : undefined;
+  const [channelQueues, setChannelQueues] = useState<Array<{ queue_id: string; is_default: boolean; queue: { id: string; name: string; slug: string } | null }>>([]);
+  const [channelQueuesLoading, setChannelQueuesLoading] = useState(false);
+  useEffect(() => {
+    setQueueId(channelQueueId ?? "");
+  }, [channelQueueId, open]);
+
+  const fetchChannelQueues = useCallback(async () => {
+    if (!channelId) return;
+    setChannelQueuesLoading(true);
+    try {
+      const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/queues`, { credentials: "include", headers: apiHeaders });
+      const data = await r.json();
+      if (r.ok && Array.isArray(data)) setChannelQueues(data);
+    } catch {
+      setChannelQueues([]);
+    } finally {
+      setChannelQueuesLoading(false);
+    }
+  }, [channelId]);
+
+  useEffect(() => {
+    if (open && channelId) fetchChannelQueues();
+  }, [open, channelId, fetchChannelQueues]);
+
   const fetchConnectStatus = useCallback(async () => {
     try {
-      const r = await fetch(`/api/uazapi/instance/status?channel_id=${encodeURIComponent(channelId)}`);
+      const r = await fetch(`/api/uazapi/instance/status?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders });
       const data = await r.json();
       if (r.ok) {
         const s: "connected" | "connecting" | "disconnected" =
@@ -86,6 +159,28 @@ export function ChannelConfigSideOver({
   }, [open, channelId, fetchConnectStatus]);
 
   useEffect(() => {
+    if (!open || activeTab !== "chatbot" || !channelId) return;
+    const load = async () => {
+      setChatbotLoading(true);
+      try {
+        const [tRes, qRes] = await Promise.all([
+          fetch(`/api/uazapi/trigger?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders }),
+          fetch(`/api/uazapi/quickreply?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders }),
+        ]);
+        const tData = await tRes.json();
+        const qData = await qRes.json();
+        if (tRes.ok && Array.isArray(tData)) setTriggers(tData);
+        if (qRes.ok && Array.isArray(qData)) setQuickReplies(qData);
+      } catch {
+        // silencioso; erro geral já vai para setError em ações específicas
+      } finally {
+        setChatbotLoading(false);
+      }
+    };
+    load();
+  }, [open, activeTab, channelId]);
+
+  useEffect(() => {
     if (!open || activeTab !== "conectar" || connectStatus !== "connecting" || !channelId) return;
     let cancelled = false;
     const deadline = Date.now() + 120000;
@@ -95,8 +190,8 @@ export function ChannelConfigSideOver({
       if (cancelled) return;
       if (data?.connected || data?.loggedIn) {
         setConnectStatus("connected");
-        onSaved?.();
-        onClose();
+        onSavedRef.current?.();
+        onCloseRef.current?.();
         return;
       }
       setTimeout(poll, 2500);
@@ -106,11 +201,11 @@ export function ChannelConfigSideOver({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [open, activeTab, connectStatus, channelId, fetchConnectStatus, onSaved, onClose]);
+  }, [open, activeTab, connectStatus, channelId, fetchConnectStatus]);
 
   const fetchPrivacy = async () => {
     try {
-      const r = await fetch(`/api/uazapi/instance/privacy?channel_id=${encodeURIComponent(channelId)}`);
+      const r = await fetch(`/api/uazapi/instance/privacy?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders });
       const data = await r.json();
       if (r.ok && typeof data === "object") setPrivacy(data);
     } catch {
@@ -132,8 +227,9 @@ export function ChannelConfigSideOver({
       }
       const r = await fetch("/api/uazapi/instance/profile", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify(body),
+        credentials: "include",
       });
       const data = await r.json();
       if (!r.ok) {
@@ -154,8 +250,9 @@ export function ChannelConfigSideOver({
     try {
       const r = await fetch("/api/uazapi/instance/privacy", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({ channel_id: channelId, ...privacy }),
+        credentials: "include",
       });
       const data = await r.json();
       if (!r.ok) {
@@ -176,7 +273,7 @@ export function ChannelConfigSideOver({
     try {
       const r = await fetch("/api/uazapi/instance/chatbot", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({
           channel_id: channelId,
           chatbot_enabled: chatbotEnabled,
@@ -185,6 +282,7 @@ export function ChannelConfigSideOver({
           chatbot_stopMinutes: chatbotStopMinutes,
           chatbot_stopWhenYouSendMsg: chatbotStopWhenSend,
         }),
+        credentials: "include",
       });
       const data = await r.json();
       if (!r.ok) {
@@ -199,14 +297,91 @@ export function ChannelConfigSideOver({
     setSaving(false);
   };
 
+  const handleCreateTrigger = async () => {
+    if (!newTrigger.wordsToStart.trim() || !newTrigger.quickreplyId) {
+      setError("Informe palavras-chave e selecione uma resposta rápida.");
+      return;
+    }
+    setChatbotInnerSaving(true);
+    setError("");
+    try {
+      const r = await fetch("/api/uazapi/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_id: channelId,
+          trigger: {
+            active: true,
+            type: "quickreply",
+            quickreply_id: newTrigger.quickreplyId,
+            wordsToStart: newTrigger.wordsToStart,
+            priority: newTrigger.priority,
+            ignoreGroups: chatbotIgnoreGroups,
+          },
+        }),
+        credentials: "include",
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setError(data?.error ?? "Falha ao criar trigger");
+        setChatbotInnerSaving(false);
+        return;
+      }
+      // Recarregar lista
+      const tRes = await fetch(`/api/uazapi/trigger?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders });
+      const tData = await tRes.json();
+      if (tRes.ok && Array.isArray(tData)) setTriggers(tData);
+      setNewTrigger({ wordsToStart: "", quickreplyId: "", priority: 0 });
+    } catch {
+      setError("Erro de rede ao criar trigger");
+    }
+    setChatbotInnerSaving(false);
+  };
+
+  const handleCreateQuickReply = async () => {
+    if (!newQuickReply.shortCut.trim() || !newQuickReply.text.trim()) {
+      setError("Informe atalho e texto da resposta rápida.");
+      return;
+    }
+    setChatbotInnerSaving(true);
+    setError("");
+    try {
+      const r = await fetch("/api/uazapi/quickreply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_id: channelId,
+          shortCut: newQuickReply.shortCut.trim(),
+          type: "text",
+          text: newQuickReply.text,
+        }),
+        credentials: "include",
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setError(data?.error ?? "Falha ao criar resposta rápida");
+        setChatbotInnerSaving(false);
+        return;
+      }
+      const qRes = await fetch(`/api/uazapi/quickreply?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders });
+      const qData = await qRes.json();
+      if (qRes.ok && Array.isArray(qData)) setQuickReplies(qData);
+      setNewQuickReply({ shortCut: "", text: "" });
+    } catch {
+      setError("Erro de rede ao criar resposta rápida");
+    }
+    setChatbotInnerSaving(false);
+  };
+
   const savePresence = async () => {
     setSaving(true);
     setError("");
     try {
       const r = await fetch("/api/uazapi/instance/presence", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({ channel_id: channelId, presence }),
+        credentials: "include",
       });
       const data = await r.json();
       if (!r.ok) {
@@ -227,8 +402,9 @@ export function ChannelConfigSideOver({
     try {
       const r = await fetch("/api/uazapi/instance/connect", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({ channel_id: channelId }),
+        credentials: "include",
       });
       const data = await r.json();
       if (!r.ok) {
@@ -272,7 +448,7 @@ export function ChannelConfigSideOver({
     formData.append("file", file);
     setUploadingImage(true);
     try {
-      const r = await fetch("/api/upload/channel-profile-image", { method: "POST", body: formData });
+      const r = await fetch("/api/upload/channel-profile-image", { method: "POST", body: formData, credentials: "include", headers: apiHeaders });
       const data = await r.json();
       if (r.ok && data?.url) {
         setProfileImage(data.url);
@@ -332,7 +508,32 @@ export function ChannelConfigSideOver({
     ]},
   ];
 
+  const doRemoveQueue = async () => {
+    const q = removeQueueConfirm;
+    if (!q) return;
+    setRemoveQueueConfirm(null);
+    setError("");
+    try {
+      const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/queues`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ queue_id: q.queue_id }),
+        credentials: "include",
+      });
+      if (r.ok) {
+        fetchChannelQueues();
+        onSaved?.();
+      } else {
+        const d = await r.json();
+        setError(d?.error ?? "Falha ao remover");
+      }
+    } catch {
+      setError("Erro de rede");
+    }
+  };
+
   return (
+    <>
     <SideOver
       open={open}
       onClose={onClose}
@@ -362,6 +563,74 @@ export function ChannelConfigSideOver({
           <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
         )}
 
+        <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-[#334155]">Caixas de entrada (até 8)</h3>
+              {channelQueuesLoading && <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />}
+            </div>
+            <p className="text-xs text-[#64748B]">Novas conversas deste número entram na caixa padrão. Para vincular ou desvincular caixas, use a página Filas.</p>
+
+            {channelQueues.length > 0 ? (
+              <ul className="space-y-2">
+                {channelQueues.map((cq) => (
+                  <li
+                    key={cq.queue_id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2"
+                  >
+                    <span className="text-sm font-medium text-[#1E293B]">
+                      {cq.queue?.name ?? cq.queue_id}
+                      {cq.is_default && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded bg-clicvend-orange/15 px-1.5 py-0.5 text-xs font-medium text-clicvend-orange">
+                          <Star className="h-3 w-3 fill-current" /> Padrão
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {!cq.is_default && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setError("");
+                            try {
+                              const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/queues`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json", ...apiHeaders },
+                                body: JSON.stringify({ queue_id: cq.queue_id, is_default: true }),
+                                credentials: "include",
+                              });
+                              if (r.ok) {
+                                fetchChannelQueues();
+                                onSaved?.();
+                              } else {
+                                const d = await r.json();
+                                setError(d?.error ?? "Falha ao definir padrão");
+                              }
+                            } catch {
+                              setError("Erro de rede");
+                            }
+                          }}
+                          className="rounded p-1.5 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+                          title="Definir como padrão"
+                        >
+                          <Star className="h-4 w-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setRemoveQueueConfirm({ queue_id: cq.queue_id, queue_name: cq.queue?.name ?? cq.queue_id })}
+                        className="rounded p-1.5 text-[#64748B] hover:bg-red-50 hover:text-red-600"
+                        title="Remover caixa"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-[#94A3B8]">Nenhuma caixa vinculada. Vincule em Filas.</p>
+            )}
+          </div>
         {/* Conectar */}
         {activeTab === "conectar" && (
           <div className="space-y-4">
@@ -517,7 +786,7 @@ export function ChannelConfigSideOver({
 
         {/* Chatbot / Respostas automáticas */}
         {activeTab === "chatbot" && (
-          <div className="space-y-4">
+          <div className="space-y-6">
             <div className="rounded-lg bg-[#F0F9FF] p-3 text-sm text-[#0369A1]">
               <strong>O que são respostas automáticas?</strong> Configure um chatbot para responder mensagens automaticamente. Quando habilitado, o sistema pode enviar respostas pré-definidas. Use a palavra para parar quando o cliente quiser falar com um atendente humano.
             </div>
@@ -569,6 +838,200 @@ export function ChannelConfigSideOver({
                 className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
               />
             </div>
+
+            <div className="pt-2 border-t border-[#E2E8F0] space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[#0F172A]">Triggers de respostas automáticas</h3>
+                {chatbotLoading && <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />}
+              </div>
+              <p className="text-xs text-[#64748B]">
+                Quando o cliente enviar uma das palavras abaixo, a UAZAPI enviará automaticamente a resposta rápida escolhida.
+              </p>
+
+              {triggers.length > 0 ? (
+                <div className="max-h-56 overflow-auto rounded-lg border border-[#E2E8F0]">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-[#F8FAFC] text-[#64748B]">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Ativo</th>
+                        <th className="px-3 py-2 text-left font-medium">Palavras-chave</th>
+                        <th className="px-3 py-2 text-left font-medium">Tipo</th>
+                        <th className="px-3 py-2 text-left font-medium">Prioridade</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E2E8F0]">
+                      {triggers.map((t) => (
+                        <tr key={t.id ?? `${t.type}-${t.wordsToStart}-${t.quickreply_id}`}>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                t.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              {t.active ? "Ativo" : "Inativo"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-[#0F172A] break-words max-w-[220px]">
+                            {t.wordsToStart || "—"}
+                          </td>
+                          <td className="px-3 py-2 text-[#64748B]">
+                            {t.type === "quickreply" ? "QuickReply" : t.type === "agent" ? "Agente IA" : t.type ?? "—"}
+                          </td>
+                          <td className="px-3 py-2 text-[#64748B]">{t.priority ?? 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-[#94A3B8]">Nenhum trigger configurado ainda.</p>
+              )}
+
+              <div className="rounded-lg border border-dashed border-[#CBD5E1] bg-[#F8FAFC] p-3 space-y-3">
+                <p className="text-xs font-medium text-[#0F172A]">Novo trigger (QuickReply)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] font-medium text-[#64748B] mb-1">
+                      Palavras-chave (separadas por | )
+                    </label>
+                    <input
+                      type="text"
+                      value={newTrigger.wordsToStart}
+                      onChange={(e) =>
+                        setNewTrigger((cur) => ({ ...cur, wordsToStart: e.target.value }))
+                      }
+                      placeholder="Ex: ola|bom dia|atendimento"
+                      className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1.5 text-xs text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#64748B] mb-1">
+                      Prioridade
+                    </label>
+                    <input
+                      type="number"
+                      value={newTrigger.priority}
+                      onChange={(e) =>
+                        setNewTrigger((cur) => ({
+                          ...cur,
+                          priority: Number.isNaN(parseInt(e.target.value, 10))
+                            ? 0
+                            : parseInt(e.target.value, 10),
+                        }))
+                      }
+                      className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1.5 text-xs text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] font-medium text-[#64748B] mb-1">
+                      Resposta rápida a enviar
+                    </label>
+                    <select
+                      value={newTrigger.quickreplyId}
+                      onChange={(e) =>
+                        setNewTrigger((cur) => ({ ...cur, quickreplyId: e.target.value }))
+                      }
+                      className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1.5 text-xs text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    >
+                      <option value="">Selecione uma resposta rápida…</option>
+                      {quickReplies.map((qr) => (
+                        <option key={qr.id ?? qr.shortCut} value={qr.id}>
+                          {qr.shortCut} {qr.text ? `– ${qr.text.slice(0, 40)}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex md:justify-end">
+                    <button
+                      type="button"
+                      onClick={handleCreateTrigger}
+                      disabled={chatbotInnerSaving}
+                      className="inline-flex w-full md:w-auto items-center justify-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                    >
+                      {chatbotInnerSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                      Adicionar trigger
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-[#0F172A]">Respostas rápidas (QuickReply)</h3>
+                {quickReplies.length > 0 ? (
+                  <div className="max-h-40 overflow-auto rounded-lg border border-[#E2E8F0]">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-[#F8FAFC] text-[#64748B]">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Atalho</th>
+                          <th className="px-3 py-2 text-left font-medium">Texto</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E2E8F0]">
+                        {quickReplies.map((qr) => (
+                          <tr key={qr.id ?? qr.shortCut}>
+                            <td className="px-3 py-2 text-[#0F172A]">{qr.shortCut}</td>
+                            <td className="px-3 py-2 text-[#64748B]">
+                              {qr.text ? qr.text.slice(0, 80) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#94A3B8]">
+                    Nenhuma resposta rápida cadastrada ainda.
+                  </p>
+                )}
+
+                <div className="rounded-lg border border-dashed border-[#CBD5E1] bg-[#F8FAFC] p-3 space-y-3">
+                  <p className="text-xs font-medium text-[#0F172A]">Nova resposta rápida</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[11px] font-medium text-[#64748B] mb-1">
+                        Atalho
+                      </label>
+                      <input
+                        type="text"
+                        value={newQuickReply.shortCut}
+                        onChange={(e) =>
+                          setNewQuickReply((cur) => ({ ...cur, shortCut: e.target.value }))
+                        }
+                        placeholder="Ex: saudacao1"
+                        className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1.5 text-xs text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-[11px] font-medium text-[#64748B] mb-1">
+                        Texto
+                      </label>
+                      <input
+                        type="text"
+                        value={newQuickReply.text}
+                        onChange={(e) =>
+                          setNewQuickReply((cur) => ({ ...cur, text: e.target.value }))
+                        }
+                        placeholder="Ex: Olá! Como posso ajudar hoje?"
+                        className="w-full rounded-lg border border-[#E2E8F0] px-2 py-1.5 text-xs text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex md:justify-end">
+                    <button
+                      type="button"
+                      onClick={handleCreateQuickReply}
+                      disabled={chatbotInnerSaving}
+                      className="inline-flex w-full md:w-auto items-center justify-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                    >
+                      {chatbotInnerSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                      Adicionar resposta rápida
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -611,5 +1074,17 @@ export function ChannelConfigSideOver({
         </div>
       </div>
     </SideOver>
+    <ConfirmDialog
+      open={!!removeQueueConfirm}
+      onClose={() => setRemoveQueueConfirm(null)}
+      title="Remover caixa"
+      message={removeQueueConfirm ? `Remover a caixa "${removeQueueConfirm.queue_name}" deste número?` : ""}
+      confirmLabel="Remover"
+      cancelLabel="Cancelar"
+      variant="danger"
+      onConfirm={doRemoveQueue}
+      onCancel={() => setRemoveQueueConfirm(null)}
+    />
+    </>
   );
 }

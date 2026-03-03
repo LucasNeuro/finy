@@ -1,27 +1,18 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { getInstancePrivacy, setInstancePrivacy } from "@/lib/uazapi/client";
+import { editTrigger, listTriggers } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
-const PRIVACY_KEYS = [
-  "groupadd",
-  "last",
-  "status",
-  "profile",
-  "readreceipts",
-  "online",
-  "calladd",
-] as const;
-
 /**
- * GET /api/uazapi/instance/privacy?channel_id=xxx
- * Retorna configurações de privacidade da instância.
+ * GET /api/uazapi/trigger?channel_id=xxx
+ * Lista triggers de chatbot da instância vinculada ao canal.
  */
 export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
   const { searchParams } = new URL(request.url);
   const channelId = searchParams.get("channel_id")?.trim();
   if (!channelId) {
@@ -33,21 +24,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const result = await getInstancePrivacy(resolved.token);
+  const result = await listTriggers(resolved.token);
   if (!result.ok) {
     return NextResponse.json(
-      { error: result.error ?? "Failed to get privacy settings" },
+      { error: result.error ?? "Failed to list triggers" },
       { status: 502 }
     );
   }
 
-  return NextResponse.json(result.data ?? {});
+  return NextResponse.json(result.data ?? []);
 }
 
 /**
- * POST /api/uazapi/instance/privacy
- * Atualiza configurações de privacidade.
- * Body: { channel_id, groupadd?, last?, status?, profile?, readreceipts?, online?, calladd? }
+ * POST /api/uazapi/trigger
+ * Cria/atualiza/exclui trigger.
+ * Body: { channel_id: string, id?: string, delete?: boolean, trigger: ChatbotTrigger }
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -72,28 +63,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const settings: Record<string, string> = {};
-  for (const key of PRIVACY_KEYS) {
-    const v = body[key];
-    if (typeof v === "string" && v.trim()) {
-      settings[key] = v.trim();
-    }
+  const payload: {
+    id?: string;
+    delete?: boolean;
+    trigger: Record<string, unknown>;
+  } = {
+    trigger: {},
+  };
+
+  if (typeof body.id === "string" && body.id.trim()) {
+    payload.id = body.id.trim();
+  }
+  if (typeof body.delete === "boolean") {
+    payload.delete = body.delete;
+  }
+  if (body.trigger && typeof body.trigger === "object") {
+    payload.trigger = body.trigger as Record<string, unknown>;
   }
 
-  if (Object.keys(settings).length === 0) {
+  if (!payload.trigger || Object.keys(payload.trigger).length === 0) {
     return NextResponse.json(
-      { error: "At least one privacy setting is required" },
+      { error: "trigger payload is required" },
       { status: 400 }
     );
   }
 
-  const result = await setInstancePrivacy(resolved.token, settings);
+  const result = await editTrigger(resolved.token, payload as Parameters<typeof editTrigger>[1]);
   if (!result.ok) {
     return NextResponse.json(
-      { error: result.error ?? "Failed to update privacy" },
+      { error: result.error ?? "Failed to edit trigger" },
       { status: 502 }
     );
   }
 
-  return NextResponse.json(result.data ?? settings);
+  return NextResponse.json(result.data ?? payload);
 }
+

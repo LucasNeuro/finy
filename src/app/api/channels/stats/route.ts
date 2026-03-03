@@ -1,4 +1,4 @@
-import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
+import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -9,8 +9,8 @@ export type ChannelStats = {
   open_conversations: number;
 };
 
-export async function GET() {
-  const companyId = await getCompanyIdFromCookie();
+export async function GET(request: Request) {
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

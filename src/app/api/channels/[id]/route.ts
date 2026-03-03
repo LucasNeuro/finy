@@ -1,4 +1,4 @@
-import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
+import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requireAdmin } from "@/lib/auth/get-profile";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { updateInstanceName } from "@/lib/uazapi/client";
@@ -14,7 +14,7 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

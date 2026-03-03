@@ -9,11 +9,13 @@ import {
   Settings,
   Zap,
   Tag,
+  Inbox,
 } from "lucide-react";
 
 const tabs = [
   { href: "/conversas", label: "Conversas", icon: MessageSquare },
   { href: "/conexoes", label: "Conexões", icon: Plug },
+  { href: "/filas", label: "Filas", icon: Inbox },
   { href: "/contatos", label: "Contatos", icon: Users },
   { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap },
   { href: "/tags", label: "Tags", icon: Tag },

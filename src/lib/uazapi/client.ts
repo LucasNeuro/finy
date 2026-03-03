@@ -79,6 +79,37 @@ export type InstanceResponse = {
   [key: string]: unknown;
 };
 
+export type ChatbotTrigger = {
+  id?: string;
+  active?: boolean;
+  type: "agent" | "quickreply" | "flow";
+  agent_id?: string;
+  quickreply_id?: string;
+  flow_id?: string;
+  wordsToStart?: string;
+  ignoreGroups?: boolean;
+  lead_field?: string;
+  lead_operator?: string;
+  lead_value?: string;
+  priority?: number;
+  responseDelay_seconds?: number;
+  [key: string]: unknown;
+};
+
+export type QuickReply = {
+  id?: string;
+  onWhatsApp?: boolean;
+  docName?: string;
+  file?: string;
+  shortCut: string;
+  text?: string;
+  type?: string;
+  owner?: string;
+  created?: string;
+  updated?: string;
+  [key: string]: unknown;
+};
+
 /**
  * Cria uma nova instância WhatsApp na UAZAPI (requer admintoken).
  */
@@ -209,6 +240,81 @@ export async function disconnectInstance(token: string): Promise<{
   return {
     ok,
     instance: data?.instance,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Lista todos os triggers de chatbot da instância autenticada.
+ */
+export async function listTriggers(
+  token: string
+): Promise<{ ok: boolean; data?: ChatbotTrigger[]; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<ChatbotTrigger[]>("/trigger/list", { token });
+  return {
+    ok,
+    data: ok && Array.isArray(data) ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Cria, atualiza ou exclui um trigger de chatbot.
+ * Body segue o schema da UAZAPI: { id?, delete?, trigger: ChatbotTrigger }
+ */
+export async function editTrigger(
+  token: string,
+  payload: { id?: string; delete?: boolean; trigger: ChatbotTrigger }
+): Promise<{ ok: boolean; data?: ChatbotTrigger; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<ChatbotTrigger>("/trigger/edit", {
+    method: "POST",
+    token,
+    body: payload,
+  });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Lista todas as respostas rápidas (QuickReply) da instância autenticada.
+ */
+export async function listQuickReplies(
+  token: string
+): Promise<{ ok: boolean; data?: QuickReply[]; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<QuickReply[]>("/quickreply/showall", { token });
+  return {
+    ok,
+    data: ok && Array.isArray(data) ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Cria, atualiza ou exclui uma resposta rápida.
+ * Body segue o schema da UAZAPI: { id?, delete?, shortCut, type, text?, file? }
+ */
+export async function editQuickReply(
+  token: string,
+  payload: {
+    id?: string;
+    delete?: boolean;
+    shortCut: string;
+    type: string;
+    text?: string;
+    file?: string;
+  }
+): Promise<{ ok: boolean; data?: QuickReply; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<QuickReply>("/quickreply/edit", {
+    method: "POST",
+    token,
+    body: payload,
+  });
+  return {
+    ok,
+    data: ok ? data : undefined,
     error: ok ? undefined : (error ?? `HTTP ${status}`),
   };
 }
@@ -380,6 +486,65 @@ export async function updateInstancePresence(
     body: { presence },
   });
   return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/** Contato retornado por GET /contacts */
+export type UazapiContact = {
+  jid?: string;
+  contactName?: string;
+  contact_FirstName?: string;
+  contact_name?: string;
+};
+
+/**
+ * Lista contatos da instância (agenda do WhatsApp).
+ * GET /contacts - lista completa sem paginação.
+ */
+export async function listContacts(token: string): Promise<{
+  ok: boolean;
+  data?: UazapiContact[];
+  error?: string;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<UazapiContact[] | { contacts?: UazapiContact[] }>("/contacts", { token });
+  const list = Array.isArray(data) ? data : data?.contacts;
+  return {
+    ok,
+    data: ok && Array.isArray(list) ? list : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/** Grupo retornado por GET /group/list */
+export type UazapiGroup = {
+  JID?: string;
+  Name?: string;
+  Topic?: string;
+  invite_link?: string;
+  OwnerIsAdmin?: boolean;
+  Participants?: unknown[];
+  [key: string]: unknown;
+};
+
+/**
+ * Lista grupos da instância (grupos que o número participa).
+ * GET /group/list - force=true para atualizar cache.
+ */
+export async function listGroups(
+  token: string,
+  opts?: { force?: boolean; noparticipants?: boolean }
+): Promise<{ ok: boolean; data?: UazapiGroup[]; error?: string }> {
+  const params = new URLSearchParams();
+  if (opts?.force) params.set("force", "true");
+  if (opts?.noparticipants) params.set("noparticipants", "true");
+  const qs = params.toString();
+  const path = qs ? `/group/list?${qs}` : "/group/list";
+  const { data, ok, error, status } = await uazapiFetch<{ groups?: UazapiGroup[] } | UazapiGroup[]>(path, { token });
+  const list = Array.isArray(data) ? data : (data && typeof data === "object" && "groups" in data ? (data as { groups?: UazapiGroup[] }).groups : undefined);
+  return {
+    ok,
+    data: ok && Array.isArray(list) ? list : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
 }
 
 /**
@@ -586,4 +751,8 @@ export const uazapi = {
   setGlobalWebhook,
   getGlobalWebhook,
   sendText,
+  listTriggers,
+  editTrigger,
+  listQuickReplies,
+  editQuickReply,
 };

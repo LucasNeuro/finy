@@ -1,5 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
+import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { NextResponse } from "next/server";
 
 const BUCKET = "channel-profile-images";
@@ -7,7 +7,7 @@ const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
 export async function POST(request: Request) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   }

@@ -1,15 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { Settings, LogOut, ChevronDown, Search } from "lucide-react";
+import { Settings, ChevronDown, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
 
 export function AppHeader() {
   const pathname = usePathname();
-  const router = useRouter();
   const [user, setUser] = useState<{ email?: string } | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -33,12 +32,6 @@ export function AppHeader() {
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
-
-  async function handleLogout() {
-    await createClient().auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
 
   const initial = user?.email?.[0]?.toUpperCase() ?? "U";
 
@@ -83,18 +76,6 @@ export function AppHeader() {
                 <Settings className="h-4 w-4 shrink-0" />
                 Configurações
               </Link>
-              <div className="my-1 h-px bg-[#E2E8F0]" />
-              <button
-                type="button"
-                onClick={() => {
-                  setDropdownOpen(false);
-                  handleLogout();
-                }}
-                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-[#EF4444] hover:bg-[#FEF2F2] transition-colors"
-              >
-                <LogOut className="h-4 w-4" />
-                Deslogar
-              </button>
             </div>
           )}
         </div>

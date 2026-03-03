@@ -1,4 +1,4 @@
-import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
+import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requireAdmin } from "@/lib/auth/get-profile";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { disconnectInstance } from "@/lib/uazapi/client";
@@ -10,7 +10,7 @@ import { NextResponse } from "next/server";
  * Body: { channel_id: string }
  */
 export async function POST(request: Request) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -137,6 +137,7 @@ export async function POST(request: Request) {
     user_id: userId,
     company_id: company.id,
     role: "admin",
+    is_owner: true,
   });
   if (profileError) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });

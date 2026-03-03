@@ -1,27 +1,18 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { getInstancePrivacy, setInstancePrivacy } from "@/lib/uazapi/client";
+import { editQuickReply, listQuickReplies } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
-const PRIVACY_KEYS = [
-  "groupadd",
-  "last",
-  "status",
-  "profile",
-  "readreceipts",
-  "online",
-  "calladd",
-] as const;
-
 /**
- * GET /api/uazapi/instance/privacy?channel_id=xxx
- * Retorna configurações de privacidade da instância.
+ * GET /api/uazapi/quickreply?channel_id=xxx
+ * Lista respostas rápidas (QuickReply) da instância vinculada ao canal.
  */
 export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
   const { searchParams } = new URL(request.url);
   const channelId = searchParams.get("channel_id")?.trim();
   if (!channelId) {
@@ -33,21 +24,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const result = await getInstancePrivacy(resolved.token);
+  const result = await listQuickReplies(resolved.token);
   if (!result.ok) {
     return NextResponse.json(
-      { error: result.error ?? "Failed to get privacy settings" },
+      { error: result.error ?? "Failed to list quick replies" },
       { status: 502 }
     );
   }
 
-  return NextResponse.json(result.data ?? {});
+  return NextResponse.json(result.data ?? []);
 }
 
 /**
- * POST /api/uazapi/instance/privacy
- * Atualiza configurações de privacidade.
- * Body: { channel_id, groupadd?, last?, status?, profile?, readreceipts?, online?, calladd? }
+ * POST /api/uazapi/quickreply
+ * Cria/atualiza/exclui resposta rápida.
+ * Body: { channel_id: string, id?: string, delete?: boolean, shortCut: string, type: string, text?: string, file?: string }
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -72,28 +63,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const settings: Record<string, string> = {};
-  for (const key of PRIVACY_KEYS) {
-    const v = body[key];
-    if (typeof v === "string" && v.trim()) {
-      settings[key] = v.trim();
-    }
-  }
+  const shortCut = typeof body.shortCut === "string" ? body.shortCut.trim() : "";
+  const type = typeof body.type === "string" ? body.type.trim() : "";
+  const text = typeof body.text === "string" ? body.text : undefined;
+  const file = typeof body.file === "string" ? body.file : undefined;
+  const id = typeof body.id === "string" && body.id.trim() ? body.id.trim() : undefined;
+  const del = typeof body.delete === "boolean" ? body.delete : false;
 
-  if (Object.keys(settings).length === 0) {
+  if (!shortCut || !type) {
     return NextResponse.json(
-      { error: "At least one privacy setting is required" },
+      { error: "shortCut and type are required" },
       { status: 400 }
     );
   }
 
-  const result = await setInstancePrivacy(resolved.token, settings);
+  const result = await editQuickReply(resolved.token, {
+    id,
+    delete: del,
+    shortCut,
+    type,
+    ...(text ? { text } : {}),
+    ...(file ? { file } : {}),
+  });
+
   if (!result.ok) {
     return NextResponse.json(
-      { error: result.error ?? "Failed to update privacy" },
+      { error: result.error ?? "Failed to edit quick reply" },
       { status: 502 }
     );
   }
 
-  return NextResponse.json(result.data ?? settings);
+  return NextResponse.json(result.data ?? { ok: true });
 }
+

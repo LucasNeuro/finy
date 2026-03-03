@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Smartphone, Plus, Loader2, Settings, Wifi, WifiOff, Link2, Trash2, MessageSquare, Users } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { SideOver } from "@/components/SideOver";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChannelConfigSideOver } from "./ChannelConfigSideOver";
 
 type Channel = {
@@ -21,6 +23,8 @@ type ChannelStatus = "connected" | "connecting" | "disconnected" | null;
 const MAX_CHANNELS_PER_COMPANY = 3;
 
 export default function ConexoesPage() {
+  const pathname = usePathname();
+  const slug = pathname?.split("/").filter(Boolean)[0] ?? "";
   const [channels, setChannels] = useState<Channel[]>([]);
   const [queues, setQueues] = useState<Queue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,24 +37,31 @@ export default function ConexoesPage() {
   const [configSideOverOpen, setConfigSideOverOpen] = useState(false);
   const [configChannelId, setConfigChannelId] = useState<string | null>(null);
   const [configChannelName, setConfigChannelName] = useState("");
+  const [configChannelQueueId, setConfigChannelQueueId] = useState<string | null>(null);
   const [channelStatuses, setChannelStatuses] = useState<Record<string, ChannelStatus>>({});
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [channelStats, setChannelStats] = useState<Record<string, { conversations_count: number; messages_count: number; open_conversations: number }>>({});
 
+  const [newQueueOpen, setNewQueueOpen] = useState(false);
+  const [newQueueName, setNewQueueName] = useState("");
+  const [newQueueCreating, setNewQueueCreating] = useState(false);
+  const [newQueueError, setNewQueueError] = useState("");
+
+  const [deleteConfirmChannel, setDeleteConfirmChannel] = useState<Channel | null>(null);
   const canAddChannel = channels.length < MAX_CHANNELS_PER_COMPANY;
 
   const fetchChannels = useCallback(() => {
     setLoading(true);
-    return fetch("/api/channels")
+    return fetch("/api/channels", { credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined })
       .then((r) => r.json())
       .then((data) => setChannels(Array.isArray(data) ? data : []))
       .catch(() => setChannels([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [slug]);
 
   const fetchStatus = useCallback(async (chId: string) => {
     try {
-      const r = await fetch(`/api/uazapi/instance/status?channel_id=${encodeURIComponent(chId)}`);
+      const r = await fetch(`/api/uazapi/instance/status?channel_id=${encodeURIComponent(chId)}`, { credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined });
       const data = await r.json();
       if (r.ok) {
         const s: ChannelStatus = data.connected || data.loggedIn ? "connected" : data.qrcode || data.paircode ? "connecting" : "disconnected";
@@ -61,10 +72,10 @@ export default function ConexoesPage() {
       setChannelStatuses((prev) => ({ ...prev, [chId]: "disconnected" }));
     }
     return null;
-  }, []);
+  }, [slug]);
 
   const fetchStats = useCallback(() => {
-    fetch("/api/channels/stats")
+    fetch("/api/channels/stats", { credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined })
       .then((r) => r.json())
       .then((data: Array<{ channel_id: string; conversations_count: number; messages_count: number; open_conversations: number }>) => {
         const map: Record<string, { conversations_count: number; messages_count: number; open_conversations: number }> = {};
@@ -78,28 +89,32 @@ export default function ConexoesPage() {
         setChannelStats(map);
       })
       .catch(() => setChannelStats({}));
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
     fetchChannels();
   }, [fetchChannels]);
 
   useEffect(() => {
+    if (channels.length === 0) return;
     channels.forEach((c) => fetchStatus(c.id));
   }, [channels, fetchStatus]);
 
   useEffect(() => {
-    if (channels.length) fetchStats();
-  }, [channels, fetchStats]);
+    fetch("/api/queues", { credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined })
+      .then((r) => r.json())
+      .then((data) => setQueues(Array.isArray(data) ? data : []))
+      .catch(() => setQueues([]));
+  }, [slug]);
 
   useEffect(() => {
     if (sideOverOpen) {
-      fetch("/api/queues")
+      fetch("/api/queues", { credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined })
         .then((r) => r.json())
         .then((data) => setQueues(Array.isArray(data) ? data : []))
         .catch(() => setQueues([]));
     }
-  }, [sideOverOpen]);
+  }, [sideOverOpen, slug]);
 
   const openSideOver = () => {
     if (!canAddChannel) return;
@@ -118,6 +133,7 @@ export default function ConexoesPage() {
   const openConfig = (ch: Channel) => {
     setConfigChannelId(ch.id);
     setConfigChannelName(ch.name);
+    setConfigChannelQueueId(ch.queue_id);
     setConfigSideOverOpen(true);
   };
 
@@ -125,7 +141,41 @@ export default function ConexoesPage() {
     setConfigSideOverOpen(false);
     setConfigChannelId(null);
     setConfigChannelName("");
+    setConfigChannelQueueId(null);
     fetchChannels();
+  };
+
+  const createQueue = async () => {
+    const n = newQueueName.trim();
+    if (!n) {
+      setNewQueueError("Informe o nome da caixa.");
+      return;
+    }
+    setNewQueueError("");
+    setNewQueueCreating(true);
+    try {
+      const slug = n.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || "caixa";
+      const r = await fetch("/api/queues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
+        body: JSON.stringify({ name: n, slug }),
+        credentials: "include",
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setNewQueueError(data?.error ?? "Falha ao criar caixa");
+        setNewQueueCreating(false);
+        return;
+      }
+      setQueues((prev) => [...prev, { id: data.id, name: data.name, slug: data.slug }]);
+      setQueueId(data.id);
+      setNewQueueName("");
+      setNewQueueOpen(false);
+    } catch {
+      setNewQueueError("Erro de rede.");
+    } finally {
+      setNewQueueCreating(false);
+    }
   };
 
   const createInstance = async () => {
@@ -139,12 +189,13 @@ export default function ConexoesPage() {
     try {
       const createRes = await fetch("/api/uazapi/instance", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
         body: JSON.stringify({
           name: n,
           createChannel: true,
           queue_id: queueId.trim() || undefined,
         }),
+        credentials: "include",
       });
       const createData = await createRes.json();
       if (!createRes.ok) {
@@ -174,8 +225,9 @@ export default function ConexoesPage() {
     try {
       const r = await fetch("/api/uazapi/instance/connect", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
         body: JSON.stringify({ channel_id: ch.id }),
+        credentials: "include",
       });
       const data = await r.json();
       if (r.ok) {
@@ -194,8 +246,9 @@ export default function ConexoesPage() {
     try {
       const r = await fetch("/api/uazapi/instance/disconnect", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
         body: JSON.stringify({ channel_id: ch.id }),
+        credentials: "include",
       });
       if (r.ok) {
         setChannelStatuses((prev) => ({ ...prev, [ch.id]: "disconnected" }));
@@ -208,11 +261,17 @@ export default function ConexoesPage() {
     }
   };
 
-  const handleDelete = async (ch: Channel) => {
-    if (!confirm(`Excluir a conexão "${ch.name}"? Esta ação não pode ser desfeita.`)) return;
+  const handleDelete = (ch: Channel) => {
+    setDeleteConfirmChannel(ch);
+  };
+
+  const doDeleteChannel = async () => {
+    const ch = deleteConfirmChannel;
+    if (!ch) return;
+    setDeleteConfirmChannel(null);
     setActionLoading(ch.id);
     try {
-      const r = await fetch(`/api/uazapi/instance/delete?channel_id=${encodeURIComponent(ch.id)}`, { method: "DELETE" });
+      const r = await fetch(`/api/uazapi/instance/delete?channel_id=${encodeURIComponent(ch.id)}`, { method: "DELETE", credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined });
       if (r.ok) {
         setChannels((prev) => prev.filter((c) => c.id !== ch.id));
         setChannelStatuses((prev) => {
@@ -319,6 +378,7 @@ export default function ConexoesPage() {
               <thead>
                 <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Nome</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Caixa de entrada</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Status</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Conversas</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Mensagens</th>
@@ -346,6 +406,9 @@ export default function ConexoesPage() {
                             {ch.uazapi_instance_id.length > 16 ? `${ch.uazapi_instance_id.slice(0, 12)}…` : ch.uazapi_instance_id}
                           </p>
                         </div>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-[#64748B]">
+                        {ch.queue_id ? (queues.find((q) => q.id === ch.queue_id)?.name ?? "—") : "—"}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(status)}`}>
@@ -434,17 +497,25 @@ export default function ConexoesPage() {
           placeholder="Ex: Atendimento"
           className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
         />
-        <label className="mb-1 block text-sm font-medium text-[#334155]">Setor (opcional)</label>
+        <label className="mb-1 block text-sm font-medium text-[#334155]">Caixa de entrada</label>
         <select
           value={queueId}
           onChange={(e) => setQueueId(e.target.value)}
           className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
         >
-          <option value="">Nenhum</option>
+          <option value="">Nenhuma</option>
           {queues.map((q) => (
             <option key={q.id} value={q.id}>{q.name}</option>
           ))}
         </select>
+        <p className="mb-4 text-xs text-[#64748B]">As conversas deste número serão agrupadas nesta caixa. Crie caixas em Configurações da empresa se precisar.</p>
+        <button
+          type="button"
+          onClick={() => { setNewQueueError(""); setNewQueueName(""); setNewQueueOpen(true); }}
+          className="mb-4 text-sm text-clicvend-orange hover:underline"
+        >
+          + Nova caixa de entrada
+        </button>
         {createError && <p className="mb-3 text-sm text-red-600">{createError}</p>}
         <div className="flex justify-end gap-2">
           <button
@@ -472,6 +543,38 @@ export default function ConexoesPage() {
         </div>
       </SideOver>
 
+      {/* SideOver Nova caixa de entrada */}
+      <SideOver open={newQueueOpen} onClose={() => setNewQueueOpen(false)} title="Nova caixa de entrada" width={400}>
+        <p className="mb-4 text-sm text-[#64748B]">Crie uma caixa para organizar conversas por setor (ex.: Comercial, Suporte).</p>
+        <label className="mb-1 block text-sm font-medium text-[#334155]">Nome da caixa</label>
+        <input
+          type="text"
+          value={newQueueName}
+          onChange={(e) => setNewQueueName(e.target.value)}
+          placeholder="Ex: Comercial"
+          className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+        />
+        {newQueueError && <p className="mb-3 text-sm text-red-600">{newQueueError}</p>}
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setNewQueueOpen(false)}
+            className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={createQueue}
+            disabled={newQueueCreating}
+            className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+          >
+            {newQueueCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Criar caixa
+          </button>
+        </div>
+      </SideOver>
+
       {/* SideOver Configuração do canal */}
       {configChannelId && (
         <ChannelConfigSideOver
@@ -479,12 +582,29 @@ export default function ConexoesPage() {
           onClose={closeConfig}
           channelId={configChannelId}
           channelName={configChannelName}
+          channelQueueId={configChannelQueueId}
+          queues={queues}
+          companySlug={slug}
           onSaved={() => {
             fetchChannels();
             fetchStats();
+            if (configChannelId) fetchStatus(configChannelId);
           }}
         />
       )}
+
+      {/* Modal de confirmação de exclusão de conexão */}
+      <ConfirmDialog
+        open={!!deleteConfirmChannel}
+        onClose={() => setDeleteConfirmChannel(null)}
+        title="Excluir conexão"
+        message={deleteConfirmChannel ? `Excluir a conexão "${deleteConfirmChannel.name}"? Esta ação não pode ser desfeita.` : ""}
+        confirmLabel="Excluir"
+        cancelLabel="Cancelar"
+        variant="danger"
+        onConfirm={doDeleteChannel}
+        onCancel={() => setDeleteConfirmChannel(null)}
+      />
     </div>
   );
 }
