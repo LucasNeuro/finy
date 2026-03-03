@@ -42,11 +42,6 @@ export default function ConexoesPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [channelStats, setChannelStats] = useState<Record<string, { conversations_count: number; messages_count: number; open_conversations: number }>>({});
 
-  const [newQueueOpen, setNewQueueOpen] = useState(false);
-  const [newQueueName, setNewQueueName] = useState("");
-  const [newQueueCreating, setNewQueueCreating] = useState(false);
-  const [newQueueError, setNewQueueError] = useState("");
-
   const [deleteConfirmChannel, setDeleteConfirmChannel] = useState<Channel | null>(null);
   const canAddChannel = channels.length < MAX_CHANNELS_PER_COMPANY;
 
@@ -143,39 +138,6 @@ export default function ConexoesPage() {
     setConfigChannelName("");
     setConfigChannelQueueId(null);
     fetchChannels();
-  };
-
-  const createQueue = async () => {
-    const n = newQueueName.trim();
-    if (!n) {
-      setNewQueueError("Informe o nome da caixa.");
-      return;
-    }
-    setNewQueueError("");
-    setNewQueueCreating(true);
-    try {
-      const slug = n.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || "caixa";
-      const r = await fetch("/api/queues", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
-        body: JSON.stringify({ name: n, slug }),
-        credentials: "include",
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        setNewQueueError(data?.error ?? "Falha ao criar caixa");
-        setNewQueueCreating(false);
-        return;
-      }
-      setQueues((prev) => [...prev, { id: data.id, name: data.name, slug: data.slug }]);
-      setQueueId(data.id);
-      setNewQueueName("");
-      setNewQueueOpen(false);
-    } catch {
-      setNewQueueError("Erro de rede.");
-    } finally {
-      setNewQueueCreating(false);
-    }
   };
 
   const createInstance = async () => {
@@ -508,14 +470,10 @@ export default function ConexoesPage() {
             <option key={q.id} value={q.id}>{q.name}</option>
           ))}
         </select>
-        <p className="mb-4 text-xs text-[#64748B]">As conversas deste número serão agrupadas nesta caixa. Crie caixas em Configurações da empresa se precisar.</p>
-        <button
-          type="button"
-          onClick={() => { setNewQueueError(""); setNewQueueName(""); setNewQueueOpen(true); }}
-          className="mb-4 text-sm text-clicvend-orange hover:underline"
-        >
-          + Nova caixa de entrada
-        </button>
+        <p className="mb-4 text-xs text-[#64748B]">
+          As conversas deste número serão agrupadas nesta caixa. Para criar novas caixas, vá em{" "}
+          <strong>Filas</strong> no topo da tela.
+        </p>
         {createError && <p className="mb-3 text-sm text-red-600">{createError}</p>}
         <div className="flex justify-end gap-2">
           <button
@@ -539,38 +497,6 @@ export default function ConexoesPage() {
             ) : (
               "Criar"
             )}
-          </button>
-        </div>
-      </SideOver>
-
-      {/* SideOver Nova caixa de entrada */}
-      <SideOver open={newQueueOpen} onClose={() => setNewQueueOpen(false)} title="Nova caixa de entrada" width={400}>
-        <p className="mb-4 text-sm text-[#64748B]">Crie uma caixa para organizar conversas por setor (ex.: Comercial, Suporte).</p>
-        <label className="mb-1 block text-sm font-medium text-[#334155]">Nome da caixa</label>
-        <input
-          type="text"
-          value={newQueueName}
-          onChange={(e) => setNewQueueName(e.target.value)}
-          placeholder="Ex: Comercial"
-          className="mb-4 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-        />
-        {newQueueError && <p className="mb-3 text-sm text-red-600">{newQueueError}</p>}
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setNewQueueOpen(false)}
-            className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={createQueue}
-            disabled={newQueueCreating}
-            className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
-          >
-            {newQueueCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Criar caixa
           </button>
         </div>
       </SideOver>
