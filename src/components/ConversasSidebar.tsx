@@ -16,8 +16,10 @@ type Conversation = {
 
 export function ConversasSidebar() {
   const pathname = usePathname();
-  const slug = pathname?.split("/")[1];
+  const segments = pathname?.split("/").filter(Boolean) ?? [];
+  const slug = segments[0];
   const base = slug ? `/${slug}` : "";
+  const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
   const [queues, setQueues] = useState<Queue[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [queueId, setQueueId] = useState<string>("");
@@ -25,24 +27,26 @@ export function ConversasSidebar() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/queues")
+    if (!slug) return;
+    fetch("/api/queues?for_inbox=1", { credentials: "include", headers: apiHeaders })
       .then((r) => r.json())
       .then((data) => setQueues(Array.isArray(data) ? data : []))
       .catch(() => setQueues([]));
-  }, []);
+  }, [slug]);
 
   useEffect(() => {
+    if (!slug) return;
     setLoading(true);
     const params = new URLSearchParams();
     if (queueId) params.set("queue_id", queueId);
-    fetch(`/api/conversations?${params}`)
+    fetch(`/api/conversations?${params}`, { credentials: "include", headers: apiHeaders })
       .then((r) => r.json())
       .then((res) => {
         setConversations(res.data ?? []);
       })
       .catch(() => setConversations([]))
       .finally(() => setLoading(false));
-  }, [queueId]);
+  }, [slug, queueId]);
 
   const filtered = search.trim()
     ? conversations.filter(

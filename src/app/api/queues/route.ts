@@ -1,5 +1,5 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
-import { requireAdmin } from "@/lib/auth/get-profile";
+import { getProfileForCompany, requireAdmin } from "@/lib/auth/get-profile";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -17,16 +17,43 @@ export async function GET(request: Request) {
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const { searchParams } = new URL(request.url);
+  const forInbox = searchParams.get("for_inbox") === "1";
+
   const supabase = await createClient();
+  let allowedQueueIds: string[] | null = null;
+  if (forInbox) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const profile = await getProfileForCompany(companyId);
+      const isFullAccess = profile?.is_owner || (profile?.role === "admin" && !profile?.role_id);
+      if (!isFullAccess) {
+        const { data: assignments } = await supabase
+          .from("queue_assignments")
+          .select("queue_id")
+          .eq("user_id", user.id)
+          .eq("company_id", companyId);
+        allowedQueueIds = (assignments ?? []).map((r: { queue_id: string }) => r.queue_id);
+      }
+    }
+  }
+
   type Row = { id: string; name: string; slug: string; created_at?: string; business_hours?: unknown; special_dates?: unknown };
   let data: Row[] | null = null;
   let error: { message: string } | null = null;
 
-  const res = await supabase
+  let q = supabase
     .from("queues")
     .select("id, name, slug, created_at, business_hours, special_dates")
     .eq("company_id", companyId)
     .order("name");
+  if (allowedQueueIds !== null) {
+    if (allowedQueueIds.length === 0) {
+      return NextResponse.json([]);
+    }
+    q = q.in("id", allowedQueueIds);
+  }
+  const res = await q;
   data = res.data;
   error = res.error;
 

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState, useEffect, useMemo } from "react";
 import {
   MessageSquare,
   Plug,
@@ -10,15 +11,17 @@ import {
   Zap,
   Tag,
   Inbox,
+  UserCog,
 } from "lucide-react";
 
-const tabs = [
+const ALL_TABS = [
   { href: "/conversas", label: "Conversas", icon: MessageSquare },
   { href: "/conexoes", label: "Conexões", icon: Plug },
   { href: "/filas", label: "Filas", icon: Inbox },
   { href: "/contatos", label: "Contatos", icon: Users },
   { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap },
   { href: "/tags", label: "Tags", icon: Tag },
+  { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.manage" as const },
   { href: "/perfil", label: "Perfil", icon: Settings },
 ];
 
@@ -27,6 +30,29 @@ export function AppNavTabs() {
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
+
+  const [permissions, setPermissions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!slug) {
+      setPermissions([]);
+      return;
+    }
+    fetch("/api/auth/permissions", {
+      credentials: "include",
+      headers: { "X-Company-Slug": slug },
+    })
+      .then((r) => r.json())
+      .then((data) => setPermissions(Array.isArray(data?.permissions) ? data.permissions : []))
+      .catch(() => setPermissions([]));
+  }, [slug]);
+
+  const tabs = useMemo(() => {
+    return ALL_TABS.filter((t) => {
+      if (!("requires" in t) || !t.requires) return true;
+      return permissions.includes(t.requires);
+    });
+  }, [permissions]);
 
   if (!base) return null;
 

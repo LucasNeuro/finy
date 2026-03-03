@@ -1,5 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { isQueueOpen } from "@/lib/queue-hours";
+import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 import { NextResponse } from "next/server";
 
 type WebhookPayload = {
@@ -83,18 +83,27 @@ export async function POST(request: Request) {
     const cqList = (channelQueues ?? []) as { queue_id: string; is_default: boolean }[];
     if (cqList.length > 0) {
       const queueIds = cqList.map((cq) => cq.queue_id);
-      let queues: { id: string; business_hours?: unknown; special_dates?: unknown }[] | null = null;
+      let queues: { id: string; business_hours?: BusinessHoursItem[] | null; special_dates?: SpecialDateItem[] | null }[] | null = null;
       const res = await supabase.from("queues").select("id, business_hours, special_dates").in("id", queueIds);
       if (res.error && (res.error.message.includes("special_dates") || res.error.message.includes("column"))) {
         const fallback = await supabase.from("queues").select("id, business_hours").in("id", queueIds);
-        queues = (fallback.data ?? []).map((r) => ({ ...r, special_dates: [] }));
+        queues = (fallback.data ?? []).map((r) => ({ ...r, special_dates: [] as SpecialDateItem[] }));
       } else {
         queues = res.data ?? [];
       }
       const at = new Date(sentAt);
       for (const cq of cqList) {
         const q = (queues ?? []).find((r) => r.id === cq.queue_id);
-        if (q && isQueueOpen({ business_hours: q.business_hours ?? [], special_dates: q.special_dates ?? [] }, at)) {
+        if (
+          q &&
+          isQueueOpen(
+            {
+              business_hours: (q.business_hours ?? []) as BusinessHoursItem[],
+              special_dates: (q.special_dates ?? []) as SpecialDateItem[],
+            },
+            at
+          )
+        ) {
           queueId = cq.queue_id;
           break;
         }
