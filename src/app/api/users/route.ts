@@ -93,6 +93,7 @@ export async function POST(request: Request) {
   }
 
   const userId = newUser.user.id;
+  // Usuários criados pelo ADM na gestão nunca são proprietários; só o primeiro (onboarding) é is_owner.
   const { error: profileError } = await admin
     .from("profiles")
     .insert({
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
       role_id: roleId,
       role: "agent",
       email,
+      is_owner: false,
     });
 
   if (profileError) {

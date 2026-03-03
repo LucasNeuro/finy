@@ -133,11 +133,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: companyError?.message ?? "Failed to create company" }, { status: 500 });
   }
 
+  // Primeiro usuário da empresa (cadastro/onboarding) é sempre proprietário (is_owner = true).
+  const profileEmail = user ? (user.email ?? str(body?.user_email)) : str(body?.user_email);
   const { error: profileError } = await admin.from("profiles").insert({
     user_id: userId,
     company_id: company.id,
     role: "admin",
     is_owner: true,
+    ...(profileEmail && { email: profileEmail }),
   });
   if (profileError) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });

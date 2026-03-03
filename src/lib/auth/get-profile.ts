@@ -11,7 +11,7 @@ export type ProfileRow = {
   role: string;
   role_id: string | null;
   is_owner: boolean;
-  companies: { slug: string; name: string } | null;
+  companies: { slug: string; name: string } | { slug: string; name: string }[] | null;
   roles: RoleRow | null;
 };
 
@@ -26,7 +26,9 @@ export async function getCurrentUserProfiles(): Promise<ProfileRow[]> {
     .eq("user_id", user.id);
 
   if (error) return [];
-  const rows = (data ?? []) as (Omit<ProfileRow, "roles"> & { roles: RoleRow | RoleRow[] | null })[];
+  const rows = (data ?? []) as unknown as (Omit<ProfileRow, "roles"> & {
+    roles: RoleRow | RoleRow[] | null;
+  })[];
   return rows.map((r) => ({
     ...r,
     roles: Array.isArray(r.roles) ? r.roles[0] ?? null : r.roles ?? null,
