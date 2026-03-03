@@ -1,5 +1,6 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
-import { getProfileForCompany } from "@/lib/auth/get-profile";
+import { getProfileForCompany, requirePermission } from "@/lib/auth/get-profile";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -7,6 +8,10 @@ export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const readErr = await requirePermission(companyId, PERMISSIONS.inbox.read);
+  if (readErr) {
+    return NextResponse.json({ error: readErr.error }, { status: readErr.status });
   }
   const { searchParams } = new URL(request.url);
   const queueIdParam = searchParams.get("queue_id") ?? undefined;
@@ -19,14 +24,19 @@ export async function GET(request: Request) {
   let allowedQueueIds: string[] | null = null;
   if (user) {
     const profile = await getProfileForCompany(companyId);
-    const isFullAccess = profile?.is_owner || (profile?.role === "admin" && !profile?.role_id);
-    if (!isFullAccess && profile) {
-      const { data: assignments } = await supabase
-        .from("queue_assignments")
-        .select("queue_id")
-        .eq("user_id", user.id)
-        .eq("company_id", companyId);
-      allowedQueueIds = (assignments ?? []).map((r: { queue_id: string }) => r.queue_id);
+    if (profile) {
+      // Se não tiver permissão para ver todas as conversas (todas as caixas),
+      // restringimos às filas (queues) onde o usuário está atribuído.
+      const seeAllErr = await requirePermission(companyId, PERMISSIONS.inbox.see_all);
+      const canSeeAll = seeAllErr === null;
+      if (!canSeeAll) {
+        const { data: assignments } = await supabase
+          .from("queue_assignments")
+          .select("queue_id")
+          .eq("user_id", user.id)
+          .eq("company_id", companyId);
+        allowedQueueIds = (assignments ?? []).map((r: { queue_id: string }) => r.queue_id);
+      }
     }
   }
 
