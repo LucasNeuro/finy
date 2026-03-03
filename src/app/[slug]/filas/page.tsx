@@ -1,12 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Inbox, Plus, Loader2, Plug, Pencil, Trash2 } from "lucide-react";
+import { Inbox, Plus, Loader2, Plug, Settings, Trash2 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-
-type Queue = { id: string; name: string; slug: string; created_at?: string };
+import { QueueConfigSideOver, type Queue } from "./QueueConfigSideOver";
 
 function getCompanySlug(pathname: string | null): string {
   const fromPath = pathname?.split("/").filter(Boolean)[0] ?? "";
@@ -32,12 +31,7 @@ export default function FilasPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
-  const [editQueue, setEditQueue] = useState<Queue | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editSlug, setEditSlug] = useState("");
-  const [editSaving, setEditSaving] = useState(false);
-  const [editError, setEditError] = useState("");
-
+  const [configQueue, setConfigQueue] = useState<Queue | null>(null);
   const [deleteConfirmQueue, setDeleteConfirmQueue] = useState<Queue | null>(null);
 
   const fetchQueues = useCallback(() => {
@@ -88,14 +82,6 @@ export default function FilasPage() {
     };
   }, [queues, fetchQueueLinkedCount]);
 
-  useEffect(() => {
-    if (editQueue) {
-      setEditName(editQueue.name);
-      setEditSlug(editQueue.slug);
-      setEditError("");
-    }
-  }, [editQueue]);
-
   const createQueue = async () => {
     const n = newName.trim();
     if (!n) {
@@ -132,39 +118,6 @@ export default function FilasPage() {
       setError("Erro de rede.");
     }
     setCreating(false);
-  };
-
-  const updateQueue = async () => {
-    if (!editQueue) return;
-    const name = editName.trim();
-    const slugVal = editSlug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") || editQueue.slug;
-    if (!name) {
-      setEditError("Informe o nome.");
-      return;
-    }
-    setEditError("");
-    setEditSaving(true);
-    try {
-      const r = await fetch(`/api/queues/${encodeURIComponent(editQueue.id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ name, slug: slugVal }),
-        credentials: "include",
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        setEditError(data?.error ?? "Falha ao atualizar");
-        setEditSaving(false);
-        return;
-      }
-      setQueues((prev) =>
-        prev.map((q) => (q.id === editQueue.id ? { ...q, name: data.name, slug: data.slug } : q))
-      );
-      setEditQueue(null);
-    } catch {
-      setEditError("Erro de rede.");
-    }
-    setEditSaving(false);
   };
 
   const deleteQueue = async () => {
@@ -270,11 +223,11 @@ export default function FilasPage() {
                       <div className="flex justify-end gap-1">
                         <button
                           type="button"
-                          onClick={() => setEditQueue(q)}
+                          onClick={() => setConfigQueue(q)}
                           className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
-                          title="Editar"
+                          title="Configurar"
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Settings className="h-4 w-4" />
                         </button>
                         <button
                           type="button"
@@ -329,54 +282,19 @@ export default function FilasPage() {
         </div>
       </SideOver>
 
-      {/* SideOver Editar fila */}
-      <SideOver
-        open={!!editQueue}
-        onClose={() => setEditQueue(null)}
-        title={editQueue ? `Editar: ${editQueue.name}` : "Editar fila"}
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#334155]">Nome</label>
-            <input
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-[#334155]">Slug</label>
-            <input
-              type="text"
-              value={editSlug}
-              onChange={(e) => setEditSlug(e.target.value)}
-              placeholder="ex: comercial"
-              className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 font-mono text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-            />
-            <p className="mt-1 text-xs text-[#64748B]">Somente letras minúsculas, números e hífens.</p>
-          </div>
-          {editError && <p className="text-sm text-red-600">{editError}</p>}
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setEditQueue(null)}
-              className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={updateQueue}
-              disabled={editSaving}
-              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
-            >
-              {editSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Salvar
-            </button>
-          </div>
-        </div>
-      </SideOver>
+      <QueueConfigSideOver
+        open={!!configQueue}
+        onClose={() => setConfigQueue(null)}
+        queue={configQueue}
+        companySlug={slug}
+        onSaved={(updated) => {
+          if (configQueue && updated) {
+            setQueues((prev) =>
+              prev.map((q) => (q.id === configQueue.id ? { ...q, ...updated } : q))
+            );
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={!!deleteConfirmQueue}
