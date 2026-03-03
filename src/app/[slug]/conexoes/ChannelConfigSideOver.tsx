@@ -104,10 +104,12 @@ export function ChannelConfigSideOver({
   const [connectLoading, setConnectLoading] = useState(false);
 
   const [queueId, setQueueId] = useState<string>(channelQueueId ?? "");
+  const [queueSaving, setQueueSaving] = useState(false);
   const [removeQueueConfirm, setRemoveQueueConfirm] = useState<{ queue_id: string; queue_name: string } | null>(null);
   const apiHeaders = companySlug ? { "X-Company-Slug": companySlug } : undefined;
   const [channelQueues, setChannelQueues] = useState<Array<{ queue_id: string; is_default: boolean; queue: { id: string; name: string; slug: string } | null }>>([]);
   const [channelQueuesLoading, setChannelQueuesLoading] = useState(false);
+  const [addQueueId, setAddQueueId] = useState("");
   useEffect(() => {
     setQueueId(channelQueueId ?? "");
   }, [channelQueueId, open]);
@@ -568,7 +570,7 @@ export function ChannelConfigSideOver({
               <h3 className="text-sm font-semibold text-[#334155]">Caixas de entrada (até 8)</h3>
               {channelQueuesLoading && <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />}
             </div>
-            <p className="text-xs text-[#64748B]">Novas conversas deste número entram na caixa padrão. Para vincular ou desvincular caixas, use a página Filas.</p>
+            <p className="text-xs text-[#64748B]">Novas conversas deste número entram na caixa padrão. Vincule até 8 caixas e escolha qual é a padrão.</p>
 
             {channelQueues.length > 0 ? (
               <ul className="space-y-2">
@@ -628,7 +630,59 @@ export function ChannelConfigSideOver({
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-[#94A3B8]">Nenhuma caixa vinculada. Vincule em Filas.</p>
+              <p className="text-sm text-[#94A3B8]">Nenhuma caixa vinculada. Adicione abaixo.</p>
+            )}
+
+            {channelQueues.length < 8 && queues.length > 0 && (
+              <div className="flex flex-wrap items-end gap-2 border-t border-[#E2E8F0] pt-2">
+                <select
+                  value={addQueueId}
+                  onChange={(e) => setAddQueueId(e.target.value)}
+                  className="flex-1 min-w-[160px] rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                >
+                  <option value="">Selecionar caixa…</option>
+                  {queues
+                    .filter((q) => !channelQueues.some((cq) => cq.queue_id === q.id))
+                    .map((q) => (
+                      <option key={q.id} value={q.id}>{q.name}</option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!addQueueId || queueSaving}
+                  onClick={async () => {
+                    if (!addQueueId) return;
+                    setQueueSaving(true);
+                    setError("");
+                    try {
+                      const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/queues`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", ...apiHeaders },
+                        body: JSON.stringify({
+                          queue_id: addQueueId,
+                          is_default: channelQueues.length === 0,
+                        }),
+                        credentials: "include",
+                      });
+                      const data = await r.json();
+                      if (r.ok) {
+                        fetchChannelQueues();
+                        setAddQueueId("");
+                        onSaved?.();
+                      } else {
+                        setError(data?.error ?? "Falha ao adicionar caixa");
+                      }
+                    } catch {
+                      setError("Erro de rede");
+                    }
+                    setQueueSaving(false);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                >
+                  {queueSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Adicionar caixa
+                </button>
+              </div>
             )}
           </div>
         {/* Conectar */}

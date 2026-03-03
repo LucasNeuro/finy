@@ -43,11 +43,16 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const list = (rows ?? []).map((r: { queue_id: string; is_default: boolean; queues: { id: string; name: string; slug: string } | null }) => ({
-    queue_id: r.queue_id,
-    is_default: r.is_default,
-    queue: r.queues ? { id: r.queues.id, name: r.queues.name, slug: r.queues.slug } : null,
-  }));
+  type QueueRef = { id: string; name: string; slug: string };
+  const raw = (rows ?? []) as { queue_id: string; is_default: boolean; queues: QueueRef[] | QueueRef | null }[];
+  const list = raw.map((r) => {
+    const q = Array.isArray(r.queues) ? r.queues[0] : r.queues;
+    return {
+      queue_id: r.queue_id,
+      is_default: r.is_default,
+      queue: q ? { id: q.id, name: q.name, slug: q.slug } : null,
+    };
+  });
 
   return NextResponse.json(list);
 }
