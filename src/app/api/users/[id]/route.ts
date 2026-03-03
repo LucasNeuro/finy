@@ -40,7 +40,7 @@ export async function PATCH(
   }
 
   const admin = createServiceRoleClient();
-  const updates: { role_id?: string; is_active?: boolean; full_name?: string; phone?: string | null; cpf?: string | null; updated_at: string } = {
+  const updates: { role_id?: string; is_active?: boolean; full_name?: string | null; phone?: string | null; cpf?: string | null; updated_at: string } = {
     updated_at: new Date().toISOString(),
   };
   if (body.role_id !== undefined) {

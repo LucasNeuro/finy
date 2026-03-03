@@ -1,4 +1,4 @@
-\"use client\";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
@@ -203,4 +203,3 @@ export default function TicketsPage() {
     </div>
   );
 }
-

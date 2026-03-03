@@ -640,7 +640,7 @@ export default function CargosUsuariosPage() {
                     {users.map((u) => (
                       <tr key={u.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
                         <td className="px-3 py-2.5">
-                          <div className="font-medium text-[#1E293B]">{u.full_name || u.email ?? "—"}</div>
+                          <div className="font-medium text-[#1E293B]">{u.full_name || u.email || "—"}</div>
                           {u.full_name && u.email && <div className="text-xs text-[#64748B]">{u.email}</div>}
                           {u.is_owner && (
                             <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">

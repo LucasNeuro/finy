@@ -12,11 +12,12 @@ import {
   Tag,
   Inbox,
   UserCog,
+  Ticket,
 } from "lucide-react";
 
 const ALL_TABS = [
   { href: "/conversas", label: "Conversas", icon: MessageSquare },
-  { href: "/tickets", label: "Tickets", icon: Inbox, requires: "inbox.see_all" as const },
+  { href: "/tickets", label: "Tickets", icon: Ticket, requires: "inbox.see_all" as const },
   { href: "/conexoes", label: "Conexões", icon: Plug },
   { href: "/filas", label: "Filas", icon: Inbox },
   { href: "/contatos", label: "Contatos", icon: Users },
