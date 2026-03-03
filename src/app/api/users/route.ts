@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: profiles, error: profError } = await supabase
     .from("profiles")
-    .select("id, user_id, company_id, role_id, email, is_owner, is_active, created_at, roles(id, name)")
+    .select("id, user_id, company_id, role_id, email, full_name, phone, cpf, is_owner, is_active, created_at, roles(id, name)")
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
 
@@ -34,10 +34,13 @@ export async function GET(request: Request) {
     return acc;
   }, {});
 
-  const list = (profiles ?? []).map((p: { id: string; user_id: string; company_id: string; role_id: string | null; email: string | null; is_owner: boolean; is_active?: boolean; created_at: string; roles: { id: string; name: string } | { id: string; name: string }[] | null }) => ({
+  const list = (profiles ?? []).map((p: { id: string; user_id: string; company_id: string; role_id: string | null; email: string | null; full_name: string | null; phone: string | null; cpf: string | null; is_owner: boolean; is_active?: boolean; created_at: string; roles: { id: string; name: string } | { id: string; name: string }[] | null }) => ({
     id: p.id,
     user_id: p.user_id,
     email: p.email ?? undefined,
+    full_name: p.full_name ?? undefined,
+    phone: p.phone ?? undefined,
+    cpf: p.cpf ?? undefined,
     is_owner: p.is_owner,
     is_active: p.is_active !== false,
     role_id: p.role_id ?? undefined,
@@ -56,7 +59,7 @@ export async function POST(request: Request) {
   const err = await requirePermission(companyId, PERMISSIONS.users.manage);
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
 
-  let body: { email?: string; password?: string; full_name?: string; role_id?: string; queue_ids?: string[] };
+  let body: { email?: string; password?: string; full_name?: string; phone?: string; cpf?: string; role_id?: string; queue_ids?: string[] };
   try {
     body = await request.json();
   } catch {
@@ -66,6 +69,8 @@ export async function POST(request: Request) {
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   const fullName = typeof body?.full_name === "string" ? body.full_name.trim() : "";
+  const phone = typeof body?.phone === "string" ? body.phone.replace(/\D/g, "").trim() || null : null;
+  const cpf = typeof body?.cpf === "string" ? body.cpf.replace(/\D/g, "").trim() || null : null;
   const roleId = typeof body?.role_id === "string" ? body.role_id.trim() : null;
   const queueIds = Array.isArray(body?.queue_ids) ? body.queue_ids.filter((id): id is string => typeof id === "string") : [];
 
@@ -94,7 +99,7 @@ export async function POST(request: Request) {
 
   const userId = newUser.user.id;
   // Usuários criados pelo ADM na gestão nunca são proprietários; só o primeiro (onboarding) é is_owner.
-  const { error: profileError } = await admin
+  const { data: insertedProfile, error: profileError } = await admin
     .from("profiles")
     .insert({
       user_id: userId,
@@ -103,7 +108,12 @@ export async function POST(request: Request) {
       role: "agent",
       email,
       is_owner: false,
-    });
+      ...(fullName && { full_name: fullName }),
+      ...(phone && { phone: phone }),
+      ...(cpf && { cpf: cpf }),
+    })
+    .select("id")
+    .single();
 
   if (profileError) {
     return NextResponse.json({ error: profileError.message ?? "Falha ao criar perfil" }, { status: 500 });
@@ -117,5 +127,9 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, user_id: userId });
+  return NextResponse.json({
+    ok: true,
+    user_id: userId,
+    profile_id: insertedProfile?.id ?? undefined,
+  });
 }

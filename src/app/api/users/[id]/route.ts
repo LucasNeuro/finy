@@ -16,7 +16,7 @@ export async function PATCH(
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
 
   const { id } = await context.params;
-  let body: { role_id?: string; queue_ids?: string[]; is_active?: boolean };
+  let body: { role_id?: string; queue_ids?: string[]; is_active?: boolean; full_name?: string; phone?: string; cpf?: string };
   try {
     body = await request.json();
   } catch {
@@ -40,7 +40,7 @@ export async function PATCH(
   }
 
   const admin = createServiceRoleClient();
-  const updates: { role_id?: string; is_active?: boolean; updated_at: string } = {
+  const updates: { role_id?: string; is_active?: boolean; full_name?: string; phone?: string | null; cpf?: string | null; updated_at: string } = {
     updated_at: new Date().toISOString(),
   };
   if (body.role_id !== undefined) {
@@ -51,6 +51,9 @@ export async function PATCH(
   if (body.is_active !== undefined && !row.is_owner) {
     updates.is_active = !!body.is_active;
   }
+  if (body.full_name !== undefined) updates.full_name = body.full_name?.trim() || null;
+  if (body.phone !== undefined) updates.phone = typeof body.phone === "string" ? body.phone.replace(/\D/g, "").trim() || null : null;
+  if (body.cpf !== undefined) updates.cpf = typeof body.cpf === "string" ? body.cpf.replace(/\D/g, "").trim() || null : null;
   if (Object.keys(updates).length > 1) {
     const { error: upErr } = await admin.from("profiles").update(updates).eq("id", row.id);
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });

@@ -26,6 +26,9 @@ type UserRow = {
   id: string;
   user_id: string;
   email?: string;
+  full_name?: string;
+  phone?: string;
+  cpf?: string;
   is_owner: boolean;
   is_active?: boolean;
   role_id?: string;
@@ -57,8 +60,12 @@ export default function CargosUsuariosPage() {
   const [userSideOverTab, setUserSideOverTab] = useState<"lista" | "form">("lista");
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
   const [userEmail, setUserEmail] = useState("");
+  const [userFullName, setUserFullName] = useState("");
+  const [userPhone, setUserPhone] = useState("");
+  const [userCpf, setUserCpf] = useState("");
   const [userPassword, setUserPassword] = useState("");
   const [userShowPassword, setUserShowPassword] = useState(false);
+  const [userSendCredentialsWhatsApp, setUserSendCredentialsWhatsApp] = useState(false);
   const [userRoleId, setUserRoleId] = useState("");
   const [userQueueIds, setUserQueueIds] = useState<string[]>([]);
   const [userSaving, setUserSaving] = useState(false);
@@ -170,8 +177,12 @@ export default function CargosUsuariosPage() {
   const openNewUser = () => {
     setEditingUser(null);
     setUserEmail("");
+    setUserFullName("");
+    setUserPhone("");
+    setUserCpf("");
     setUserPassword("");
     setUserShowPassword(false);
+    setUserSendCredentialsWhatsApp(false);
     setUserRoleId(roles[0]?.id ?? "");
     setUserQueueIds([]);
     setError("");
@@ -182,6 +193,9 @@ export default function CargosUsuariosPage() {
   const openEditUser = (u: UserRow) => {
     setEditingUser(u);
     setUserEmail(u.email ?? "");
+    setUserFullName(u.full_name ?? "");
+    setUserPhone(u.phone ?? "");
+    setUserCpf(u.cpf ?? "");
     setUserPassword("");
     setUserShowPassword(false);
     setUserRoleId(u.role_id ?? roles[0]?.id ?? "");
@@ -219,7 +233,13 @@ export default function CargosUsuariosPage() {
     setUserSaving(true);
     try {
       if (editingUser) {
-        const body: { role_id: string; queue_ids: string[]; is_active?: boolean } = { role_id: userRoleId, queue_ids: userQueueIds };
+        const body: { role_id: string; queue_ids: string[]; full_name?: string; phone?: string; cpf?: string } = {
+          role_id: userRoleId,
+          queue_ids: userQueueIds,
+          full_name: userFullName.trim() || undefined,
+          phone: userPhone.trim() || undefined,
+          cpf: userCpf.replace(/\D/g, "").trim() || undefined,
+        };
         const r = await fetch(`/api/users/${editingUser.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json", ...apiHeaders },
@@ -250,12 +270,21 @@ export default function CargosUsuariosPage() {
           setUserSaving(false);
           return;
         }
+        const sendCredentials = userSendCredentialsWhatsApp;
+        if (sendCredentials && !userPhone.trim().replace(/\D/g, "")) {
+          setError("Para enviar credenciais por WhatsApp, informe o telefone do usuário.");
+          setUserSaving(false);
+          return;
+        }
         const r = await fetch("/api/users", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...apiHeaders },
           body: JSON.stringify({
             email,
             password,
+            full_name: userFullName.trim() || undefined,
+            phone: userPhone.trim().replace(/\D/g, "") || undefined,
+            cpf: userCpf.replace(/\D/g, "").trim() || undefined,
             role_id: userRoleId,
             queue_ids: userQueueIds,
           }),
@@ -266,6 +295,24 @@ export default function CargosUsuariosPage() {
           setError(data?.error ?? "Falha ao criar usuário");
           setUserSaving(false);
           return;
+        }
+        if (sendCredentials && data?.user_id && userPhone.trim()) {
+          const sendR = await fetch("/api/users/send-credentials", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({
+              user_id: data.user_id,
+              password,
+              phone: userPhone.trim().replace(/\D/g, ""),
+            }),
+            credentials: "include",
+          });
+          if (!sendR.ok) {
+            const sendData = await sendR.json().catch(() => ({}));
+            setError(sendData?.error ?? "Usuário criado, mas falha ao enviar credenciais por WhatsApp.");
+            setUserSaving(false);
+            return;
+          }
         }
       }
       fetchUsers();
@@ -582,7 +629,8 @@ export default function CargosUsuariosPage() {
                 <table className="w-full min-w-[520px]">
                   <thead>
                     <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">E-mail</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Nome / E-mail</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">WhatsApp</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Cargo</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Ativo</th>
                       <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-[#64748B]">Ações</th>
@@ -592,13 +640,15 @@ export default function CargosUsuariosPage() {
                     {users.map((u) => (
                       <tr key={u.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
                         <td className="px-3 py-2.5">
-                          <span className="font-medium text-[#1E293B]">{u.email ?? "—"}</span>
+                          <div className="font-medium text-[#1E293B]">{u.full_name || u.email ?? "—"}</div>
+                          {u.full_name && u.email && <div className="text-xs text-[#64748B]">{u.email}</div>}
                           {u.is_owner && (
-                            <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                            <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
                               Proprietário
                             </span>
                           )}
                         </td>
+                        <td className="px-3 py-2.5 text-sm text-[#64748B]">{u.phone ? `+55 ${u.phone}` : "—"}</td>
                         <td className="px-3 py-2.5 text-sm text-[#64748B]">{u.role_name ?? "—"}</td>
                         <td className="px-3 py-2.5">
                           {u.is_owner ? (
@@ -654,6 +704,16 @@ export default function CargosUsuariosPage() {
           {userSideOverTab === "form" && (
             <div className="space-y-4">
               <div>
+                <label className="mb-1 block text-sm font-medium text-[#334155]">Nome completo</label>
+                <input
+                  type="text"
+                  value={userFullName}
+                  onChange={(e) => setUserFullName(e.target.value)}
+                  placeholder="Ex: Maria Silva"
+                  className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                />
+              </div>
+              <div>
                 <label className="mb-1 block text-sm font-medium text-[#334155]">E-mail</label>
                 <input
                   type="email"
@@ -662,6 +722,28 @@ export default function CargosUsuariosPage() {
                   placeholder="usuario@empresa.com"
                   disabled={!!editingUser}
                   className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange disabled:bg-[#F1F5F9] disabled:text-[#64748B]"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-[#334155]">Telefone WhatsApp</label>
+                <input
+                  type="tel"
+                  value={userPhone}
+                  onChange={(e) => setUserPhone(e.target.value)}
+                  placeholder="Ex: 11999998888 (apenas números)"
+                  className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                />
+                <p className="mt-1 text-xs text-[#64748B]">Para enviar login e senha por WhatsApp ao criar o usuário.</p>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-[#334155]">CPF</label>
+                <input
+                  type="text"
+                  value={userCpf}
+                  onChange={(e) => setUserCpf(e.target.value)}
+                  placeholder="Apenas números"
+                  maxLength={14}
+                  className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
                 />
               </div>
               {!editingUser ? (
@@ -687,6 +769,15 @@ export default function CargosUsuariosPage() {
                     </button>
                   </div>
                 </div>
+                <label className="mt-2 flex items-center gap-2 text-sm text-[#334155]">
+                  <input
+                    type="checkbox"
+                    checked={userSendCredentialsWhatsApp}
+                    onChange={(e) => setUserSendCredentialsWhatsApp(e.target.checked)}
+                    className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                  />
+                  Enviar credenciais de acesso por WhatsApp (login e senha) para o telefone informado
+                </label>
               ) : (
                 <p className="text-xs text-[#64748B]">Deixe a senha em branco para não alterar. Para redefinir, use a opção de recuperação ou altere em edição (futuro).</p>
               )}
