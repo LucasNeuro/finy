@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Inbox, Plus, Loader2, Plug, Link2, Star, Trash2 } from "lucide-react";
+import { Inbox, Plus, Loader2, Plug, Link2, Star, Trash2, ChevronRight, Smartphone } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SideOver } from "@/components/SideOver";
@@ -11,9 +11,19 @@ type Queue = { id: string; name: string; slug: string; created_at?: string };
 type Channel = { id: string; name: string; queue_id?: string | null };
 type LinkedChannel = { channel_id: string; channel_name: string; is_default: boolean };
 
+function getCompanySlug(pathname: string | null): string {
+  const fromPath = pathname?.split("/").filter(Boolean)[0] ?? "";
+  if (fromPath && !["login", "api", "onboarding", "auth"].includes(fromPath)) return fromPath;
+  if (typeof document !== "undefined") {
+    const match = document.cookie.match(/\bclicvend_slug=([^;]+)/);
+    if (match?.[1]) return match[1].trim();
+  }
+  return fromPath;
+}
+
 export default function FilasPage() {
   const pathname = usePathname();
-  const slug = pathname?.split("/").filter(Boolean)[0] ?? "";
+  const slug = getCompanySlug(pathname);
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
   const [queues, setQueues] = useState<Queue[]>([]);
@@ -367,132 +377,177 @@ export default function FilasPage() {
         </div>
       </SideOver>
 
-      {/* SideOver Vincular a números */}
+      {/* SideOver Vincular a números – fluxo em etapas */}
       <SideOver
         open={!!linkSideOverQueue}
         onClose={() => { setLinkSideOverQueue(null); setLinkError(""); }}
-        title={linkSideOverQueue ? `Caixa: ${linkSideOverQueue.name} – Vincular a números` : "Vincular a números"}
-        width={520}
+        title={linkSideOverQueue ? `Vincular caixa a números` : "Vincular a números"}
+        width={540}
       >
         <div className="space-y-6">
-          <p className="text-sm text-[#64748B]">
-            Cada <strong>número (instância WhatsApp)</strong> pode ter até <strong>8 caixas</strong> e uma caixa padrão.
-            Abaixo: números que já usam esta caixa e números aos quais você pode vincular.
-          </p>
           {linkError && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-              {linkError}
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <p className="font-medium">Não autorizado</p>
+              <p className="mt-1 text-red-700">
+                Acesse pela URL da empresa (ex: /sua-empresa/filas). Se o problema continuar, faça login novamente.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setLinkError("");
+                  setLinkLoading(true);
+                  if (linkSideOverQueue) {
+                    Promise.all([
+                      fetchQueueLinked(linkSideOverQueue.id),
+                      fetchChannels(),
+                    ])
+                      .then(([linked]) => setLinkedChannels(linked ?? []))
+                      .catch(() => setLinkedChannels([]))
+                      .finally(() => setLinkLoading(false));
+                  }
+                }}
+                className="mt-3 rounded-lg bg-red-100 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-200"
+              >
+                Tentar novamente
+              </button>
             </div>
           )}
+
           {linkLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
+            <div className="flex flex-col items-center justify-center py-10">
+              <Loader2 className="h-10 w-10 animate-spin text-clicvend-orange" />
+              <span className="mt-3 text-sm text-[#64748B]">Carregando números…</span>
             </div>
-          ) : (
+          ) : linkSideOverQueue ? (
             <>
-              {/* Seção: Números que já usam esta caixa */}
-              <div>
-                <h3 className="mb-2 text-sm font-semibold text-[#1E293B]">
-                  Números que já usam esta caixa
-                </h3>
-                {linkedChannels.length > 0 ? (
-                  <ul className="space-y-2">
-                    {linkedChannels.map((link) => {
-                      const loadingThis = linkActionLoading === link.channel_id;
-                      return (
-                        <li
-                          key={link.channel_id}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2"
-                        >
-                          <span className="text-sm font-medium text-[#1E293B]">{link.channel_name}</span>
-                          <div className="flex items-center gap-1">
-                            {link.is_default ? (
-                              <span className="inline-flex items-center gap-1 rounded bg-clicvend-orange/15 px-1.5 py-0.5 text-xs font-medium text-clicvend-orange">
-                                <Star className="h-3 w-3 fill-current" /> Padrão
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setDefaultQueueOnChannel(link.channel_id)}
-                                disabled={!!linkActionLoading}
-                                className="rounded p-1.5 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange disabled:opacity-50"
-                                title="Definir como padrão"
-                              >
-                                {loadingThis ? <Loader2 className="h-4 w-4 animate-spin" /> : <Star className="h-4 w-4" />}
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setRemoveConfirm({ channelId: link.channel_id, channelName: link.channel_name })}
-                              disabled={!!linkActionLoading}
-                              className="rounded p-1.5 text-[#64748B] hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-                              title="Remover caixa deste número"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="rounded-lg border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-3 py-4 text-center text-sm text-[#94A3B8]">
-                    Nenhum número vinculado ainda. Use a seção abaixo para vincular.
-                  </p>
-                )}
+              {/* Step 1: Caixa selecionada */}
+              <div className="flex items-center gap-3 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-sm font-bold text-white">1</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium uppercase tracking-wider text-[#64748B]">Caixa</p>
+                  <p className="font-semibold text-[#1E293B]">{linkSideOverQueue.name}</p>
+                </div>
+                <ChevronRight className="h-5 w-5 shrink-0 text-[#94A3B8]" />
               </div>
 
-              {/* Seção: Vincular esta caixa a um número */}
-              <div>
-                <h3 className="mb-2 text-sm font-semibold text-[#1E293B]">
-                  Vincular esta caixa a um número
-                </h3>
-                <p className="mb-3 text-xs text-[#64748B]">
-                  Escolha um número (instância) abaixo e clique em <strong>Vincular</strong> para que esta caixa passe a receber conversas desse número.
-                </p>
-                {channels.filter((ch) => !linkedChannels.some((c) => c.channel_id === ch.id)).length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-3 py-4 text-center text-sm text-[#94A3B8]">
-                    {channels.length === 0 ? (
-                      <>
-                        Nenhuma instância cadastrada.{" "}
-                        <Link href={slug ? `/${slug}/conexoes` : "/conexoes"} className="font-medium text-clicvend-orange hover:underline">
-                          Crie um número em Conexões
-                        </Link>{" "}
-                        primeiro.
-                      </>
-                    ) : (
-                      "Todos os números já têm esta caixa vinculada."
-                    )}
+              {/* Step 2: Números que já usam esta caixa */}
+              <div className="rounded-xl border border-[#E2E8F0] bg-white">
+                <div className="flex items-center gap-3 border-b border-[#E2E8F0] px-4 py-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1E293B] text-sm font-bold text-white">2</span>
+                  <div>
+                    <h3 className="font-semibold text-[#1E293B]">Números que já usam esta caixa</h3>
+                    <p className="text-xs text-[#64748B]">Defina o padrão ou remova o vínculo.</p>
                   </div>
-                ) : (
-                  <ul className="space-y-2">
-                    {channels
-                      .filter((ch) => !linkedChannels.some((c) => c.channel_id === ch.id))
-                      .map((ch) => {
-                        const loadingThis = linkActionLoading === ch.id;
+                </div>
+                <div className="p-4">
+                  {linkedChannels.length > 0 ? (
+                    <ul className="space-y-2">
+                      {linkedChannels.map((link) => {
+                        const loadingThis = linkActionLoading === link.channel_id;
                         return (
                           <li
-                            key={ch.id}
-                            className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2.5 shadow-sm"
+                            key={link.channel_id}
+                            className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5"
                           >
-                            <span className="text-sm font-medium text-[#1E293B]">{ch.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => addQueueToChannel(ch.id)}
-                              disabled={!!linkActionLoading}
-                              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
-                            >
-                              {loadingThis ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-                              Vincular
-                            </button>
+                            <span className="flex items-center gap-2 text-sm font-medium text-[#1E293B]">
+                              <Smartphone className="h-4 w-4 text-[#64748B]" />
+                              {link.channel_name}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {link.is_default ? (
+                                <span className="inline-flex items-center gap-1 rounded bg-clicvend-orange/15 px-2 py-0.5 text-xs font-medium text-clicvend-orange">
+                                  <Star className="h-3 w-3 fill-current" /> Padrão
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setDefaultQueueOnChannel(link.channel_id)}
+                                  disabled={!!linkActionLoading}
+                                  className="rounded-lg px-2 py-1 text-xs font-medium text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange disabled:opacity-50"
+                                  title="Definir como padrão"
+                                >
+                                  {loadingThis ? <Loader2 className="h-4 w-4 animate-spin" /> : "Definir padrão"}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setRemoveConfirm({ channelId: link.channel_id, channelName: link.channel_name })}
+                                disabled={!!linkActionLoading}
+                                className="rounded-lg px-2 py-1 text-xs font-medium text-[#64748B] hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                                title="Remover"
+                              >
+                                Remover
+                              </button>
+                            </div>
                           </li>
                         );
                       })}
-                  </ul>
-                )}
+                    </ul>
+                  ) : (
+                    <p className="rounded-lg border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-4 py-5 text-center text-sm text-[#94A3B8]">
+                      Nenhum número vinculado. Use a etapa 3 para vincular.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Step 3: Vincular esta caixa a um número */}
+              <div className="rounded-xl border border-[#E2E8F0] bg-white">
+                <div className="flex items-center gap-3 border-b border-[#E2E8F0] px-4 py-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-sm font-bold text-white">3</span>
+                  <div>
+                    <h3 className="font-semibold text-[#1E293B]">Vincular a mais números</h3>
+                    <p className="text-xs text-[#64748B]">Cada número pode ter até 8 caixas. Clique em Vincular.</p>
+                  </div>
+                </div>
+                <div className="p-4">
+                  {channels.filter((ch) => !linkedChannels.some((c) => c.channel_id === ch.id)).length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-4 py-5 text-center text-sm text-[#94A3B8]">
+                      {channels.length === 0 ? (
+                        <>
+                          Nenhuma instância cadastrada.{" "}
+                          <Link href={slug ? `/${slug}/conexoes` : "/conexoes"} className="font-medium text-clicvend-orange hover:underline">
+                            Crie um número em Conexões
+                          </Link>{" "}
+                          primeiro.
+                        </>
+                      ) : (
+                        "Todos os números já têm esta caixa vinculada."
+                      )}
+                    </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {channels
+                        .filter((ch) => !linkedChannels.some((c) => c.channel_id === ch.id))
+                        .map((ch) => {
+                          const loadingThis = linkActionLoading === ch.id;
+                          return (
+                            <li
+                              key={ch.id}
+                              className="flex items-center justify-between gap-2 rounded-lg border border-[#E2E8F0] bg-[#FAFBFC] px-3 py-2.5"
+                            >
+                              <span className="flex items-center gap-2 text-sm font-medium text-[#1E293B]">
+                                <Smartphone className="h-4 w-4 text-[#64748B]" />
+                                {ch.name}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => addQueueToChannel(ch.id)}
+                                disabled={!!linkActionLoading}
+                                className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-clicvend-orange-dark disabled:opacity-50"
+                              >
+                                {loadingThis ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                                Vincular
+                              </button>
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  )}
+                </div>
               </div>
             </>
-          )}
+          ) : null}
         </div>
       </SideOver>
 

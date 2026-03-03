@@ -16,20 +16,21 @@ export async function getSlugFromCookie(): Promise<string | null> {
 }
 
 /**
- * Obtém company_id: primeiro do cookie, depois do header X-Company-Slug (fallback quando o cookie não vem na requisição).
- * Use em Route Handlers passando o request para evitar 401 em chamadas da interface.
+ * Obtém company_id: primeiro do header X-Company-Slug (enviado pela interface), depois do cookie.
+ * Assim evitamos 401 quando o cookie não chega na requisição (ex.: em produção).
  */
 export async function getCompanyIdFromRequest(request: Request): Promise<string | null> {
+  const slugFromHeader = request.headers.get(HEADER_COMPANY_SLUG)?.trim().toLowerCase();
+  if (slugFromHeader) {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("company_links")
+      .select("company_id")
+      .eq("slug", slugFromHeader)
+      .eq("is_active", true)
+      .single();
+    if (data?.company_id) return data.company_id;
+  }
   const fromCookie = await getCompanyIdFromCookie();
-  if (fromCookie) return fromCookie;
-  const slug = request.headers.get(HEADER_COMPANY_SLUG)?.trim().toLowerCase();
-  if (!slug) return null;
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("company_links")
-    .select("company_id")
-    .eq("slug", slug)
-    .eq("is_active", true)
-    .single();
-  return data?.company_id ?? null;
+  return fromCookie;
 }
