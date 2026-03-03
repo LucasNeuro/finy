@@ -2,6 +2,12 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { NextResponse } from "next/server";
 
+/**
+ * Upload de foto de perfil para o Supabase Storage (opcional).
+ * Na aba Perfil da conexão, o usuário pode enviar arquivo direto como base64 (sem usar este endpoint)
+ * ou colar uma URL. Este endpoint existe para quem quiser guardar a imagem no bucket e usar a URL.
+ * Bucket: channel-profile-images, path: {companyId}/{uuid}.{ext}
+ */
 const BUCKET = "channel-profile-images";
 const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];

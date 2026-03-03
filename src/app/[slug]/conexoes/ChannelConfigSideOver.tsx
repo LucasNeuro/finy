@@ -444,21 +444,31 @@ export function ChannelConfigSideOver({
     }
   };
 
+  const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
+  const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
   const [uploadingImage, setUploadingImage] = useState(false);
   const handleImageUpload = useCallback(async (file: File) => {
-    const formData = new FormData();
-    formData.append("file", file);
+    const type = file.type?.toLowerCase();
+    if (!type || !ALLOWED_IMAGE_TYPES.includes(type)) {
+      setError("Use JPEG, PNG, GIF ou WebP.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      setError("Imagem muito grande. Máximo 5MB.");
+      return;
+    }
     setUploadingImage(true);
+    setError("");
     try {
-      const r = await fetch("/api/upload/channel-profile-image", { method: "POST", body: formData, credentials: "include", headers: apiHeaders });
-      const data = await r.json();
-      if (r.ok && data?.url) {
-        setProfileImage(data.url);
-      } else {
-        setError(data?.error ?? "Falha ao enviar imagem");
-      }
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
+        reader.readAsDataURL(file);
+      });
+      setProfileImage(dataUrl);
     } catch {
-      setError("Erro ao enviar imagem");
+      setError("Erro ao ler imagem. Tente outra ou use uma URL.");
     } finally {
       setUploadingImage(false);
     }
