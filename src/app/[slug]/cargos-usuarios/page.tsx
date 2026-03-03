@@ -747,37 +747,39 @@ export default function CargosUsuariosPage() {
                 />
               </div>
               {!editingUser ? (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-[#334155]">Senha inicial</label>
-                  <p className="mb-1.5 text-xs text-[#64748B]">Pode colar a senha para compartilhar com o usuário. Use &quot;Mostrar senha&quot; para copiar.</p>
-                  <div className="flex gap-2">
-                    <input
-                      type={userShowPassword ? "text" : "password"}
-                      value={userPassword}
-                      onChange={(e) => setUserPassword(e.target.value)}
-                      placeholder="Mín. 6 caracteres (pode colar)"
-                      autoComplete="new-password"
-                      className="flex-1 rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setUserShowPassword((p) => !p)}
-                      className="rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#64748B] hover:bg-[#F8FAFC]"
-                      title={userShowPassword ? "Ocultar senha" : "Mostrar senha"}
-                    >
-                      {userShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
+                <>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-[#334155]">Senha inicial</label>
+                    <p className="mb-1.5 text-xs text-[#64748B]">Pode colar a senha para compartilhar com o usuário. Use &quot;Mostrar senha&quot; para copiar.</p>
+                    <div className="flex gap-2">
+                      <input
+                        type={userShowPassword ? "text" : "password"}
+                        value={userPassword}
+                        onChange={(e) => setUserPassword(e.target.value)}
+                        placeholder="Mín. 6 caracteres (pode colar)"
+                        autoComplete="new-password"
+                        className="flex-1 rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setUserShowPassword((p) => !p)}
+                        className="rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#64748B] hover:bg-[#F8FAFC]"
+                        title={userShowPassword ? "Ocultar senha" : "Mostrar senha"}
+                      >
+                        {userShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <label className="mt-2 flex items-center gap-2 text-sm text-[#334155]">
-                  <input
-                    type="checkbox"
-                    checked={userSendCredentialsWhatsApp}
-                    onChange={(e) => setUserSendCredentialsWhatsApp(e.target.checked)}
-                    className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
-                  />
-                  Enviar credenciais de acesso por WhatsApp (login e senha) para o telefone informado
-                </label>
+                  <label className="mt-2 flex items-center gap-2 text-sm text-[#334155]">
+                    <input
+                      type="checkbox"
+                      checked={userSendCredentialsWhatsApp}
+                      onChange={(e) => setUserSendCredentialsWhatsApp(e.target.checked)}
+                      className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                    />
+                    Enviar credenciais de acesso por WhatsApp (login e senha) para o telefone informado
+                  </label>
+                </>
               ) : (
                 <p className="text-xs text-[#64748B]">Deixe a senha em branco para não alterar. Para redefinir, use a opção de recuperação ou altere em edição (futuro).</p>
               )}
