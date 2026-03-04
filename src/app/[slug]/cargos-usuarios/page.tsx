@@ -29,6 +29,7 @@ type UserRow = {
   full_name?: string;
   phone?: string;
   cpf?: string;
+  avatar_url?: string;
   is_owner: boolean;
   is_active?: boolean;
   role_id?: string;
@@ -70,6 +71,8 @@ export default function CargosUsuariosPage() {
   const [userQueueIds, setUserQueueIds] = useState<string[]>([]);
   const [userSaving, setUserSaving] = useState(false);
   const [userToggleActiveId, setUserToggleActiveId] = useState<string | null>(null);
+  const [userAvatarUrl, setUserAvatarUrl] = useState("");
+  const [userFetchingWhatsProfile, setUserFetchingWhatsProfile] = useState(false);
 
   const [deleteRoleConfirm, setDeleteRoleConfirm] = useState<Role | null>(null);
 
@@ -185,6 +188,7 @@ export default function CargosUsuariosPage() {
     setUserSendCredentialsWhatsApp(false);
     setUserRoleId(roles[0]?.id ?? "");
     setUserQueueIds([]);
+    setUserAvatarUrl("");
     setError("");
     setUserSideOverTab("form");
     setUserSideOverOpen(true);
@@ -198,6 +202,7 @@ export default function CargosUsuariosPage() {
     setUserCpf(u.cpf ?? "");
     setUserPassword("");
     setUserShowPassword(false);
+    setUserAvatarUrl(u.avatar_url ?? "");
     setUserRoleId(u.role_id ?? roles[0]?.id ?? "");
     setUserQueueIds(u.queues?.map((q) => q.id) ?? []);
     setError("");
@@ -287,6 +292,7 @@ export default function CargosUsuariosPage() {
             cpf: userCpf.replace(/\D/g, "").trim() || undefined,
             role_id: userRoleId,
             queue_ids: userQueueIds,
+            avatar_url: userAvatarUrl || undefined,
           }),
           credentials: "include",
         });
@@ -734,6 +740,60 @@ export default function CargosUsuariosPage() {
                   className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
                 />
                 <p className="mt-1 text-xs text-[#64748B]">Para enviar login e senha por WhatsApp ao criar o usuário.</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const raw = userPhone.trim();
+                      if (!raw) {
+                        setError("Informe o telefone WhatsApp (apenas números) para buscar os dados.");
+                        return;
+                      }
+                      setError("");
+                      setUserFetchingWhatsProfile(true);
+                      try {
+                        const r = await fetch("/api/users/whatsapp-profile", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", ...apiHeaders },
+                          body: JSON.stringify({ phone: raw }),
+                          credentials: "include",
+                        });
+                        const data = await r.json();
+                        if (!r.ok) {
+                          setError(data?.error ?? "Falha ao buscar dados no WhatsApp.");
+                          return;
+                        }
+                        if (data.full_name && !userFullName) {
+                          setUserFullName(data.full_name);
+                        }
+                        if (data.phone && !userPhone) {
+                          setUserPhone(data.phone);
+                        }
+                        if (data.avatar_url) {
+                          setUserAvatarUrl(data.avatar_url);
+                        }
+                      } catch {
+                        setError("Erro de rede ao consultar WhatsApp.");
+                      } finally {
+                        setUserFetchingWhatsProfile(false);
+                      }
+                    }}
+                    disabled={userFetchingWhatsProfile || !userPhone.trim()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
+                  >
+                    {userFetchingWhatsProfile ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : null}
+                    Buscar dados no WhatsApp
+                  </button>
+                  {userAvatarUrl && (
+                    <img
+                      src={userAvatarUrl}
+                      alt="Foto de perfil do usuário"
+                      className="h-8 w-8 rounded-full object-cover ring-2 ring-[#E2E8F0]"
+                    />
+                  )}
+                </div>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-[#334155]">CPF</label>
