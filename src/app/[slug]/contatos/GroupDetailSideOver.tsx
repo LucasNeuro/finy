@@ -12,6 +12,8 @@ export type Group = {
   topic: string | null;
   invite_link: string | null;
   synced_at: string;
+  /** Quando o número saiu do grupo; null = ainda no grupo */
+  left_at?: string | null;
 };
 
 type GroupParticipant = {
@@ -154,15 +156,24 @@ export function GroupDetailSideOver({
                     <dt className="text-[#64748B] font-medium flex items-center gap-1">
                       <Link2 className="h-3.5 w-3.5" /> Link de convite
                     </dt>
-                    <dd className="mt-1 break-all">
+                    <dd className="mt-1 flex items-center gap-2 flex-wrap">
                       <a
                         href={inviteLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-clicvend-orange hover:underline"
+                        className="text-clicvend-orange hover:underline break-all"
                       >
                         {inviteLink}
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(inviteLink);
+                        }}
+                        className="shrink-0 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+                      >
+                        Copiar link
+                      </button>
                     </dd>
                   </div>
                 ) : null}

@@ -9,7 +9,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Settings } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Settings, Unlock } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContactDetailSideOver, type Contact } from "./ContactDetailSideOver";
@@ -23,16 +23,22 @@ const PAGE_SIZE = 25;
 function BlockedRow({
   jid,
   channelId,
+  contactInfo,
   apiHeaders,
   onUnblock,
 }: {
   jid: string;
   channelId: string;
+  contactInfo: { contact_name: string | null; first_name: string | null; phone: string | null } | null;
   apiHeaders: Record<string, string> | undefined;
   onUnblock: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const number = jid.replace(/@s\.whatsapp\.net$/, "");
+  const displayName = contactInfo
+    ? (contactInfo.contact_name || contactInfo.first_name || "").trim() || "—"
+    : "—";
+  const displayPhone = contactInfo?.phone?.trim() || number || jid;
   const handleUnblock = async () => {
     setLoading(true);
     try {
@@ -49,15 +55,18 @@ function BlockedRow({
   };
   return (
     <tr className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
-      <td className="px-4 py-3 text-sm text-[#1E293B]">{jid}</td>
+      <td className="px-4 py-3">
+        <div className="font-medium text-[#1E293B]">{displayName}</div>
+        <div className="text-sm text-[#64748B]">{displayPhone}</div>
+      </td>
       <td className="px-4 py-3 text-right">
         <button
           type="button"
           onClick={handleUnblock}
           disabled={loading}
-          className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-60"
         >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {loading ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : <Unlock className="h-4 w-4 shrink-0" />}
           Desbloquear
         </button>
       </td>
@@ -69,6 +78,7 @@ function GroupsManageActions({
   channelId,
   channelName,
   contacts,
+  groups,
   apiHeaders,
   onSuccess,
   setAlertMessage,
@@ -76,6 +86,7 @@ function GroupsManageActions({
   channelId: string;
   channelName: string;
   contacts: Contact[];
+  groups: Group[];
   apiHeaders: Record<string, string> | undefined;
   onSuccess: () => void;
   setAlertMessage: (msg: string | null) => void;
@@ -86,6 +97,13 @@ function GroupsManageActions({
   const [createLoading, setCreateLoading] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
+  const [communityName, setCommunityName] = useState("");
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [editCommunityJid, setEditCommunityJid] = useState("");
+  const [editCommunityAction, setEditCommunityAction] = useState<"add" | "remove">("add");
+  const [editCommunityGroupJids, setEditCommunityGroupJids] = useState<string[]>([]);
+  const [editCommunityLoading, setEditCommunityLoading] = useState(false);
+  const channelGroups = groups.filter((g) => g.channel_id === channelId);
 
   const channelContacts = contacts.filter((c) => c.channel_id === channelId);
   const participantSearchLower = participantSearch.trim().toLowerCase();
@@ -169,6 +187,79 @@ function GroupsManageActions({
     } finally {
       setJoinLoading(false);
     }
+  };
+
+  const handleCreateCommunity = async () => {
+    const name = communityName.trim();
+    if (!name) {
+      setAlertMessage("Informe o nome da comunidade.");
+      return;
+    }
+    setCommunityLoading(true);
+    try {
+      const r = await fetch("/api/communities/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ channel_id: channelId, name }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        setCommunityName("");
+        onSuccess();
+        setAlertMessage("Comunidade criada com sucesso.");
+      } else {
+        setAlertMessage(data?.error ?? "Falha ao criar comunidade.");
+      }
+    } catch {
+      setAlertMessage("Erro de rede ao criar comunidade.");
+    } finally {
+      setCommunityLoading(false);
+    }
+  };
+
+  const handleEditCommunityGroups = async () => {
+    const community = editCommunityJid.trim();
+    if (!community || !community.endsWith("@g.us")) {
+      setAlertMessage("Selecione a comunidade (JID).");
+      return;
+    }
+    if (editCommunityGroupJids.length === 0) {
+      setAlertMessage("Selecione ao menos um grupo.");
+      return;
+    }
+    setEditCommunityLoading(true);
+    try {
+      const r = await fetch("/api/communities/edit-groups", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_id: channelId,
+          community,
+          action: editCommunityAction,
+          groupjids: editCommunityGroupJids,
+        }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        setEditCommunityGroupJids([]);
+        onSuccess();
+        setAlertMessage(data?.failed?.length ? `Concluído. Alguns grupos falharam: ${data.failed.join(", ")}` : "Comunidade atualizada.");
+      } else {
+        setAlertMessage(data?.error ?? "Falha ao atualizar comunidade.");
+      }
+    } catch {
+      setAlertMessage("Erro de rede.");
+    } finally {
+      setEditCommunityLoading(false);
+    }
+  };
+
+  const toggleEditCommunityGroup = (jid: string) => {
+    setEditCommunityGroupJids((prev) =>
+      prev.includes(jid) ? prev.filter((j) => j !== jid) : [...prev, jid]
+    );
   };
 
   return (
@@ -279,6 +370,81 @@ function GroupsManageActions({
           Entrar no grupo
         </button>
       </div>
+      <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+        <h3 className="text-sm font-semibold text-[#1E293B] mb-3">Criar comunidade</h3>
+        <p className="text-xs text-[#64748B] mb-3">Conexão: {channelName}</p>
+        <input
+          type="text"
+          value={communityName}
+          onChange={(e) => setCommunityName(e.target.value)}
+          placeholder="Nome da comunidade"
+          maxLength={100}
+          className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-3"
+        />
+        <button
+          type="button"
+          onClick={handleCreateCommunity}
+          disabled={communityLoading}
+          className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+        >
+          {communityLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Criar comunidade
+        </button>
+      </div>
+      <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4 md:col-span-2">
+        <h3 className="text-sm font-semibold text-[#1E293B] mb-3">Gerenciar grupos em uma comunidade</h3>
+        <p className="text-xs text-[#64748B] mb-3">Conexão: {channelName}</p>
+        <div className="grid gap-3 sm:grid-cols-2 mb-3">
+          <div>
+            <label className="block text-xs font-medium text-[#64748B] mb-1">Comunidade (JID)</label>
+            <select
+              value={editCommunityJid}
+              onChange={(e) => setEditCommunityJid(e.target.value)}
+              className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B]"
+            >
+              <option value="">Selecione a comunidade</option>
+              {channelGroups.map((g) => (
+                <option key={g.jid} value={g.jid}>{g.name ?? g.jid}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[#64748B] mb-1">Ação</label>
+            <select
+              value={editCommunityAction}
+              onChange={(e) => setEditCommunityAction(e.target.value as "add" | "remove")}
+              className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B]"
+            >
+              <option value="add">Adicionar grupos à comunidade</option>
+              <option value="remove">Remover grupos da comunidade</option>
+            </select>
+          </div>
+        </div>
+        <label className="block text-xs font-medium text-[#64748B] mb-1">Grupos selecionados ({editCommunityGroupJids.length})</label>
+        <div className="max-h-32 overflow-y-auto rounded-lg border border-[#E2E8F0] bg-white p-2 mb-3">
+          {channelGroups.filter((g) => g.jid !== editCommunityJid).map((g) => (
+            <label key={g.jid} className="flex items-center gap-2 py-1 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={editCommunityGroupJids.includes(g.jid)}
+                onChange={() => toggleEditCommunityGroup(g.jid)}
+                className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+              />
+              {g.name ?? g.jid}
+            </label>
+          ))}
+          {channelGroups.length <= 1 && <p className="text-xs text-[#64748B]">Nenhum outro grupo nesta conexão para vincular.</p>}
+        </div>
+        <button
+          type="button"
+          onClick={handleEditCommunityGroups}
+          disabled={editCommunityLoading || !editCommunityJid || editCommunityGroupJids.length === 0}
+          className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+        >
+          {editCommunityLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Aplicar
+        </button>
+      </div>
     </div>
   );
 }
@@ -362,8 +528,8 @@ export default function ContatosPage() {
   }, [fetchGroups]);
 
   useEffect(() => {
-    if (activeTab === "blocked" && filterChannelId) fetchBlockList();
-    else if (activeTab !== "blocked") setBlockList([]);
+    if (filterChannelId && (activeTab === "blocked" || activeTab === "contacts")) fetchBlockList();
+    else if (activeTab !== "blocked" && activeTab !== "contacts") setBlockList([]);
   }, [activeTab, filterChannelId, fetchBlockList]);
 
   const handleSync = async (channelId: string) => {
@@ -458,6 +624,20 @@ export default function ContatosPage() {
         ),
       },
       {
+        header: "Status",
+        id: "status",
+        cell: ({ row }) => {
+          const c = row.original;
+          const isBlocked = filterChannelId && c.channel_id === filterChannelId && blockList.some((jid) => jid === c.jid || jid === c.jid?.split("@")[0]);
+          if (!isBlocked) return <span className="text-[#94A3B8]">—</span>;
+          return (
+            <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+              Bloqueado
+            </span>
+          );
+        },
+      },
+      {
         id: "actions",
         header: "",
         cell: ({ row }) => (
@@ -482,7 +662,7 @@ export default function ContatosPage() {
         ),
       },
     ],
-    [channels]
+    [channels, filterChannelId, blockList]
   );
 
   const groupColumns = useMemo<ColumnDef<Group>[]>(
@@ -512,6 +692,19 @@ export default function ContatosPage() {
             {channelName(row.original.channel_id)}
           </span>
         ),
+      },
+      {
+        header: "Status",
+        id: "groupStatus",
+        cell: ({ row }) => {
+          const g = row.original;
+          if (!g.left_at) return <span className="text-[#94A3B8]">—</span>;
+          return (
+            <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+              Saiu do grupo
+            </span>
+          );
+        },
       },
       {
         id: "actions",
@@ -574,58 +767,62 @@ export default function ContatosPage() {
 
   return (
     <div className="flex flex-col gap-4 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-[#1E293B]">Contatos e grupos</h1>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-[#64748B]">Conexão:</span>
-          <select
-            value={filterChannelId}
-            onChange={(e) => setFilterChannelId(e.target.value)}
-            className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-          >
-            <option value="">Todas</option>
+        <div className="flex items-center gap-2">
+            <span className="text-sm text-[#64748B]"></span>
+            <select
+              value={filterChannelId}
+              onChange={(e) => setFilterChannelId(e.target.value)}
+              className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="">Todas</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>{ch.name}</option>
+              ))}
+            </select>
+            <input
+              type="search"
+              value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              placeholder={
+                activeTab === "contacts"
+                  ? "Buscar contatos..."
+                  : activeTab === "groups" || activeTab === "groupsManage"
+                    ? "Buscar grupos..."
+                    : activeTab === "blocked"
+                      ? "Buscar bloqueados..."
+                      : "Buscar..."
+              }
+              className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange min-w-[160px] sm:min-w-[180px]"
+            />
+          </div>
+          <div className="flex flex-nowrap items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-1">
             {channels.map((ch) => (
-              <option key={ch.id} value={ch.id}>{ch.name}</option>
+              <button
+                key={ch.id}
+                type="button"
+                onClick={() => handleSync(ch.id)}
+                disabled={syncing !== null}
+                className="inline-flex items-center gap-1.5 rounded-md bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60 whitespace-nowrap"
+              >
+                {syncing === ch.id ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : <RefreshCw className="h-4 w-4 shrink-0" />}
+                {ch.name}
+              </button>
             ))}
-          </select>
-          <input
-            type="search"
-            value={listSearch}
-            onChange={(e) => setListSearch(e.target.value)}
-            placeholder={
-              activeTab === "contacts"
-                ? "Buscar contatos..."
-                : activeTab === "groups" || activeTab === "groupsManage"
-                  ? "Buscar grupos..."
-                  : activeTab === "blocked"
-                    ? "Buscar bloqueados..."
-                    : "Buscar..."
-            }
-            className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange min-w-[180px]"
-          />
-          {channels.map((ch) => (
-            <button
-              key={ch.id}
-              type="button"
-              onClick={() => handleSync(ch.id)}
-              disabled={syncing !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
-            >
-              {syncing === ch.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Sincronizar {ch.name}
-            </button>
-          ))}
-          {channels.length > 1 && (
-            <button
-              type="button"
-              onClick={handleSyncAll}
-              disabled={syncing !== null}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-clicvend-orange bg-white px-3 py-2 text-sm font-medium text-clicvend-orange hover:bg-[#FFF7ED] disabled:opacity-60"
-            >
-              {syncing !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Sincronizar todos
-            </button>
-          )}
+            {channels.length > 1 && (
+              <button
+                type="button"
+                onClick={handleSyncAll}
+                disabled={syncing !== null}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-white hover:text-clicvend-orange hover:border-clicvend-orange disabled:opacity-60 whitespace-nowrap"
+              >
+                {syncing !== null ? <Loader2 className="h-4 w-4 animate-spin shrink-0" /> : <RefreshCw className="h-4 w-4 shrink-0" />}
+                Todos
+              </button>
+            )}
+          </div>
           {channels.length === 0 && !loading && (
             <Link
               href={slug ? `/${slug}/conexoes` : "/conexoes"}
@@ -637,43 +834,41 @@ export default function ContatosPage() {
         </div>
       </div>
 
-      <p className="text-sm text-[#64748B]">
-        Contatos e grupos são sincronizados da agenda e dos grupos do WhatsApp de cada número. Use <strong>Sincronizar</strong> após conectar um número para trazer contatos e grupos para cá.
-      </p>
+     
 
       <div className="flex gap-2 border-b border-[#E2E8F0]">
-        <button
-          type="button"
+          <button
+            type="button"
           onClick={() => setActiveTab("contacts")}
           className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === "contacts" ? "border-clicvend-orange text-clicvend-orange" : "border-transparent text-[#64748B] hover:text-[#1E293B]"
           }`}
-        >
+          >
           <Users className="h-4 w-4" />
           Contatos ({contacts.length})
-        </button>
-        <button
-          type="button"
+          </button>
+          <button
+            type="button"
           onClick={() => setActiveTab("groups")}
           className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === "groups" ? "border-clicvend-orange text-clicvend-orange" : "border-transparent text-[#64748B] hover:text-[#1E293B]"
           }`}
-        >
+          >
           <MessageCircle className="h-4 w-4" />
           Grupos ({groups.length})
-        </button>
-        <button
-          type="button"
+          </button>
+          <button
+            type="button"
           onClick={() => setActiveTab("blocked")}
           className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === "blocked" ? "border-clicvend-orange text-clicvend-orange" : "border-transparent text-[#64748B] hover:text-[#1E293B]"
           }`}
-        >
+          >
           <Ban className="h-4 w-4" />
           Bloqueados {filterChannelId ? `(${listSearch.trim() ? filteredBlockList.length : blockList.length})` : ""}
-        </button>
-        <button
-          type="button"
+          </button>
+          <button
+            type="button"
           onClick={() => setActiveTab("groupsManage")}
           className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === "groupsManage" ? "border-clicvend-orange text-clicvend-orange" : "border-transparent text-[#64748B] hover:text-[#1E293B]"
@@ -681,7 +876,7 @@ export default function ContatosPage() {
         >
           <MessageCircle className="h-4 w-4" />
           Grupos e comunidades
-        </button>
+          </button>
       </div>
 
       {loading ? (
@@ -764,8 +959,8 @@ export default function ContatosPage() {
               <p className="mt-2">Nenhum grupo sincronizado.</p>
               <p className="mt-1 text-sm">Quando o número for adicionado a grupos, sincronize para listar aqui.</p>
             </div>
-          ) : (
-            <>
+      ) : (
+        <>
               <div className="overflow-auto max-h-[60vh] min-h-[200px]">
                 <table className="w-full min-w-[520px] border-collapse">
                   <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
@@ -826,47 +1021,65 @@ export default function ContatosPage() {
         </div>
       ) : activeTab === "blocked" ? (
         <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
-          {!filterChannelId ? (
-            <div className="p-8 text-center text-[#64748B]">
-              <Ban className="mx-auto h-12 w-12 text-[#94A3B8]" />
-              <p className="mt-2">Selecione uma conexão para ver contatos bloqueados.</p>
-            </div>
-          ) : blockListLoading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
-            </div>
-          ) : filteredBlockList.length === 0 ? (
-            <div className="p-8 text-center text-[#64748B]">
-              <Ban className="mx-auto h-12 w-12 text-[#94A3B8]" />
-              <p className="mt-2">
-                {blockList.length === 0
-                  ? "Nenhum contato bloqueado nesta conexão."
-                  : "Nenhum resultado para a busca."}
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-auto max-h-[60vh]">
-              <table className="w-full min-w-[400px]">
-                <thead>
-                  <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Número / JID</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">Ação</th>
+          <div className="overflow-auto max-h-[60vh]">
+            <table className="w-full min-w-[400px]">
+              <thead>
+                <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Contato</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">Ação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!filterChannelId ? (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-8 text-center text-[#64748B]">
+                      <Ban className="mx-auto h-10 w-10 text-[#94A3B8]" />
+                      <p className="mt-2">Selecione uma conexão no menu acima para ver os contatos bloqueados.</p>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filteredBlockList.map((jid) => (
-                    <BlockedRow
-                      key={jid}
-                      jid={jid}
-                      channelId={filterChannelId}
-                      apiHeaders={apiHeaders}
-                      onUnblock={() => fetchBlockList()}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                ) : blockListLoading ? (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-12 text-center">
+                      <Loader2 className="mx-auto h-8 w-8 animate-spin text-clicvend-orange" />
+                    </td>
+                  </tr>
+                ) : filteredBlockList.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="px-4 py-8 text-center text-[#64748B]">
+                      <Ban className="mx-auto h-10 w-10 text-[#94A3B8]" />
+                      <p className="mt-2">
+                        {blockList.length === 0
+                          ? "Nenhum contato bloqueado nesta conexão."
+                          : "Nenhum resultado para a busca."}
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredBlockList.map((jid) => {
+                    const numberFromJid = jid.replace(/@s\.whatsapp\.net$/, "");
+                    const contact = contacts.find(
+                      (c) =>
+                        c.channel_id === filterChannelId &&
+                        (c.jid === jid || c.phone === numberFromJid || c.jid === numberFromJid || (c.phone && c.phone.replace(/\D/g, "") === numberFromJid.replace(/\D/g, "")))
+                    );
+                    const contactInfo = contact
+                      ? { contact_name: contact.contact_name, first_name: contact.first_name, phone: contact.phone }
+                      : null;
+                    return (
+                      <BlockedRow
+                        key={jid}
+                        jid={jid}
+                        channelId={filterChannelId}
+                        contactInfo={contactInfo}
+                        apiHeaders={apiHeaders}
+                        onUnblock={() => fetchBlockList()}
+                      />
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : activeTab === "groupsManage" ? (
         <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden flex flex-col gap-6 p-6">
@@ -881,6 +1094,7 @@ export default function ContatosPage() {
                 channelId={filterChannelId}
                 channelName={channelName(filterChannelId)}
                 contacts={contacts}
+                groups={groups}
                 apiHeaders={apiHeaders}
                 onSuccess={() => fetchGroups()}
                 setAlertMessage={setAlertMessage}
@@ -926,17 +1140,17 @@ export default function ContatosPage() {
                                   title="Gerenciar"
                                 >
                                   <Settings className="h-4 w-4" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
                 )}
-              </div>
-            </>
-          )}
+          </div>
+        </>
+      )}
         </div>
       ) : null}
 

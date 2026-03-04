@@ -1,12 +1,12 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { joinGroup, type UazapiGroupInfo } from "@/lib/uazapi/client";
+import { createCommunity, type UazapiGroupInfo } from "@/lib/uazapi/client";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 /**
- * POST /api/groups/join
- * Body: { channel_id: string, invitecode: string }
+ * POST /api/communities/create
+ * Body: { channel_id: string, name: string }
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { channel_id?: string; invitecode?: string };
+  let body: { channel_id?: string; name?: string };
   try {
     body = await request.json();
   } catch {
@@ -22,13 +22,13 @@ export async function POST(request: Request) {
   }
 
   const channelId = typeof body?.channel_id === "string" ? body.channel_id.trim() : "";
-  const invitecode = typeof body?.invitecode === "string" ? body.invitecode.trim() : "";
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
 
   if (!channelId) {
     return NextResponse.json({ error: "channel_id é obrigatório" }, { status: 400 });
   }
-  if (!invitecode) {
-    return NextResponse.json({ error: "invitecode (link ou código de convite) é obrigatório" }, { status: 400 });
+  if (!name) {
+    return NextResponse.json({ error: "name é obrigatório" }, { status: 400 });
   }
 
   const resolved = await getChannelToken(channelId, companyId);
@@ -36,10 +36,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Canal não encontrado" }, { status: 404 });
   }
 
-  const result = await joinGroup(resolved.token, invitecode);
+  const result = await createCommunity(resolved.token, name);
   if (!result.ok) {
     return NextResponse.json(
-      { error: result.error ?? "Falha ao entrar no grupo" },
+      { error: result.error ?? "Falha ao criar comunidade" },
       { status: 502 }
     );
   }
@@ -52,11 +52,10 @@ export async function POST(request: Request) {
         channel_id: channelId,
         company_id: companyId,
         jid: (group as UazapiGroupInfo).JID?.trim() ?? "",
-        name: ((group as UazapiGroupInfo).Name ?? "").trim() || null,
-        topic: ((group as UazapiGroupInfo).Topic ?? "").trim() || null,
+        name: ((group as UazapiGroupInfo).Name ?? name).trim() || null,
+        topic: null,
         invite_link: ((group as UazapiGroupInfo).InviteLink ?? (group as { invite_link?: string }).invite_link ?? "").trim() || null,
         synced_at: new Date().toISOString(),
-        left_at: null,
       },
       { onConflict: "channel_id,jid" }
     );

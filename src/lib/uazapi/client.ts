@@ -14,6 +14,9 @@ const getAdminToken = (): string | undefined => {
   return process.env.UAZAPI_ADMIN_TOKEN?.trim() || undefined;
 };
 
+/** Timeout em ms para requisições à UAZAPI (evita Connect Timeout longo). */
+const UAZAPI_FETCH_TIMEOUT_MS = Number(process.env.UAZAPI_FETCH_TIMEOUT_MS) || 25_000;
+
 type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   body?: unknown;
@@ -36,11 +39,31 @@ async function uazapiFetch<T = unknown>(
   } else if (options.token) {
     headers.token = options.token;
   }
-  const res = await fetch(url, {
-    method: options.method ?? "GET",
-    headers,
-    body: options.body != null ? JSON.stringify(options.body) : undefined,
-  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), UAZAPI_FETCH_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: options.method ?? "GET",
+      headers,
+      body: options.body != null ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    const isAbort = err instanceof Error && err.name === "AbortError";
+    const message =
+      isAbort
+        ? "Timeout ao conectar na UAZAPI. Tente novamente."
+        : err instanceof Error
+          ? err.message
+          : "Erro de rede ao chamar UAZAPI";
+    return { ok: false, status: 0, error: message };
+  }
+  clearTimeout(timeoutId);
+
   let data: T | undefined;
   const text = await res.text();
   if (text) {
@@ -715,6 +738,50 @@ export async function joinGroup(
   return {
     ok,
     data: ok ? group : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Criar uma comunidade (POST /community/create).
+ * A instância vira admin; a comunidade começa com o grupo de anúncios.
+ */
+export async function createCommunity(
+  token: string,
+  name: string
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const n = name.trim().slice(0, 100);
+  if (!n) return { ok: false, error: "Nome da comunidade é obrigatório" };
+  const { data, ok, error, status } = await uazapiFetch<UazapiGroupInfo | { group?: UazapiGroupInfo }>("/community/create", {
+    method: "POST",
+    token,
+    body: { name: n },
+  });
+  const group = data && typeof data === "object" && "JID" in data ? data as UazapiGroupInfo : (data as { group?: UazapiGroupInfo })?.group;
+  return { ok, data: ok ? group : undefined, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Gerenciar grupos em uma comunidade (POST /community/editgroups).
+ * action: 'add' | 'remove', groupjids: JIDs dos grupos.
+ */
+export async function editCommunityGroups(
+  token: string,
+  params: { community: string; action: "add" | "remove"; groupjids: string[] }
+): Promise<{ ok: boolean; success?: string[]; failed?: string[]; error?: string }> {
+  const community = params.community.trim();
+  const groupjids = params.groupjids.map((j) => j.trim()).filter((j) => j.endsWith("@g.us"));
+  if (!community || !community.endsWith("@g.us")) return { ok: false, error: "JID da comunidade inválido" };
+  if (groupjids.length === 0) return { ok: false, error: "Informe ao menos um grupo (JID)" };
+  const { data, ok, error, status } = await uazapiFetch<{ success?: string[]; failed?: string[] }>("/community/editgroups", {
+    method: "POST",
+    token,
+    body: { community, action: params.action, groupjids },
+  });
+  return {
+    ok,
+    success: data?.success,
+    failed: data?.failed,
     error: ok ? undefined : (error ?? `HTTP ${status}`),
   };
 }

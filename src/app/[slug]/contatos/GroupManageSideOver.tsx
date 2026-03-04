@@ -11,14 +11,17 @@ import {
   Lock,
   Settings,
   Users,
+  UserCheck,
   Info,
   RefreshCw,
   UserPlus,
   UserMinus,
   Crown,
   UserCog,
+  Copy,
 } from "lucide-react";
 import type { Group } from "./GroupDetailSideOver";
+import { FileDropzone } from "@/components/FileDropzone";
 
 type GroupParticipant = {
   JID?: string;
@@ -52,6 +55,7 @@ const TABS = [
   { id: "info", label: "Informações", icon: Info },
   { id: "config", label: "Configurações", icon: Settings },
   { id: "participants", label: "Participantes", icon: Users },
+  { id: "attendants", label: "Atendentes responsáveis", icon: UserCheck },
   { id: "leave", label: "Sair", icon: LogOut },
 ] as const;
 
@@ -146,14 +150,14 @@ export function GroupManageSideOver({
 
   if (!group) {
     return (
-      <SideOver open={open} onClose={onClose} title="Gerenciar grupo" width={480}>
+      <SideOver open={open} onClose={onClose} title="Gerenciar grupos e comunidades" width={800}>
         <p className="text-sm text-[#64748B]">Nenhum grupo selecionado.</p>
       </SideOver>
     );
   }
 
   return (
-    <SideOver open={open} onClose={onClose} title="Gerenciar grupo" width={480}>
+    <SideOver open={open} onClose={onClose} title="Gerenciar grupos e comunidades" width={800}>
       <div className="flex flex-col gap-4">
         {loading && (
           <div className="flex items-center justify-center py-12">
@@ -175,15 +179,15 @@ export function GroupManageSideOver({
               <p className="text-xs text-[#94A3B8]">{channelName}</p>
             </div>
 
-            <div className="flex gap-1 overflow-x-auto border-b border-[#E2E8F0] pb-2 -mx-1">
+            <div className="flex gap-1 pb-2 overflow-x-auto">
               {TABS.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
                   type="button"
                   onClick={() => setActiveTab(id)}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium whitespace-nowrap ${
+                  className={`flex items-center gap-1.5 shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                     activeTab === id
-                      ? "bg-clicvend-orange/10 text-clicvend-orange border-b-2 border-clicvend-orange -mb-0.5"
+                      ? "bg-clicvend-orange/10 text-clicvend-orange"
                       : "text-[#64748B] hover:bg-[#F1F5F9]"
                   }`}
                 >
@@ -225,6 +229,13 @@ export function GroupManageSideOver({
                   fetchInfo();
                   onUpdateSuccess?.();
                 }}
+                onError={setError}
+              />
+            )}
+            {activeTab === "attendants" && (
+              <GroupAttendantsTab
+                group={group}
+                apiHeaders={apiHeaders}
                 onError={setError}
               />
             )}
@@ -274,15 +285,23 @@ function GroupInfoTab({
           <dt className="text-[#64748B] font-medium flex items-center gap-1">
             <Link2 className="h-3.5 w-3.5" /> Link de convite
           </dt>
-          <dd className="mt-1 break-all">
+          <dd className="mt-1 flex items-center gap-2 flex-wrap">
             <a
               href={inviteLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-clicvend-orange hover:underline"
+              className="text-clicvend-orange hover:underline break-all"
             >
               {inviteLink}
             </a>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard.writeText(inviteLink)}
+              className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copiar
+            </button>
           </dd>
         </div>
       ) : null}
@@ -316,7 +335,7 @@ function GroupConfigTab({
 }) {
   const [name, setName] = useState(info?.Name ?? group.name ?? "");
   const [description, setDescription] = useState(info?.Topic ?? group.topic ?? "");
-  const [imageUrl, setImageUrl] = useState("");
+  const [imageUploading, setImageUploading] = useState(false);
   const [announce, setAnnounce] = useState(info?.IsAnnounce ?? false);
   const [locked, setLocked] = useState(info?.IsLocked ?? false);
   const [saving, setSaving] = useState<string | null>(null);
@@ -356,6 +375,9 @@ function GroupConfigTab({
 
   return (
     <div className="space-y-4 text-sm">
+      <p className="text-xs text-[#64748B] mb-1">
+        As alterações são salvas automaticamente na instância e refletem na lista de grupos.
+      </p>
       <div>
         <label className="block text-[#64748B] font-medium mb-1">Nome do grupo</label>
         <input
@@ -384,30 +406,68 @@ function GroupConfigTab({
             }
           }}
           disabled={saving === "description"}
-          rows={2}
-          className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] disabled:opacity-60"
+          rows={4}
+          placeholder="Descrição do grupo"
+          className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] disabled:opacity-60 resize-y min-h-[80px]"
         />
       </div>
       <div>
-        <label className="block text-[#64748B] font-medium mb-1">URL da imagem do grupo</label>
-        <input
-          type="url"
-          value={imageUrl}
-          onChange={(e) => setImageUrl(e.target.value)}
-          placeholder="https://..."
-          className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B]"
+        <label className="block text-[#64748B] font-medium mb-1">Imagem do grupo</label>
+        <FileDropzone
+          accept="image/*"
+          maxSize={5 * 1024 * 1024}
+          loading={imageUploading}
+          disabled={!!saving}
+          label="Arraste uma imagem ou clique para selecionar"
+          onFileSelect={async (file) => {
+            setImageUploading(true);
+            try {
+              const form = new FormData();
+              form.append("file", file);
+              form.append("type", "group-image");
+              const res = await fetch("/api/upload/company-asset", {
+                method: "POST",
+                body: form,
+                headers: apiHeaders ?? {},
+                credentials: "include",
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok || !data?.url) {
+                onError(data?.error ?? "Falha no upload da imagem");
+                setImageUploading(false);
+                return;
+              }
+              apiCall("/api/groups/update-image", { ...base, image: data.url }, apiHeaders).then(
+                ({ ok, error: err }) => {
+                  setImageUploading(false);
+                  if (ok) onSuccess();
+                  else onError(err ?? "Falha ao atualizar imagem do grupo");
+                }
+              );
+            } catch (e) {
+              onError(e instanceof Error ? e.message : "Erro ao enviar imagem");
+              setImageUploading(false);
+            }
+          }}
         />
-        <button
-          type="button"
-          disabled={!imageUrl.trim() || saving === "image"}
-          onClick={() => save("image", { ...base, image: imageUrl.trim() }, "/api/groups/update-image")}
-          className="mt-2 rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-        >
-          {saving === "image" ? "Salvando…" : "Atualizar imagem"}
-        </button>
       </div>
       <div>
         <label className="block text-[#64748B] font-medium mb-1">Link de convite</label>
+        {(info?.InviteLink ?? group?.invite_link) ? (
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <span className="text-[#1E293B] text-sm break-all flex-1 min-w-0">
+              {info?.InviteLink ?? group?.invite_link}
+            </span>
+            <button
+              type="button"
+              onClick={() => navigator.clipboard.writeText((info?.InviteLink ?? group?.invite_link) ?? "")}
+              className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copiar
+            </button>
+          </div>
+        ) : null}
         <button
           type="button"
           onClick={handleResetInvite}
@@ -559,6 +619,112 @@ function GroupParticipantsTab({
           })}
         </ul>
       </div>
+    </div>
+  );
+}
+
+type Agent = { id: string; user_id: string; full_name: string; email?: string };
+
+function GroupAttendantsTab({
+  group,
+  apiHeaders,
+  onError,
+}: {
+  group: Group;
+  apiHeaders: Record<string, string> | undefined;
+  onError: (msg: string | null) => void;
+}) {
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [assignedUserIds, setAssignedUserIds] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!group) return;
+    setLoading(true);
+    const channelId = group.channel_id;
+    const groupJid = group.jid;
+    Promise.all([
+      fetch("/api/company/agents", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+      fetch(`/api/groups/assignments?channel_id=${encodeURIComponent(channelId)}&group_jid=${encodeURIComponent(groupJid)}`, {
+        credentials: "include",
+        headers: apiHeaders,
+      }).then((r) => r.json()),
+    ])
+      .then(([agentsList, assignments]) => {
+        setAgents(Array.isArray(agentsList) ? agentsList : []);
+        setAssignedUserIds(Array.isArray(assignments?.user_ids) ? assignments.user_ids : []);
+      })
+      .catch(() => onError("Erro ao carregar atendentes"))
+      .finally(() => setLoading(false));
+  }, [group?.channel_id, group?.jid, apiHeaders]);
+
+  const toggle = (userId: string) => {
+    setAssignedUserIds((prev) =>
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    );
+  };
+
+  const handleSave = () => {
+    setSaving(true);
+    onError(null);
+    fetch("/api/groups/assignments", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...apiHeaders },
+      body: JSON.stringify({
+        channel_id: group.channel_id,
+        group_jid: group.jid,
+        user_ids: assignedUserIds,
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.error) onError(data.error);
+      })
+      .catch(() => onError("Erro ao salvar"))
+      .finally(() => setSaving(false));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-[#64748B]">
+        Atendentes responsáveis por este grupo ou comunidade poderão ver e interagir com as conversas aqui no chat.
+      </p>
+      <div className="max-h-48 overflow-y-auto rounded-lg border border-[#E2E8F0] bg-white p-2">
+        {agents.length === 0 ? (
+          <p className="text-sm text-[#64748B]">Nenhum atendente cadastrado na empresa.</p>
+        ) : (
+          agents.map((a) => (
+            <label key={a.user_id} className="flex items-center gap-2 py-2 px-2 rounded hover:bg-[#F8FAFC] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={assignedUserIds.includes(a.user_id)}
+                onChange={() => toggle(a.user_id)}
+                className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+              />
+              <span className="text-sm font-medium text-[#1E293B]">{a.full_name}</span>
+              {a.email && <span className="text-xs text-[#64748B]">({a.email})</span>}
+            </label>
+          ))
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving}
+        className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+      >
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+        Salvar atendentes
+      </button>
     </div>
   );
 }

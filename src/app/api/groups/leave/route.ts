@@ -52,7 +52,16 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
-  await supabase.from("channel_groups").delete().eq("channel_id", channelId).eq("jid", groupjid);
+  const { error: updateError } = await supabase
+    .from("channel_groups")
+    .update({ left_at: new Date().toISOString() })
+    .eq("channel_id", channelId)
+    .eq("jid", groupjid)
+    .eq("company_id", companyId);
+
+  if (updateError) {
+    console.error("[groups/leave] Erro ao marcar left_at em channel_groups:", updateError);
+  }
 
   return NextResponse.json({ ok: true });
 }

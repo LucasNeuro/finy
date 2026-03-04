@@ -73,6 +73,7 @@ export async function POST(
         name: (g.Name ?? "").trim() || null,
         topic: (g.Topic ?? "").trim() || null,
         invite_link: (g.invite_link ?? "").trim() || null,
+        left_at: null,
       };
     }).filter((r) => r.jid);
     if (rows.length > 0) {
