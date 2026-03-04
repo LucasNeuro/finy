@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { leaveGroup } from "@/lib/uazapi/client";
+import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 /**
@@ -49,5 +50,9 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
+
+  const supabase = await createClient();
+  await supabase.from("channel_groups").delete().eq("channel_id", channelId).eq("jid", groupjid);
+
   return NextResponse.json({ ok: true });
 }

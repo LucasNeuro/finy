@@ -663,6 +663,62 @@ export async function leaveGroup(
   return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
 }
 
+/**
+ * Criar um novo grupo (POST /group/create).
+ * name: 1–100 caracteres. participants: números sem formatação (mín. 1, máx. 50).
+ */
+export async function createGroup(
+  token: string,
+  params: { name: string; participants: string[] }
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const name = params.name.trim().slice(0, 100);
+  const participants = params.participants
+    .map((p) => p.replace(/\D/g, ""))
+    .filter(Boolean);
+  if (!name) {
+    return { ok: false, error: "Nome do grupo é obrigatório" };
+  }
+  if (participants.length === 0) {
+    return { ok: false, error: "Adicione pelo menos um participante" };
+  }
+  const { data, ok, error, status } = await uazapiFetch<UazapiGroupInfo | { group?: UazapiGroupInfo }>("/group/create", {
+    method: "POST",
+    token,
+    body: { name, participants },
+  });
+  const group = data && typeof data === "object" && "JID" in data ? data as UazapiGroupInfo : (data as { group?: UazapiGroupInfo })?.group;
+  return {
+    ok,
+    data: ok ? group : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Entrar em um grupo por link/código de convite (POST /group/join).
+ * invitecode: código (ex: IYnl5Zg9bUcJD32rJrDzO7) ou URL completa (https://chat.whatsapp.com/...).
+ */
+export async function joinGroup(
+  token: string,
+  invitecode: string
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const code = invitecode.trim();
+  if (!code) {
+    return { ok: false, error: "Código ou link de convite é obrigatório" };
+  }
+  const { data, ok, error, status } = await uazapiFetch<UazapiGroupInfo | { group?: UazapiGroupInfo }>("/group/join", {
+    method: "POST",
+    token,
+    body: { invitecode: code },
+  });
+  const group = data && typeof data === "object" && "JID" in data ? data as UazapiGroupInfo : (data as { group?: UazapiGroupInfo })?.group;
+  return {
+    ok,
+    data: ok ? group : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
 /** Participante retornado por POST /group/info */
 export type UazapiGroupParticipant = {
   JID?: string;

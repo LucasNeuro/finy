@@ -39,6 +39,8 @@ type GroupDetailSideOverProps = {
   channelName: string;
   companySlug: string;
   onLeaveSuccess?: () => void;
+  /** Opcional: chamado após atualizações (não usado neste painel simplificado; aceito para compatibilidade). */
+  onUpdateSuccess?: () => void;
 };
 
 export function GroupDetailSideOver({
@@ -48,6 +50,7 @@ export function GroupDetailSideOver({
   channelName,
   companySlug,
   onLeaveSuccess,
+  onUpdateSuccess: _onUpdateSuccess,
 }: GroupDetailSideOverProps) {
   const [info, setInfo] = useState<GroupInfo | null>(null);
   const [loading, setLoading] = useState(false);

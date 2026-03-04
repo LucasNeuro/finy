@@ -9,7 +9,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Settings } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContactDetailSideOver, type Contact } from "./ContactDetailSideOver";
@@ -62,6 +62,146 @@ function BlockedRow({
         </button>
       </td>
     </tr>
+  );
+}
+
+function GroupsManageActions({
+  channelId,
+  channelName,
+  apiHeaders,
+  onSuccess,
+  setAlertMessage,
+}: {
+  channelId: string;
+  channelName: string;
+  apiHeaders: Record<string, string> | undefined;
+  onSuccess: () => void;
+  setAlertMessage: (msg: string | null) => void;
+}) {
+  const [createName, setCreateName] = useState("");
+  const [createParticipants, setCreateParticipants] = useState("");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinLoading, setJoinLoading] = useState(false);
+
+  const handleCreate = async () => {
+    const name = createName.trim();
+    const participants = createParticipants
+      .split(/[\s,;]+/)
+      .map((s) => s.replace(/\D/g, ""))
+      .filter(Boolean);
+    if (!name) {
+      setAlertMessage("Informe o nome do grupo.");
+      return;
+    }
+    if (participants.length === 0) {
+      setAlertMessage("Adicione pelo menos um número (separado por vírgula).");
+      return;
+    }
+    setCreateLoading(true);
+    try {
+      const r = await fetch("/api/groups/create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ channel_id: channelId, name, participants }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        setCreateName("");
+        setCreateParticipants("");
+        onSuccess();
+        setAlertMessage("Grupo criado com sucesso.");
+      } else {
+        setAlertMessage(data?.error ?? "Falha ao criar grupo.");
+      }
+    } catch {
+      setAlertMessage("Erro de rede ao criar grupo.");
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    const code = joinCode.trim();
+    if (!code) {
+      setAlertMessage("Informe o link ou código de convite.");
+      return;
+    }
+    setJoinLoading(true);
+    try {
+      const r = await fetch("/api/groups/join", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ channel_id: channelId, invitecode: code }),
+      });
+      const data = await r.json();
+      if (r.ok) {
+        setJoinCode("");
+        onSuccess();
+        setAlertMessage("Entrada no grupo realizada com sucesso.");
+      } else {
+        setAlertMessage(data?.error ?? "Falha ao entrar no grupo.");
+      }
+    } catch {
+      setAlertMessage("Erro de rede ao entrar no grupo.");
+    } finally {
+      setJoinLoading(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-6 md:grid-cols-2">
+      <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+        <h3 className="text-sm font-semibold text-[#1E293B] mb-3">Criar novo grupo</h3>
+        <p className="text-xs text-[#64748B] mb-3">Conexão: {channelName}</p>
+        <input
+          type="text"
+          value={createName}
+          onChange={(e) => setCreateName(e.target.value)}
+          placeholder="Nome do grupo (1–100 caracteres)"
+          maxLength={100}
+          className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-3"
+        />
+        <textarea
+          value={createParticipants}
+          onChange={(e) => setCreateParticipants(e.target.value)}
+          placeholder="Números dos participantes (separados por vírgula), ex: 5511999999999"
+          rows={2}
+          className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-3 resize-none"
+        />
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={createLoading}
+          className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+        >
+          {createLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Criar grupo
+        </button>
+      </div>
+      <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+        <h3 className="text-sm font-semibold text-[#1E293B] mb-3">Entrar em grupo por convite</h3>
+        <p className="text-xs text-[#64748B] mb-3">Conexão: {channelName}</p>
+        <input
+          type="text"
+          value={joinCode}
+          onChange={(e) => setJoinCode(e.target.value)}
+          placeholder="Link (https://chat.whatsapp.com/...) ou código do convite"
+          className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-3"
+        />
+        <button
+          type="button"
+          onClick={handleJoin}
+          disabled={joinLoading}
+          className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+        >
+          {joinLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Entrar no grupo
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -607,6 +747,71 @@ export default function ContatosPage() {
             </div>
           )}
         </div>
+      ) : activeTab === "groupsManage" ? (
+        <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden flex flex-col gap-6 p-6">
+          {!filterChannelId ? (
+            <div className="p-8 text-center text-[#64748B]">
+              <MessageCircle className="mx-auto h-12 w-12 text-[#94A3B8]" />
+              <p className="mt-2">Selecione uma conexão para criar grupos ou entrar por link de convite.</p>
+            </div>
+          ) : (
+            <>
+              <GroupsManageActions
+                channelId={filterChannelId}
+                channelName={channelName(filterChannelId)}
+                apiHeaders={apiHeaders}
+                onSuccess={() => fetchGroups()}
+                setAlertMessage={setAlertMessage}
+              />
+              <div>
+                <h2 className="text-lg font-semibold text-[#1E293B] mb-3">Seus grupos nesta conexão</h2>
+                {groups.filter((g) => g.channel_id === filterChannelId).length === 0 ? (
+                  <p className="text-sm text-[#64748B]">Nenhum grupo nesta conexão. Crie um ou entre por link acima.</p>
+                ) : (
+                  <div className="overflow-auto max-h-[40vh] rounded-lg border border-[#E2E8F0]">
+                    <table className="w-full min-w-[400px]">
+                      <thead>
+                        <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Nome</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Descrição</th>
+                          <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groups
+                          .filter((g) => g.channel_id === filterChannelId)
+                          .map((group) => (
+                            <tr key={group.jid} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
+                              <td className="px-4 py-3 font-medium text-[#1E293B]">{group.name ?? "—"}</td>
+                              <td className="px-4 py-3 text-sm text-[#64748B] max-w-[200px] truncate" title={group.topic ?? ""}>{group.topic ?? "—"}</td>
+                              <td className="px-4 py-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => openGroupDetail(group)}
+                                  className="mr-2 rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+                                  title="Ver detalhes"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setManageGroup(group); setManageGroupOpen(true); }}
+                                  className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+                                  title="Gerenciar"
+                                >
+                                  <Settings className="h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       ) : null}
 
       <ContactDetailSideOver
@@ -625,6 +830,15 @@ export default function ContatosPage() {
         channelName={detailGroup ? channelName(detailGroup.channel_id) : ""}
         companySlug={slug}
         onLeaveSuccess={() => { fetchGroups(); setDetailGroupOpen(false); setDetailGroup(null); }}
+      />
+
+      <GroupManageSideOver
+        open={manageGroupOpen}
+        onClose={() => { setManageGroupOpen(false); setManageGroup(null); }}
+        group={manageGroup}
+        channelName={manageGroup ? channelName(manageGroup.channel_id) : ""}
+        companySlug={slug}
+        onLeaveSuccess={() => { fetchGroups(); setManageGroupOpen(false); setManageGroup(null); }}
         onUpdateSuccess={() => fetchGroups()}
       />
 
