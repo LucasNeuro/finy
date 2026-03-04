@@ -68,34 +68,43 @@ function BlockedRow({
 function GroupsManageActions({
   channelId,
   channelName,
+  contacts,
   apiHeaders,
   onSuccess,
   setAlertMessage,
 }: {
   channelId: string;
   channelName: string;
+  contacts: Contact[];
   apiHeaders: Record<string, string> | undefined;
   onSuccess: () => void;
   setAlertMessage: (msg: string | null) => void;
 }) {
   const [createName, setCreateName] = useState("");
-  const [createParticipants, setCreateParticipants] = useState("");
+  const [selectedParticipants, setSelectedParticipants] = useState<Contact[]>([]);
   const [createLoading, setCreateLoading] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
 
+  const channelContacts = contacts.filter((c) => c.channel_id === channelId);
+  const addParticipant = (contact: Contact) => {
+    if (selectedParticipants.some((p) => p.id === contact.id || p.jid === contact.jid)) return;
+    setSelectedParticipants((prev) => [...prev, contact]);
+  };
+  const removeParticipant = (id: string) => {
+    setSelectedParticipants((prev) => prev.filter((p) => p.id !== id));
+  };
+  const getNumber = (c: Contact) => c.phone?.replace(/\D/g, "") || c.jid.replace(/@.*$/, "").replace(/\D/g, "") || "";
+
   const handleCreate = async () => {
     const name = createName.trim();
-    const participants = createParticipants
-      .split(/[\s,;]+/)
-      .map((s) => s.replace(/\D/g, ""))
-      .filter(Boolean);
+    const participants = selectedParticipants.map(getNumber).filter(Boolean);
     if (!name) {
       setAlertMessage("Informe o nome do grupo.");
       return;
     }
     if (participants.length === 0) {
-      setAlertMessage("Adicione pelo menos um número (separado por vírgula).");
+      setAlertMessage("Adicione pelo menos um participante pelo dropdown acima.");
       return;
     }
     setCreateLoading(true);
@@ -109,7 +118,7 @@ function GroupsManageActions({
       const data = await r.json();
       if (r.ok) {
         setCreateName("");
-        setCreateParticipants("");
+        setSelectedParticipants([]);
         onSuccess();
         setAlertMessage("Grupo criado com sucesso.");
       } else {
@@ -164,13 +173,62 @@ function GroupsManageActions({
           maxLength={100}
           className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-3"
         />
-        <textarea
-          value={createParticipants}
-          onChange={(e) => setCreateParticipants(e.target.value)}
-          placeholder="Números dos participantes (separados por vírgula), ex: 5511999999999"
-          rows={2}
-          className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-3 resize-none"
-        />
+        <label className="block text-xs font-medium text-[#64748B] mb-1.5">Participantes (contatos da instância)</label>
+        <select
+          value=""
+          onChange={(e) => {
+            const id = e.target.value;
+            if (!id) return;
+            const c = channelContacts.find((x) => x.id === id);
+            if (c) addParticipant(c);
+            e.target.value = "";
+          }}
+          className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-2"
+        >
+          <option value="">Selecione um contato para adicionar</option>
+          {channelContacts
+            .filter((c) => !selectedParticipants.some((p) => p.id === c.id))
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.contact_name || c.first_name || c.phone || c.jid}
+                {c.phone ? ` (${c.phone})` : ""}
+              </option>
+            ))}
+        </select>
+        {channelContacts.length === 0 && (
+          <p className="text-xs text-amber-600 mb-2">Nenhum contato nesta conexão. Sincronize contatos na aba Contatos primeiro.</p>
+        )}
+        {selectedParticipants.length > 0 && (
+          <div className="rounded-lg border border-[#E2E8F0] bg-white overflow-hidden mb-3 max-h-[180px] overflow-y-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead className="sticky top-0 bg-[#F8FAFC]">
+                <tr className="border-b border-[#E2E8F0]">
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-[#64748B]">Nome</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-[#64748B]">Telefone</th>
+                  <th className="px-3 py-2 w-10 text-right text-xs font-semibold text-[#64748B]"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedParticipants.map((c) => (
+                  <tr key={c.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
+                    <td className="px-3 py-2 text-[#1E293B]">{c.contact_name || c.first_name || "—"}</td>
+                    <td className="px-3 py-2 text-[#64748B]">{c.phone || c.jid}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => removeParticipant(c.id)}
+                        className="rounded p-1 text-[#64748B] hover:bg-red-50 hover:text-red-600"
+                        title="Remover"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         <button
           type="button"
           onClick={handleCreate}
@@ -759,6 +817,7 @@ export default function ContatosPage() {
               <GroupsManageActions
                 channelId={filterChannelId}
                 channelName={channelName(filterChannelId)}
+                contacts={contacts}
                 apiHeaders={apiHeaders}
                 onSuccess={() => fetchGroups()}
                 setAlertMessage={setAlertMessage}
