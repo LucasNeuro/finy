@@ -601,6 +601,7 @@ function GroupParticipantsTab({
                     onClick={() => runAction(isAdmin ? "demote" : "promote", [jid])}
                     disabled={actioning !== null}
                     className="rounded p-1 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-50"
+                    aria-label={isAdmin ? "Rebaixar participante" : "Promover participante para admin"}
                   >
                     {isAdmin ? <UserCog className="h-4 w-4" /> : <Crown className="h-4 w-4" />}
                   </button>
@@ -610,6 +611,7 @@ function GroupParticipantsTab({
                     onClick={() => runAction("remove", [jid])}
                     disabled={actioning !== null}
                     className="rounded p-1 text-[#64748B] hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                    aria-label="Remover participante do grupo"
                   >
                     <UserMinus className="h-4 w-4" />
                   </button>

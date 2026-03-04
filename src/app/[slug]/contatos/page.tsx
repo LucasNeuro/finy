@@ -9,7 +9,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Settings, Unlock } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Settings, Unlock, X } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContactDetailSideOver, type Contact } from "./ContactDetailSideOver";
@@ -628,7 +628,10 @@ export default function ContatosPage() {
         id: "status",
         cell: ({ row }) => {
           const c = row.original;
-          const isBlocked = filterChannelId && c.channel_id === filterChannelId && blockList.some((jid) => jid === c.jid || jid === c.jid?.split("@")[0]);
+          const isBlocked =
+            filterChannelId &&
+            c.channel_id === filterChannelId &&
+            blockList.some((jid) => jid === c.jid || jid === c.jid?.split("@")[0]);
           if (!isBlocked) return <span className="text-[#94A3B8]">—</span>;
           return (
             <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
@@ -647,6 +650,7 @@ export default function ContatosPage() {
               onClick={() => openDetail(row.original)}
               className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
               title="Ver detalhes"
+              aria-label="Ver detalhes do contato"
             >
               <Eye className="h-4 w-4" />
             </button>
@@ -655,6 +659,7 @@ export default function ContatosPage() {
               onClick={() => setDeleteConfirm(row.original)}
               className="rounded p-2 text-[#64748B] hover:bg-red-50 hover:text-red-600"
               title="Excluir da lista"
+              aria-label="Excluir contato da lista"
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -716,6 +721,7 @@ export default function ContatosPage() {
               onClick={() => openGroupDetail(row.original)}
               className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
               title="Ver detalhes"
+              aria-label="Ver detalhes do grupo"
             >
               <Eye className="h-4 w-4" />
             </button>
@@ -765,8 +771,15 @@ export default function ContatosPage() {
     initialState: { pagination: { pageSize: PAGE_SIZE } },
   });
 
+  // auto fechar toast simples após alguns segundos
+  useEffect(() => {
+    if (!alertMessage) return;
+    const id = window.setTimeout(() => setAlertMessage(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [alertMessage]);
+
   return (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="flex flex-col gap-4 px-4 py-6 sm:px-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-[#1E293B]">Contatos e grupos</h1>
         <div className="flex flex-wrap items-center gap-2">
@@ -1125,22 +1138,27 @@ export default function ContatosPage() {
                               <td className="px-4 py-3 font-medium text-[#1E293B]">{group.name ?? "—"}</td>
                               <td className="px-4 py-3 text-sm text-[#64748B] max-w-[200px] truncate" title={group.topic ?? ""}>{group.topic ?? "—"}</td>
                               <td className="px-4 py-3 text-right">
-                                <button
-                                  type="button"
-                                  onClick={() => openGroupDetail(group)}
-                                  className="mr-2 rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
-                                  title="Ver detalhes"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => { setManageGroup(group); setManageGroupOpen(true); }}
-                                  className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
-                                  title="Gerenciar"
-                                >
-                                  <Settings className="h-4 w-4" />
-                      </button>
+            <button
+              type="button"
+              onClick={() => openGroupDetail(group)}
+              className="mr-2 rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+              title="Ver detalhes"
+              aria-label="Ver detalhes do grupo"
+            >
+              <Eye className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setManageGroup(group);
+                setManageGroupOpen(true);
+              }}
+              className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+              title="Gerenciar"
+              aria-label="Gerenciar grupo"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
                     </td>
                   </tr>
                 ))}
@@ -1191,15 +1209,20 @@ export default function ContatosPage() {
         variant="danger"
         onConfirm={handleDeleteContact}
       />
-      <ConfirmDialog
-        open={!!alertMessage}
-        onClose={() => setAlertMessage(null)}
-        title="Aviso"
-        message={alertMessage ?? ""}
-        confirmLabel="OK"
-        alertOnly
-        onConfirm={() => setAlertMessage(null)}
-      />
+      {/* Toast simples para mensagens de feedback */}
+      {alertMessage && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-lg bg-[#0F172A] px-4 py-3 text-sm text-white shadow-lg flex items-start gap-2">
+          <span className="flex-1">{alertMessage}</span>
+          <button
+            type="button"
+            onClick={() => setAlertMessage(null)}
+            className="ml-2 rounded-full p-1 text-[#E2E8F0] hover:bg-white/10"
+            aria-label="Fechar aviso"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
