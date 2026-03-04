@@ -35,8 +35,12 @@ type UserRow = {
   role_id?: string;
   role_name?: string;
   queues: { id: string; name: string }[];
+  group_assignments?: { channel_id: string; group_jid: string }[];
   created_at: string;
 };
+
+type Channel = { id: string; name: string };
+type ChannelGroup = { id: string; channel_id: string; jid: string; name: string | null; left_at: string | null };
 
 export default function CargosUsuariosPage() {
   const pathname = usePathname();
@@ -47,6 +51,9 @@ export default function CargosUsuariosPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [queues, setQueues] = useState<{ id: string; name: string }[]>([]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelGroups, setChannelGroups] = useState<ChannelGroup[]>([]);
+  const [userGroupAssignments, setUserGroupAssignments] = useState<{ channel_id: string; group_jid: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -73,6 +80,7 @@ export default function CargosUsuariosPage() {
   const [userToggleActiveId, setUserToggleActiveId] = useState<string | null>(null);
   const [userAvatarUrl, setUserAvatarUrl] = useState("");
   const [userFetchingWhatsProfile, setUserFetchingWhatsProfile] = useState(false);
+  const [whatsProfilePhone, setWhatsProfilePhone] = useState<string | null>(null);
 
   const [deleteRoleConfirm, setDeleteRoleConfirm] = useState<Role | null>(null);
 
@@ -97,10 +105,24 @@ export default function CargosUsuariosPage() {
       .catch(() => setQueues([]));
   }, [slug]);
 
+  const fetchChannels = useCallback(() => {
+    return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
+      .then((r) => r.json())
+      .then((data) => setChannels(Array.isArray(data) ? data : []))
+      .catch(() => setChannels([]));
+  }, [slug]);
+
+  const fetchChannelGroups = useCallback(() => {
+    return fetch("/api/groups", { credentials: "include", headers: apiHeaders })
+      .then((r) => r.json())
+      .then((data) => setChannelGroups(Array.isArray(data) ? data : []))
+      .catch(() => setChannelGroups([]));
+  }, [slug]);
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchRoles(), fetchUsers(), fetchQueues()]).finally(() => setLoading(false));
-  }, [fetchRoles, fetchUsers, fetchQueues]);
+    Promise.all([fetchRoles(), fetchUsers(), fetchQueues(), fetchChannels(), fetchChannelGroups()]).finally(() => setLoading(false));
+  }, [fetchRoles, fetchUsers, fetchQueues, fetchChannels, fetchChannelGroups]);
 
   const openNewRole = () => {
     setEditingRole(null);
@@ -188,6 +210,7 @@ export default function CargosUsuariosPage() {
     setUserSendCredentialsWhatsApp(false);
     setUserRoleId(roles[0]?.id ?? "");
     setUserQueueIds([]);
+    setUserGroupAssignments([]);
     setUserAvatarUrl("");
     setError("");
     setUserSideOverTab("form");
@@ -205,6 +228,7 @@ export default function CargosUsuariosPage() {
     setUserAvatarUrl(u.avatar_url ?? "");
     setUserRoleId(u.role_id ?? roles[0]?.id ?? "");
     setUserQueueIds(u.queues?.map((q) => q.id) ?? []);
+    setUserGroupAssignments(u.group_assignments ?? []);
     setError("");
     setUserSideOverTab("form");
     setUserSideOverOpen(true);
@@ -238,9 +262,10 @@ export default function CargosUsuariosPage() {
     setUserSaving(true);
     try {
       if (editingUser) {
-        const body: { role_id: string; queue_ids: string[]; full_name?: string; phone?: string; cpf?: string } = {
+        const body: { role_id: string; queue_ids: string[]; group_assignments: { channel_id: string; group_jid: string }[]; full_name?: string; phone?: string; cpf?: string } = {
           role_id: userRoleId,
           queue_ids: userQueueIds,
+          group_assignments: userGroupAssignments,
           full_name: userFullName.trim() || undefined,
           phone: userPhone.trim() || undefined,
           cpf: userCpf.replace(/\D/g, "").trim() || undefined,
@@ -292,6 +317,7 @@ export default function CargosUsuariosPage() {
             cpf: userCpf.replace(/\D/g, "").trim() || undefined,
             role_id: userRoleId,
             queue_ids: userQueueIds,
+            group_assignments: userGroupAssignments,
             avatar_url: userAvatarUrl || undefined,
           }),
           credentials: "include",
@@ -315,9 +341,7 @@ export default function CargosUsuariosPage() {
           });
           if (!sendR.ok) {
             const sendData = await sendR.json().catch(() => ({}));
-            setError(sendData?.error ?? "Usuário criado, mas falha ao enviar credenciais por WhatsApp.");
-            setUserSaving(false);
-            return;
+            setError("Usuário criado. " + (sendData?.error ?? "Não foi possível enviar credenciais por WhatsApp."));
           }
         }
       }
@@ -327,6 +351,41 @@ export default function CargosUsuariosPage() {
       setError("Erro de rede.");
     }
     setUserSaving(false);
+  };
+
+  const fetchWhatsappProfile = async () => {
+    if (editingUser) return;
+    const raw = userPhone.trim();
+    const numeric = raw.replace(/\D/g, "");
+    if (!numeric) return;
+    if (whatsProfilePhone && whatsProfilePhone === numeric) return;
+    setError("");
+    setUserFetchingWhatsProfile(true);
+    try {
+      const r = await fetch("/api/users/whatsapp-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ phone: numeric }),
+        credentials: "include",
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setError(data?.error ?? "Falha ao buscar dados no WhatsApp.");
+        return;
+      }
+      setWhatsProfilePhone(data.phone || numeric);
+      // Preenche apenas nome e avatar automaticamente; demais campos o usuário completa manualmente.
+      if (data.full_name && !userFullName) {
+        setUserFullName(data.full_name);
+      }
+      if (data.avatar_url && !userAvatarUrl) {
+        setUserAvatarUrl(data.avatar_url);
+      }
+    } catch {
+      setError("Erro de rede ao consultar WhatsApp.");
+    } finally {
+      setUserFetchingWhatsProfile(false);
+    }
   };
 
   const togglePermission = (key: PermissionKey) => {
@@ -456,9 +515,98 @@ export default function CargosUsuariosPage() {
                   </button>
                 </div>
               </div>
-              <div className="p-6 text-center text-sm text-[#64748B]">
-                {users.length} usuário(s) na empresa. Abra a gestão para ver a lista, ativar/desativar e editar.
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px]">
+                  <thead>
+                    <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Nome / E-mail</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">WhatsApp</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Cargo</th>
+                      <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Ativo</th>
+                      <th className="px-3 py-2.5 text-right text-xs font-semibold uppercase text-[#64748B]">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((u) => (
+                      <tr key={u.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-3">
+                            {u.avatar_url ? (
+                              <img
+                                src={u.avatar_url}
+                                alt={u.full_name || u.email || "Usuário"}
+                                className="h-8 w-8 rounded-full object-cover ring-2 ring-[#E2E8F0]"
+                              />
+                            ) : (
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E2E8F0] text-xs font-semibold text-[#475569]">
+                                {(u.full_name || u.email || "U").charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <div className="font-medium text-[#1E293B]">
+                                {u.full_name || u.email || "—"}
+                              </div>
+                              {u.full_name && u.email && (
+                                <div className="text-xs text-[#64748B]">{u.email}</div>
+                              )}
+                            </div>
+                          </div>
+                          {u.is_owner && (
+                            <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                              Proprietário
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-sm text-[#64748B]">{u.phone ? `+55 ${u.phone}` : "—"}</td>
+                        <td className="px-3 py-2.5 text-sm text-[#64748B]">{u.role_name ?? "—"}</td>
+                        <td className="px-3 py-2.5">
+                          {u.is_owner ? (
+                            <span className="text-xs text-[#94A3B8]">—</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => toggleUserActive(u)}
+                              disabled={userToggleActiveId === u.id}
+                              className={`relative inline-flex h-6 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-1 disabled:opacity-50 ${
+                                u.is_active !== false ? "bg-clicvend-orange" : "bg-[#E2E8F0]"
+                              }`}
+                              role="switch"
+                              aria-checked={u.is_active !== false}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                                  u.is_active !== false ? "translate-x-4" : "translate-x-0.5"
+                                }`}
+                              />
+                              {userToggleActiveId === u.id && (
+                                <span className="absolute inset-0 flex items-center justify-center">
+                                  <Loader2 className="h-4 w-4 animate-spin text-white" />
+                                </span>
+                              )}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => openEditUser(u)}
+                            className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
+                            title="Editar"
+                          >
+                            <Settings className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+              {users.length === 0 && (
+                <p className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4 text-center text-sm text-[#94A3B8]">
+                  Nenhum usuário cadastrado. Use &quot;Novo usuário&quot; ou &quot;Gestão de usuários&quot; para criar.
+                </p>
+              )}
+              {error && activeTab === "usuarios" && <p className="px-4 py-2 text-sm text-red-600">{error}</p>}
             </div>
           )}
         </>
@@ -591,7 +739,24 @@ export default function CargosUsuariosPage() {
 
       <SideOver
         open={userSideOverOpen}
-        onClose={() => setUserSideOverOpen(false)}
+        onClose={() => {
+          setUserSideOverOpen(false);
+          setError("");
+          if (!editingUser) {
+            setUserEmail("");
+            setUserFullName("");
+            setUserPhone("");
+            setUserCpf("");
+            setUserPassword("");
+            setUserShowPassword(false);
+            setUserSendCredentialsWhatsApp(false);
+            setUserRoleId(roles[0]?.id ?? "");
+            setUserQueueIds([]);
+            setUserGroupAssignments([]);
+            setUserAvatarUrl("");
+            setWhatsProfilePhone(null);
+          }
+        }}
         title={userSideOverTab === "form" ? (editingUser ? `Editar: ${editingUser.email ?? "Usuário"}` : "Novo usuário") : "Gestão de usuários"}
         width={760}
       >
@@ -609,7 +774,7 @@ export default function CargosUsuariosPage() {
             </button>
             <button
               type="button"
-              onClick={() => { setUserSideOverTab("form"); if (!editingUser && !userEmail) openNewUser(); }}
+              onClick={() => { setUserSideOverTab("form"); if (!editingUser) openNewUser(); }}
               className={`flex items-center gap-1.5 shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 userSideOverTab === "form" ? "bg-clicvend-orange/10 text-clicvend-orange" : "text-[#64748B] hover:bg-[#F1F5F9]"
               }`}
@@ -646,8 +811,27 @@ export default function CargosUsuariosPage() {
                     {users.map((u) => (
                       <tr key={u.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
                         <td className="px-3 py-2.5">
-                          <div className="font-medium text-[#1E293B]">{u.full_name || u.email || "—"}</div>
-                          {u.full_name && u.email && <div className="text-xs text-[#64748B]">{u.email}</div>}
+                          <div className="flex items-center gap-3">
+                            {u.avatar_url ? (
+                              <img
+                                src={u.avatar_url}
+                                alt={u.full_name || u.email || "Usuário"}
+                                className="h-8 w-8 rounded-full object-cover ring-2 ring-[#E2E8F0]"
+                              />
+                            ) : (
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E2E8F0] text-xs font-semibold text-[#475569]">
+                                {(u.full_name || u.email || "U").charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <div className="font-medium text-[#1E293B]">
+                                {u.full_name || u.email || "—"}
+                              </div>
+                              {u.full_name && u.email && (
+                                <div className="text-xs text-[#64748B]">{u.email}</div>
+                              )}
+                            </div>
+                          </div>
                           {u.is_owner && (
                             <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
                               Proprietário
@@ -709,10 +893,71 @@ export default function CargosUsuariosPage() {
 
           {userSideOverTab === "form" && (
             <div className="space-y-4">
+              {/* Cabeçalho com avatar e resumo do usuário */}
+              <div className="flex items-center gap-3">
+                {userAvatarUrl ? (
+                  <img
+                    src={userAvatarUrl}
+                    alt={userFullName || userEmail || userPhone || "Usuário"}
+                    className="h-10 w-10 rounded-full object-cover ring-2 ring-[#E2E8F0]"
+                  />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E2E8F0] text-xs font-semibold text-[#475569]">
+                    {(userFullName || userEmail || userPhone || "U").charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="text-sm">
+                  <div className="font-medium text-[#1E293B]">
+                    {userFullName || "Novo usuário"}
+                  </div>
+                  <div className="text-[#64748B]">
+                    {userEmail || (userPhone ? `+${userPhone}` : "Preencha os dados abaixo")}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-[#334155]">Telefone WhatsApp</label>
+                <input
+                  type="tel"
+                  autoComplete="off"
+                  value={userPhone}
+                  onChange={(e) => {
+                    setUserPhone(e.target.value);
+                    setWhatsProfilePhone(null);
+                  }}
+                  placeholder="Ex: 11999998888 (apenas números)"
+                  className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                />
+                <p className="mt-1 text-xs text-[#64748B]">
+                  Para enviar login e senha por WhatsApp ao criar o usuário. Se o número existir no WhatsApp/CRM,
+                  clique em &quot;Sincronizar com WhatsApp&quot; para buscar nome e foto.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!userPhone.trim()) {
+                        setError("Informe o telefone antes de sincronizar.");
+                        return;
+                      }
+                      fetchWhatsappProfile();
+                    }}
+                    disabled={userFetchingWhatsProfile}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange/10 px-3 py-2 text-sm font-medium text-clicvend-orange hover:bg-clicvend-orange/20 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {userFetchingWhatsProfile ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
+                    Sincronizar com WhatsApp
+                  </button>
+                </div>
+              </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-[#334155]">Nome completo</label>
                 <input
                   type="text"
+                  autoComplete="off"
                   value={userFullName}
                   onChange={(e) => setUserFullName(e.target.value)}
                   placeholder="Ex: Maria Silva"
@@ -723,77 +968,13 @@ export default function CargosUsuariosPage() {
                 <label className="mb-1 block text-sm font-medium text-[#334155]">E-mail</label>
                 <input
                   type="email"
+                  autoComplete="off"
                   value={userEmail}
                   onChange={(e) => setUserEmail(e.target.value)}
                   placeholder="usuario@empresa.com"
                   disabled={!!editingUser}
                   className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange disabled:bg-[#F1F5F9] disabled:text-[#64748B]"
                 />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-[#334155]">Telefone WhatsApp</label>
-                <input
-                  type="tel"
-                  value={userPhone}
-                  onChange={(e) => setUserPhone(e.target.value)}
-                  placeholder="Ex: 11999998888 (apenas números)"
-                  className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-                />
-                <p className="mt-1 text-xs text-[#64748B]">Para enviar login e senha por WhatsApp ao criar o usuário.</p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const raw = userPhone.trim();
-                      if (!raw) {
-                        setError("Informe o telefone WhatsApp (apenas números) para buscar os dados.");
-                        return;
-                      }
-                      setError("");
-                      setUserFetchingWhatsProfile(true);
-                      try {
-                        const r = await fetch("/api/users/whatsapp-profile", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json", ...apiHeaders },
-                          body: JSON.stringify({ phone: raw }),
-                          credentials: "include",
-                        });
-                        const data = await r.json();
-                        if (!r.ok) {
-                          setError(data?.error ?? "Falha ao buscar dados no WhatsApp.");
-                          return;
-                        }
-                        if (data.full_name && !userFullName) {
-                          setUserFullName(data.full_name);
-                        }
-                        if (data.phone && !userPhone) {
-                          setUserPhone(data.phone);
-                        }
-                        if (data.avatar_url) {
-                          setUserAvatarUrl(data.avatar_url);
-                        }
-                      } catch {
-                        setError("Erro de rede ao consultar WhatsApp.");
-                      } finally {
-                        setUserFetchingWhatsProfile(false);
-                      }
-                    }}
-                    disabled={userFetchingWhatsProfile || !userPhone.trim()}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
-                  >
-                    {userFetchingWhatsProfile ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : null}
-                    Buscar dados no WhatsApp
-                  </button>
-                  {userAvatarUrl && (
-                    <img
-                      src={userAvatarUrl}
-                      alt="Foto de perfil do usuário"
-                      className="h-8 w-8 rounded-full object-cover ring-2 ring-[#E2E8F0]"
-                    />
-                  )}
-                </div>
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-[#334155]">CPF</label>
@@ -858,7 +1039,7 @@ export default function CargosUsuariosPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-[#334155]">Caixas de atendimento</label>
-                <p className="mb-2 text-xs text-[#64748B]">Usuário poderá ver e atender conversas destas caixas.</p>
+                <p className="mb-2 text-xs text-[#64748B]">Usuário poderá ver e atender conversas destas caixas (atendimentos normais da fila).</p>
                 <div className="max-h-40 overflow-auto rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2 space-y-1">
                   {queues.map((q) => (
                     <label key={q.id} className="flex items-center gap-2 text-sm text-[#334155]">
@@ -877,6 +1058,52 @@ export default function CargosUsuariosPage() {
                   ))}
                 </div>
                 {queues.length === 0 && <p className="text-xs text-[#94A3B8]">Nenhuma caixa cadastrada. Crie em Filas.</p>}
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-[#334155]">Responsabilidades em grupos</label>
+                <p className="mb-2 text-xs text-[#64748B]">
+                  Apenas usuários atribuídos a um grupo recebem as conversas desse grupo e podem interagir nele. Atendimentos normais (DM) continuam sendo distribuídos pelas caixas acima.
+                </p>
+                <div className="max-h-48 overflow-auto rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2 space-y-3">
+                  {channels.length === 0 && (
+                    <p className="text-xs text-[#94A3B8]">Nenhum canal. Conecte um canal em Conexões para sincronizar grupos.</p>
+                  )}
+                  {channels.map((ch) => {
+                    const groupsInChannel = channelGroups.filter((g) => g.channel_id === ch.id && !g.left_at);
+                    if (groupsInChannel.length === 0) return null;
+                    return (
+                      <div key={ch.id}>
+                        <div className="text-xs font-medium text-[#64748B] mb-1">{ch.name}</div>
+                        <div className="space-y-1 pl-1">
+                          {groupsInChannel.map((g) => {
+                            const key = `${g.channel_id}:${g.jid}`;
+                            const checked = userGroupAssignments.some((a) => a.channel_id === g.channel_id && a.group_jid === g.jid);
+                            return (
+                              <label key={key} className="flex items-center gap-2 text-sm text-[#334155]">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    setUserGroupAssignments((prev) =>
+                                      e.target.checked
+                                        ? [...prev, { channel_id: g.channel_id, group_jid: g.jid }]
+                                        : prev.filter((a) => !(a.channel_id === g.channel_id && a.group_jid === g.jid))
+                                    );
+                                  }}
+                                  className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                                />
+                                {g.name || g.jid}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {channels.length > 0 && channelGroups.filter((g) => !g.left_at).length === 0 && (
+                    <p className="text-xs text-[#94A3B8]">Nenhum grupo sincronizado. Sincronize contatos nos canais para listar grupos.</p>
+                  )}
+                </div>
               </div>
               {error && <p className="text-sm text-red-600">{error}</p>}
               <div className="flex justify-end gap-2 pt-2">

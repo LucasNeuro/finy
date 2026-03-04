@@ -16,7 +16,7 @@ export async function PATCH(
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
 
   const { id } = await context.params;
-  let body: { role_id?: string; queue_ids?: string[]; is_active?: boolean; full_name?: string; phone?: string; cpf?: string };
+  let body: { role_id?: string; queue_ids?: string[]; group_assignments?: { channel_id: string; group_jid: string }[]; is_active?: boolean; full_name?: string; phone?: string; cpf?: string };
   try {
     body = await request.json();
   } catch {
@@ -65,6 +65,23 @@ export async function PATCH(
     if (queueIds.length > 0) {
       const rows = queueIds.map((queue_id) => ({ queue_id, user_id: row.user_id, company_id: companyId }));
       await admin.from("queue_assignments").insert(rows);
+    }
+  }
+
+  if (body.group_assignments !== undefined) {
+    await admin.from("channel_group_assignments").delete().eq("user_id", row.user_id).eq("company_id", companyId);
+    const groupAssignments = Array.isArray(body.group_assignments)
+      ? body.group_assignments.filter((a): a is { channel_id: string; group_jid: string } => typeof a?.channel_id === "string" && typeof a?.group_jid === "string")
+      : [];
+    if (groupAssignments.length > 0) {
+      const rows = groupAssignments.map(({ channel_id, group_jid }) => ({
+        channel_id,
+        company_id: companyId,
+        group_jid,
+        user_id: row.user_id,
+      }));
+      const { error: groupErr } = await admin.from("channel_group_assignments").insert(rows);
+      if (groupErr) return NextResponse.json({ error: groupErr.message ?? "Falha ao atualizar responsabilidades em grupos" }, { status: 500 });
     }
   }
 

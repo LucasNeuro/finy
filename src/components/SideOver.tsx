@@ -21,17 +21,24 @@ export function SideOver({
 }: SideOverProps) {
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const prevOpenRef = useRef(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      prevOpenRef.current = false;
+      document.body.style.overflow = "";
+      return;
+    }
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleEscape);
     document.body.style.overflow = "hidden";
-    if (closeButtonRef.current) {
+    // Foca o botão de fechar apenas quando o painel abre (transição false -> true), não a cada re-render
+    if (!prevOpenRef.current && closeButtonRef.current) {
       closeButtonRef.current.focus();
     }
+    prevOpenRef.current = true;
     return () => {
       document.removeEventListener("keydown", handleEscape);
       document.body.style.overflow = "";

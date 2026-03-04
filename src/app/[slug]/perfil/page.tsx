@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Building2, MapPin, Pencil, Link2, Copy, Share2 } from "lucide-react";
@@ -32,16 +32,20 @@ export default function PerfilPage() {
   const base = slug ? `/${slug}` : "";
   const [company, setCompany] = useState<Company | null>(null);
   const [userEmail, setUserEmail] = useState<string>("");
+  const [userId, setUserId] = useState<string>("");
+  const [userAvatarUrl, setUserAvatarUrl] = useState<string>("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarError, setAvatarError] = useState("");
   const [loading, setLoading] = useState(true);
   const [linkData, setLinkData] = useState<{ slug: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
-    createClient()
-      .auth.getUser()
-      .then(({ data: { user } }) => {
-        if (user?.email) setUserEmail(user.email);
-      });
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user?.email) setUserEmail(user.email);
+      if (user?.id) setUserId(user.id);
+    });
   }, []);
 
   useEffect(() => {
@@ -54,6 +58,67 @@ export default function PerfilPage() {
       .catch(() => setCompany(null))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!company || !userId) return;
+    const supabase = createClient();
+    void supabase
+      .from("profiles")
+      .select("avatar_url")
+      .eq("user_id", userId)
+      .eq("company_id", company.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data && typeof data.avatar_url === "string") {
+          setUserAvatarUrl(data.avatar_url);
+        }
+      });
+  }, [company, userId]);
+
+  const handleAvatarChange = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file || !company || !userId) return;
+      setAvatarError("");
+      setAvatarUploading(true);
+      try {
+        const supabase = createClient();
+        const ext = file.name.split(".").pop() || "jpg";
+        const path = `${company.id}/${userId}-${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("user-avatars")
+          .upload(path, file, { upsert: true });
+        if (uploadError) {
+          setAvatarError("Falha ao enviar a foto. Tente novamente.");
+          setAvatarUploading(false);
+          return;
+        }
+        const { data } = supabase.storage.from("user-avatars").getPublicUrl(path);
+        const publicUrl = data?.publicUrl;
+        if (!publicUrl) {
+          setAvatarError("Foto enviada, mas não foi possível gerar o link público.");
+          setAvatarUploading(false);
+          return;
+        }
+        const { error: updateError } = await supabase
+          .from("profiles")
+          .update({ avatar_url: publicUrl })
+          .eq("user_id", userId)
+          .eq("company_id", company.id);
+        if (updateError) {
+          setAvatarError("Foto enviada, mas não foi possível salvar no perfil.");
+          setAvatarUploading(false);
+          return;
+        }
+        setUserAvatarUrl(publicUrl);
+      } catch {
+        setAvatarError("Erro de rede ao enviar a foto.");
+      } finally {
+        setAvatarUploading(false);
+      }
+    },
+    [company, userId]
+  );
 
   useEffect(() => {
     fetch("/api/company/links")
@@ -145,6 +210,48 @@ export default function PerfilPage() {
             <Pencil className="h-4 w-4" />
             Editar Perfil
           </Link>
+        </div>
+      </div>
+
+      {/* Seu usuário */}
+      <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-bold text-[#1E293B]">Seu usuário</h2>
+        <p className="mt-1 text-sm text-[#64748B]">
+          Foto e e-mail usados para identificar você no atendimento.
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-3">
+            {userAvatarUrl ? (
+              <img
+                src={userAvatarUrl}
+                alt="Foto do usuário"
+                className="h-12 w-12 rounded-full object-cover ring-2 ring-[#E2E8F0]"
+              />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-semibold text-[#475569]">
+                {(userEmail || company.email || "U").charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="text-sm">
+              <div className="font-medium text-[#1E293B]">
+                {company.nome_fantasia || company.name}
+              </div>
+              <div className="text-[#64748B]">{userEmail || company.email || "—"}</div>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarChange}
+                disabled={avatarUploading}
+              />
+              {avatarUploading ? "Enviando foto…" : "Alterar foto"}
+            </label>
+            {avatarError && <p className="text-xs text-red-600">{avatarError}</p>}
+          </div>
         </div>
       </div>
 

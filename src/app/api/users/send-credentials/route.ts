@@ -1,9 +1,8 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
-import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-import { sendText } from "@/lib/uazapi/client";
+import { sendText, sendMenu } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
 function getAppOrigin(request: Request): string {
@@ -40,8 +39,8 @@ export async function POST(request: Request) {
   if (!userId) return NextResponse.json({ error: "user_id é obrigatório" }, { status: 400 });
   if (!password) return NextResponse.json({ error: "password é obrigatório para enviar credenciais" }, { status: 400 });
 
-  const supabase = await createClient();
-  const { data: profile, error: profileError } = await supabase
+  const admin = createServiceRoleClient();
+  const { data: profile, error: profileError } = await admin
     .from("profiles")
     .select("id, user_id, email, phone")
     .eq("user_id", userId)
@@ -60,7 +59,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const admin = createServiceRoleClient();
   const { data: channel, error: chError } = await admin
     .from("channels")
     .select("id, uazapi_token_encrypted")
@@ -77,22 +75,39 @@ export async function POST(request: Request) {
     );
   }
 
+  const { data: linkRow } = await admin
+    .from("company_links")
+    .select("slug")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .limit(1)
+    .single();
+  const slug = (linkRow as { slug?: string } | null)?.slug?.trim() || "";
   const origin = getAppOrigin(request);
-  const loginUrl = `${origin}/login`;
+  const loginUrl = slug ? `${origin}/${slug}/login` : `${origin}/login`;
   const email = (profile.email ?? "").trim() || "—";
-  const text =
+
+  const cardText =
     `*ClicVend – Suas credenciais de acesso*\n\n` +
     `E-mail: ${email}\n` +
     `Senha: ${password}\n\n` +
-    `Acesse: ${loginUrl}\n\n` +
-    `_Guarde esta mensagem em local seguro. Recomendamos alterar a senha no primeiro acesso._`;
+    `_Guarde esta mensagem em local seguro. Altere a senha no primeiro acesso._`;
+  const buttonLabel = slug ? `Entrar – ${slug}` : "Acessar login";
+  const result = await sendMenu(channel.uazapi_token_encrypted, phone, {
+    type: "button",
+    text: cardText,
+    choices: [`${buttonLabel}|${loginUrl}`],
+    footerText: "Use o botão abaixo para acessar direto na sua empresa.",
+  });
 
-  const result = await sendText(channel.uazapi_token_encrypted, phone, text);
   if (!result.ok) {
-    return NextResponse.json(
-      { error: "Falha ao enviar pelo WhatsApp. Verifique a conexão.", details: result.error },
-      { status: 502 }
-    );
+    const fallback = await sendText(channel.uazapi_token_encrypted, phone, cardText + `\n\nAcesse: ${loginUrl}`);
+    if (!fallback.ok) {
+      return NextResponse.json(
+        { error: "Falha ao enviar pelo WhatsApp. Verifique a conexão.", details: result.error },
+        { status: 502 }
+      );
+    }
   }
 
   return NextResponse.json({ ok: true, sent_to: phone });

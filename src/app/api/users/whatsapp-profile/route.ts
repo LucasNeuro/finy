@@ -28,9 +28,14 @@ export async function POST(request: Request) {
   }
 
   const rawPhone = typeof body?.phone === "string" ? body.phone : "";
-  const normalizedPhone = rawPhone.replace(/\D/g, "").trim();
+  let normalizedPhone = rawPhone.replace(/\D/g, "").trim();
   if (!normalizedPhone) {
     return NextResponse.json({ error: "Telefone é obrigatório" }, { status: 400 });
+  }
+
+  // Normaliza para padrão brasileiro quando vier sem DDI (ex.: 11999998888 -> 5511999998888)
+  if (normalizedPhone.length === 11 && !normalizedPhone.startsWith("55")) {
+    normalizedPhone = `55${normalizedPhone}`;
   }
 
   const supabase = await createClient();
@@ -68,6 +73,10 @@ export async function POST(request: Request) {
     (data.name && data.name.trim()) ||
     undefined;
 
+  const emailFromChat =
+    (data.lead_email && typeof data.lead_email === "string" && data.lead_email.trim()) ||
+    undefined;
+
   const avatarUrl =
     (typeof data.imagePreview === "string" && data.imagePreview.trim()) ||
     (typeof data.image === "string" && data.image.trim()) ||
@@ -80,6 +89,7 @@ export async function POST(request: Request) {
     full_name: fullName,
     phone: phoneFromChat,
     avatar_url: avatarUrl,
+    email: emailFromChat,
     source: "whatsapp",
   });
 }

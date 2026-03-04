@@ -1140,6 +1140,45 @@ export async function sendText(
   };
 }
 
+/**
+ * Envia menu interativo (botões com URL, etc.).
+ * POST /send/menu - type: "button", choices: ["Texto do botão|https://url.com"]
+ */
+export async function sendMenu(
+  token: string,
+  number: string,
+  payload: {
+    type: "button" | "list" | "poll" | "carousel";
+    text: string;
+    choices: string[];
+    footerText?: string;
+    listButton?: string;
+    imageButton?: string;
+    delay?: number;
+  }
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  const normalizedNumber = number.replace(/\D/g, "");
+  const { data, ok, error, status } = await uazapiFetch("/send/menu", {
+    method: "POST",
+    token,
+    body: {
+      number: normalizedNumber,
+      type: payload.type,
+      text: payload.text,
+      choices: payload.choices,
+      ...(payload.footerText && { footerText: payload.footerText }),
+      ...(payload.listButton && { listButton: payload.listButton }),
+      ...(payload.imageButton && { imageButton: payload.imageButton }),
+      ...(payload.delay != null && { delay: payload.delay }),
+    },
+  });
+  return {
+    ok,
+    data,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
 export const uazapi = {
   getBaseUrl,
   getAdminToken,
@@ -1151,6 +1190,7 @@ export const uazapi = {
   setGlobalWebhook,
   getGlobalWebhook,
   sendText,
+  sendMenu,
   listTriggers,
   editTrigger,
   listQuickReplies,
