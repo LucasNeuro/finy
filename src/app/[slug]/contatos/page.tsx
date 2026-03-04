@@ -602,7 +602,7 @@ export default function ContatosPage() {
         contact={detailContact}
         channelName={detailContact ? channelName(detailContact.channel_id) : ""}
         companySlug={slug}
-        onBlockChange={() => { if (activeTab === "blocked") fetchBlockList(); }}
+        onBlockChange={() => fetchBlockList()}
       />
 
       <GroupDetailSideOver
@@ -612,6 +612,7 @@ export default function ContatosPage() {
         channelName={detailGroup ? channelName(detailGroup.channel_id) : ""}
         companySlug={slug}
         onLeaveSuccess={() => { fetchGroups(); setDetailGroupOpen(false); setDetailGroup(null); }}
+        onUpdateSuccess={() => fetchGroups()}
       />
 
       <ConfirmDialog

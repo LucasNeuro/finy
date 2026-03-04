@@ -663,6 +663,167 @@ export async function leaveGroup(
   return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
 }
 
+/** Participante retornado por POST /group/info */
+export type UazapiGroupParticipant = {
+  JID?: string;
+  IsAdmin?: boolean;
+  [key: string]: unknown;
+};
+
+/** Resposta de POST /group/info (e outros update) */
+export type UazapiGroupInfo = {
+  JID?: string;
+  Name?: string;
+  Topic?: string;
+  InviteLink?: string;
+  IsLocked?: boolean;
+  IsAnnounce?: boolean;
+  IsCommunity?: boolean;
+  Participants?: UazapiGroupParticipant[];
+  [key: string]: unknown;
+};
+
+/**
+ * Obter informações detalhadas do grupo (POST /group/info).
+ * Inclui participantes e link de convite se solicitado.
+ */
+export async function getGroupInfo(
+  token: string,
+  groupjid: string,
+  options?: { getInviteLink?: boolean; getRequestsParticipants?: boolean; force?: boolean }
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<UazapiGroupInfo>("/group/info", {
+    method: "POST",
+    token,
+    body: {
+      groupjid: groupjid.trim(),
+      getInviteLink: options?.getInviteLink ?? true,
+      getRequestsParticipants: options?.getRequestsParticipants ?? false,
+      force: options?.force ?? false,
+    },
+  });
+  return { ok, data: ok ? data : undefined, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Resetar código de convite do grupo (POST /group/resetInviteCode). Apenas admins.
+ */
+export async function resetGroupInviteCode(
+  token: string,
+  groupjid: string
+): Promise<{ ok: boolean; inviteLink?: string; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ InviteLink?: string; group?: UazapiGroupInfo }>("/group/resetInviteCode", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim() },
+  });
+  const inviteLink = data?.InviteLink ?? (data as { InviteLink?: string })?.InviteLink;
+  return {
+    ok,
+    inviteLink,
+    data: data?.group ?? data as UazapiGroupInfo,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Configurar permissões de envio (apenas admins podem enviar) - POST /group/updateAnnounce.
+ */
+export async function updateGroupAnnounce(
+  token: string,
+  groupjid: string,
+  announce: boolean
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ group?: UazapiGroupInfo }>("/group/updateAnnounce", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim(), announce },
+  });
+  return { ok, data: data?.group ?? (data as UazapiGroupInfo), error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Atualizar descrição do grupo - POST /group/updateDescription. Apenas admins.
+ */
+export async function updateGroupDescription(
+  token: string,
+  groupjid: string,
+  description: string
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ group?: UazapiGroupInfo }>("/group/updateDescription", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim(), description: description.slice(0, 512) },
+  });
+  return { ok, data: data?.group ?? (data as UazapiGroupInfo), error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Atualizar imagem do grupo - POST /group/updateImage. URL, base64 ou "remove". Apenas admins.
+ */
+export async function updateGroupImage(
+  token: string,
+  groupjid: string,
+  image: string
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ group?: UazapiGroupInfo }>("/group/updateImage", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim(), image },
+  });
+  return { ok, data: data?.group ?? (data as UazapiGroupInfo), error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Configurar permissão de edição (apenas admins editam nome/desc/imagem) - POST /group/updateLocked.
+ */
+export async function updateGroupLocked(
+  token: string,
+  groupjid: string,
+  locked: boolean
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ group?: UazapiGroupInfo }>("/group/updateLocked", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim(), locked },
+  });
+  return { ok, data: data?.group ?? (data as UazapiGroupInfo), error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Atualizar nome do grupo - POST /group/updateName. Apenas admins. 1–25 caracteres.
+ */
+export async function updateGroupName(
+  token: string,
+  groupjid: string,
+  name: string
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ group?: UazapiGroupInfo }>("/group/updateName", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim(), name: name.slice(0, 25).trim() },
+  });
+  return { ok, data: data?.group ?? (data as UazapiGroupInfo), error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Gerenciar participantes - POST /group/updateParticipants.
+ * action: add | remove | promote | demote | approve | reject. participants: array de JIDs ou números.
+ */
+export async function updateGroupParticipants(
+  token: string,
+  groupjid: string,
+  action: "add" | "remove" | "promote" | "demote" | "approve" | "reject",
+  participants: string[]
+): Promise<{ ok: boolean; data?: UazapiGroupInfo; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ group?: UazapiGroupInfo }>("/group/updateParticipants", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim(), action, participants },
+  });
+  return { ok, data: data?.group ?? (data as UazapiGroupInfo), error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
 /**
  * Configura delay entre mensagens na fila (msg_delay_min, msg_delay_max em segundos).
  */
