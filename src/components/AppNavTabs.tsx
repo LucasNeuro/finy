@@ -30,7 +30,7 @@ const ALL_TABS = [
   // Tags
   { href: "/tags", label: "Tags", icon: Tag, requires: "tags.view" as const },
   { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.manage" as const },
-  { href: "/perfil", label: "Perfil", icon: Settings },
+  { href: "/perfil", label: "Perfil", icon: Settings, requires: "profile.view" as const },
 ];
 
 export function AppNavTabs() {

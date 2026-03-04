@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useState, useEffect, useMemo } from "react";
 import {
   MessageSquare,
   Plug,
@@ -13,22 +14,43 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
-const navItems = [
+const navItems: { href: string; label: string; icon: typeof MessageSquare; requires?: string }[] = [
   { href: "/conversas", label: "Conversas", icon: MessageSquare },
   { href: "/conexoes", label: "Conexões", icon: Plug },
   { href: "/contatos", label: "Contatos", icon: Users },
   { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap },
   { href: "/tags", label: "Tags", icon: Tag },
-  { href: "/perfil", label: "Perfil", icon: Settings },
+  { href: "/perfil", label: "Perfil", icon: Settings, requires: "profile.view" },
 ];
 
 export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
+
+  const [permissions, setPermissions] = useState<string[]>([]);
+  useEffect(() => {
+    if (!slug) {
+      setPermissions([]);
+      return;
+    }
+    fetch("/api/auth/permissions", {
+      credentials: "include",
+      headers: { "X-Company-Slug": slug },
+    })
+      .then((r) => r.json())
+      .then((data) => setPermissions(Array.isArray(data?.permissions) ? data.permissions : []))
+      .catch(() => setPermissions([]));
+  }, [slug]);
+
+  const items = useMemo(() => {
+    return navItems.filter((item) => {
+      if (!item.requires) return true;
+      return permissions.includes(item.requires);
+    });
+  }, [permissions]);
 
   async function handleLogout() {
     await createClient().auth.signOut();
@@ -40,7 +62,7 @@ export function AppSidebar() {
 
   return (
     <aside className="fixed left-0 top-14 z-40 flex h-[calc(100vh-3.5rem)] w-16 shrink-0 flex-col items-center border-r border-black/20 bg-[#0a0a0a] py-3">
-      {navItems.map(({ href, label, icon: Icon }) => {
+      {items.map(({ href, label, icon: Icon }) => {
         const fullHref = `${base}${href}`;
         const isActive = pathname === fullHref || (href !== "/" && pathname?.startsWith(fullHref));
         return (

@@ -29,6 +29,8 @@ export const PERMISSIONS = {
   quickreplies: { view: "quickreplies.view", manage: "quickreplies.manage" },
   // Tags
   tags: { view: "tags.view", manage: "tags.manage" },
+  // Perfil (próprio perfil / link de acesso / foto)
+  profile: { view: "profile.view" },
 } as const;
 
 export type PermissionKey =
@@ -39,7 +41,8 @@ export type PermissionKey =
   | (typeof PERMISSIONS)["reports"][keyof (typeof PERMISSIONS)["reports"]]
   | (typeof PERMISSIONS)["contacts"][keyof (typeof PERMISSIONS)["contacts"]]
   | (typeof PERMISSIONS)["quickreplies"][keyof (typeof PERMISSIONS)["quickreplies"]]
-  | (typeof PERMISSIONS)["tags"][keyof (typeof PERMISSIONS)["tags"]];
+  | (typeof PERMISSIONS)["tags"][keyof (typeof PERMISSIONS)["tags"]]
+  | (typeof PERMISSIONS)["profile"][keyof (typeof PERMISSIONS)["profile"]];
 
 const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.inbox.read,
@@ -65,6 +68,7 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.quickreplies.manage,
   PERMISSIONS.tags.view,
   PERMISSIONS.tags.manage,
+  PERMISSIONS.profile.view,
 ];
 
 export function getAllPermissionKeys(): PermissionKey[] {
@@ -94,6 +98,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   { label: "Contatos", keys: [PERMISSIONS.contacts.view, PERMISSIONS.contacts.manage] },
   { label: "Respostas rápidas", keys: [PERMISSIONS.quickreplies.view, PERMISSIONS.quickreplies.manage] },
   { label: "Tags", keys: [PERMISSIONS.tags.view, PERMISSIONS.tags.manage] },
+  { label: "Perfil", keys: [PERMISSIONS.profile.view] },
 ];
 
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
@@ -120,6 +125,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.quickreplies.manage]: "Gerenciar Respostas rápidas",
   [PERMISSIONS.tags.view]: "Ver Tags",
   [PERMISSIONS.tags.manage]: "Gerenciar Tags",
+  [PERMISSIONS.profile.view]: "Ver Perfil (próprio perfil, link de acesso, foto)",
 };
 
 export function hasPermission(permissions: string[] | null | undefined, key: PermissionKey): boolean {

@@ -13,7 +13,8 @@ DECLARE
     "reports.view","reports.export",
     "contacts.view","contacts.manage",
     "quickreplies.view","quickreplies.manage",
-    "tags.view","tags.manage"
+    "tags.view","tags.manage",
+    "profile.view"
   ]'::jsonb;
 
   supervisor_perms jsonb := '[
@@ -24,7 +25,8 @@ DECLARE
     "reports.view","reports.export",
     "contacts.view",
     "quickreplies.view",
-    "tags.view"
+    "tags.view",
+    "profile.view"
   ]'::jsonb;
 
   agent_perms jsonb := '[
@@ -32,7 +34,8 @@ DECLARE
     "inbox.close","inbox.reopen",
     "contacts.view",
     "quickreplies.view",
-    "tags.view"
+    "tags.view",
+    "profile.view"
   ]'::jsonb;
 
 BEGIN

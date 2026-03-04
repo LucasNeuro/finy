@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { Building2, MapPin, Pencil, Link2, Copy, Share2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 
 type Company = {
   id: string;
@@ -28,9 +29,11 @@ type Company = {
 
 export default function PerfilPage() {
   const params = useParams();
+  const router = useRouter();
   const slug = typeof params?.slug === "string" ? params.slug : "";
   const base = slug ? `/${slug}` : "";
   const [company, setCompany] = useState<Company | null>(null);
+  const [canView, setCanView] = useState<boolean | null>(null);
   const [userEmail, setUserEmail] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>("");
@@ -47,6 +50,29 @@ export default function PerfilPage() {
       if (user?.id) setUserId(user.id);
     });
   }, []);
+
+  useEffect(() => {
+    if (!slug) {
+      setCanView(false);
+      return;
+    }
+    fetch("/api/auth/permissions", {
+      credentials: "include",
+      headers: { "X-Company-Slug": slug },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const perms = Array.isArray(data?.permissions) ? data.permissions : [];
+        setCanView(perms.includes(PERMISSIONS.profile.view));
+      })
+      .catch(() => setCanView(false));
+  }, [slug]);
+
+  useEffect(() => {
+    if (canView === false && base) {
+      router.replace(`${base}/conversas`);
+    }
+  }, [canView, base, router]);
 
   useEffect(() => {
     fetch("/api/company")
@@ -156,6 +182,17 @@ export default function PerfilPage() {
       copyLink();
     }
   };
+
+  if (canView === false || (canView === null && slug)) {
+    return (
+      <div className="flex min-h-[200px] items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-clicvend-orange border-t-transparent" />
+          <span className="text-sm text-[#64748B]">{canView === false ? "Redirecionando…" : "Carregando…"}</span>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

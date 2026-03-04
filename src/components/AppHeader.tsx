@@ -16,12 +16,24 @@ export function AppHeader() {
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
+  const [canViewProfile, setCanViewProfile] = useState(false);
 
   useEffect(() => {
     createClient()
       .auth.getUser()
       .then(({ data: { user: u } }) => setUser(u ?? null));
   }, []);
+
+  useEffect(() => {
+    if (!slug) {
+      setCanViewProfile(false);
+      return;
+    }
+    fetch("/api/auth/permissions", { credentials: "include", headers: { "X-Company-Slug": slug } })
+      .then((r) => r.json())
+      .then((data) => setCanViewProfile(Array.isArray(data?.permissions) && data.permissions.includes("profile.view")))
+      .catch(() => setCanViewProfile(false));
+  }, [slug]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -68,14 +80,16 @@ export function AppHeader() {
 
           {dropdownOpen && (
             <div className="absolute right-0 top-full z-50 mt-2 w-52 rounded-xl border border-[#E2E8F0] bg-white py-1.5 shadow-lg ring-1 ring-black/5">
-              <Link
-                href={`${base}/perfil`}
-                onClick={() => setDropdownOpen(false)}
-                className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B] transition-colors"
-              >
-                <Settings className="h-4 w-4 shrink-0" />
-                Configurações
-              </Link>
+              {canViewProfile && (
+                <Link
+                  href={`${base}/perfil`}
+                  onClick={() => setDropdownOpen(false)}
+                  className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B] transition-colors"
+                >
+                  <Settings className="h-4 w-4 shrink-0" />
+                  Configurações
+                </Link>
+              )}
             </div>
           )}
         </div>
