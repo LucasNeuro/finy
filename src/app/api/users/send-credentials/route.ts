@@ -84,7 +84,8 @@ export async function POST(request: Request) {
     .single();
   const slug = (linkRow as { slug?: string } | null)?.slug?.trim() || "";
   const origin = getAppOrigin(request);
-  const loginUrl = slug ? `${origin}/${slug}/login` : `${origin}/login`;
+  const loginPath = slug ? `/login?returnUrl=/${encodeURIComponent(slug)}` : "/login";
+  const loginUrl = `${origin}${loginPath}`;
   const email = (profile.email ?? "").trim() || "—";
 
   const cardText =

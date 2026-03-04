@@ -43,11 +43,10 @@ export function useLogin() {
         ? (profiles[0].companies as unknown as { slug: string }).slug
         : null;
     setLoading(false);
-    const target = returnUrl && returnUrl.startsWith("/") && !returnUrl.startsWith("//")
-      ? returnUrl
-      : slug
-        ? `/${slug}`
-        : "/sem-empresa";
+    let target = slug ? `/${slug}` : "/sem-empresa";
+    if (returnUrl && returnUrl.startsWith("/") && !returnUrl.startsWith("//")) {
+      target = returnUrl.endsWith("/login") ? returnUrl.replace(/\/login$/, "") || "/" : returnUrl;
+    }
     router.push(target);
     router.refresh();
   }

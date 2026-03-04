@@ -43,7 +43,8 @@ export async function middleware(request: NextRequest) {
   if (firstSegment && !RESERVED_SLUGS.has(firstSegment) && !pathname.startsWith("/_next") && !pathname.startsWith("/api")) {
     if (!user) {
       const url = new URL("/login", request.url);
-      url.searchParams.set("returnUrl", pathname);
+      const returnPath = pathname.endsWith("/login") ? `/${firstSegment}` : pathname;
+      url.searchParams.set("returnUrl", returnPath);
       return NextResponse.redirect(url);
     }
 
