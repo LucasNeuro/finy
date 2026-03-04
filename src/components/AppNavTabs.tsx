@@ -16,13 +16,19 @@ import {
 } from "lucide-react";
 
 const ALL_TABS = [
-  { href: "/conversas", label: "Conversas", icon: MessageSquare },
+  // Atendimento / Conversas
+  { href: "/conversas", label: "Conversas", icon: MessageSquare, requires: "inbox.read" as const },
   { href: "/tickets", label: "Tickets", icon: Ticket, requires: "inbox.see_all" as const },
-  { href: "/conexoes", label: "Conexões", icon: Plug },
-  { href: "/filas", label: "Filas", icon: Inbox },
-  { href: "/contatos", label: "Contatos", icon: Users },
-  { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap },
-  { href: "/tags", label: "Tags", icon: Tag },
+  // Conexões
+  { href: "/conexoes", label: "Conexões", icon: Plug, requires: "channels.view" as const },
+  // Filas
+  { href: "/filas", label: "Filas", icon: Inbox, requires: "queues.view" as const },
+  // Contatos
+  { href: "/contatos", label: "Contatos", icon: Users, requires: "contacts.view" as const },
+  // Respostas rápidas
+  { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap, requires: "quickreplies.view" as const },
+  // Tags
+  { href: "/tags", label: "Tags", icon: Tag, requires: "tags.view" as const },
   { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.manage" as const },
   { href: "/perfil", label: "Perfil", icon: Settings },
 ];
