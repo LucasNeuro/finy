@@ -548,6 +548,72 @@ export async function listGroups(
 }
 
 /**
+ * Detalhes completos do chat/contato (POST /chat/details).
+ * number: telefone (ex: 5511999999999) ou ID do grupo (ex: 120363123456789012@g.us).
+ * preview: true para imagem em tamanho preview (menor).
+ */
+export type ChatDetails = {
+  id?: string;
+  wa_fastid?: string;
+  wa_chatid?: string;
+  wa_archived?: boolean;
+  wa_contactName?: string;
+  wa_name?: string;
+  name?: string;
+  image?: string;
+  imagePreview?: string;
+  phone?: string;
+  owner?: string;
+  wa_isBlocked?: boolean;
+  wa_isGroup?: boolean;
+  wa_isGroup_admin?: boolean;
+  wa_isGroup_announce?: boolean;
+  wa_isGroup_community?: boolean;
+  wa_isGroup_member?: boolean;
+  wa_isPinned?: boolean;
+  wa_unreadCount?: number;
+  wa_muteEndTime?: number;
+  wa_lastMessageTextVote?: string;
+  wa_lastMessageType?: string;
+  wa_lastMsgTimestamp?: number;
+  wa_lastMessageSender?: string;
+  wa_label?: string[];
+  common_groups?: string;
+  lead_name?: string;
+  lead_fullName?: string;
+  lead_email?: string;
+  lead_status?: string;
+  lead_notes?: string;
+  lead_tags?: string[];
+  lead_field01?: string;
+  lead_field02?: string;
+  lead_field03?: string;
+  lead_field04?: string;
+  lead_field05?: string;
+  chatbot_summary?: string;
+  chatbot_lastTrigger_id?: string;
+  chatbot_disableUntil?: number;
+  [key: string]: unknown;
+};
+
+export async function getChatDetails(
+  token: string,
+  number: string,
+  opts?: { preview?: boolean }
+): Promise<{ ok: boolean; data?: ChatDetails; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<ChatDetails>("/chat/details", {
+    method: "POST",
+    token,
+    body: { number: number.trim(), preview: opts?.preview ?? false },
+  });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
  * Configura delay entre mensagens na fila (msg_delay_min, msg_delay_max em segundos).
  */
 export async function updateDelaySettings(
