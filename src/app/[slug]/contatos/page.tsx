@@ -14,6 +14,7 @@ import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContactDetailSideOver, type Contact } from "./ContactDetailSideOver";
 import { GroupDetailSideOver, type Group } from "./GroupDetailSideOver";
+import { GroupManageSideOver } from "./GroupManageSideOver";
 
 type Channel = { id: string; name: string };
 
@@ -75,13 +76,15 @@ export default function ContatosPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [filterChannelId, setFilterChannelId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"contacts" | "groups" | "blocked">("contacts");
+  const [activeTab, setActiveTab] = useState<"contacts" | "groups" | "blocked" | "groupsManage">("contacts");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
   const [detailContact, setDetailContact] = useState<Contact | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailGroup, setDetailGroup] = useState<Group | null>(null);
   const [detailGroupOpen, setDetailGroupOpen] = useState(false);
+  const [manageGroup, setManageGroup] = useState<Group | null>(null);
+  const [manageGroupOpen, setManageGroupOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [blockList, setBlockList] = useState<string[]>([]);
@@ -411,6 +414,16 @@ export default function ContatosPage() {
         >
           <Ban className="h-4 w-4" />
           Bloqueados {filterChannelId ? `(${blockList.length})` : ""}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("groupsManage")}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            activeTab === "groupsManage" ? "border-clicvend-orange text-clicvend-orange" : "border-transparent text-[#64748B] hover:text-[#1E293B]"
+          }`}
+        >
+          <MessageCircle className="h-4 w-4" />
+          Grupos e comunidades
         </button>
       </div>
 
