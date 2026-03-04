@@ -614,6 +614,56 @@ export async function getChatDetails(
 }
 
 /**
+ * Bloqueia ou desbloqueia contato (POST /chat/block).
+ * number: telefone ou JID (ex: 5511999999999 ou 5511999999999@s.whatsapp.net).
+ */
+export async function blockChat(
+  token: string,
+  number: string,
+  block: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/chat/block", {
+    method: "POST",
+    token,
+    body: { number: number.trim(), block },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Lista contatos bloqueados (GET /chat/blocklist).
+ */
+export async function getBlocklist(token: string): Promise<{
+  ok: boolean;
+  data?: string[];
+  error?: string;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<{ blockList?: string[] }>("/chat/blocklist", { token });
+  const list = data?.blockList ?? (Array.isArray(data) ? data : undefined);
+  return {
+    ok,
+    data: ok && Array.isArray(list) ? list : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Sair de um grupo (POST /group/leave).
+ * groupjid: ID do grupo (ex: 120363324255083289@g.us).
+ */
+export async function leaveGroup(
+  token: string,
+  groupjid: string
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/group/leave", {
+    method: "POST",
+    token,
+    body: { groupjid: groupjid.trim() },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
  * Configura delay entre mensagens na fila (msg_delay_min, msg_delay_max em segundos).
  */
 export async function updateDelaySettings(

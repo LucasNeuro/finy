@@ -9,15 +9,60 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContactDetailSideOver, type Contact } from "./ContactDetailSideOver";
+import { GroupDetailSideOver, type Group } from "./GroupDetailSideOver";
 
 type Channel = { id: string; name: string };
-type Group = { id: string; channel_id: string; jid: string; name: string | null; topic: string | null; invite_link: string | null; synced_at: string };
 
 const PAGE_SIZE = 25;
+
+function BlockedRow({
+  jid,
+  channelId,
+  apiHeaders,
+  onUnblock,
+}: {
+  jid: string;
+  channelId: string;
+  apiHeaders: Record<string, string> | undefined;
+  onUnblock: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const number = jid.replace(/@s\.whatsapp\.net$/, "");
+  const handleUnblock = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/contacts/block", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ channel_id: channelId, number, block: false }),
+      });
+      if (r.ok) onUnblock();
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <tr className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
+      <td className="px-4 py-3 text-sm text-[#1E293B]">{jid}</td>
+      <td className="px-4 py-3 text-right">
+        <button
+          type="button"
+          onClick={handleUnblock}
+          disabled={loading}
+          className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-60"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Desbloquear
+        </button>
+      </td>
+    </tr>
+  );
+}
 
 export default function ContatosPage() {
   const pathname = usePathname();
@@ -30,13 +75,17 @@ export default function ContatosPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [filterChannelId, setFilterChannelId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"contacts" | "groups">("contacts");
+  const [activeTab, setActiveTab] = useState<"contacts" | "groups" | "blocked">("contacts");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
   const [detailContact, setDetailContact] = useState<Contact | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [detailGroup, setDetailGroup] = useState<Group | null>(null);
+  const [detailGroupOpen, setDetailGroupOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [blockList, setBlockList] = useState<string[]>([]);
+  const [blockListLoading, setBlockListLoading] = useState(false);
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -61,6 +110,22 @@ export default function ContatosPage() {
       .catch(() => setGroups([]));
   }, [filterChannelId, slug]);
 
+  const fetchBlockList = useCallback(() => {
+    if (!filterChannelId) {
+      setBlockList([]);
+      return;
+    }
+    setBlockListLoading(true);
+    fetch(`/api/contacts/blocklist?channel_id=${encodeURIComponent(filterChannelId)}`, {
+      credentials: "include",
+      headers: apiHeaders,
+    })
+      .then((r) => r.json())
+      .then((data) => setBlockList(Array.isArray(data?.blockList) ? data.blockList : []))
+      .catch(() => setBlockList([]))
+      .finally(() => setBlockListLoading(false));
+  }, [filterChannelId, slug]);
+
   useEffect(() => {
     setLoading(true);
     fetchChannels().then(() => setLoading(false));
@@ -73,6 +138,11 @@ export default function ContatosPage() {
   useEffect(() => {
     fetchGroups();
   }, [fetchGroups]);
+
+  useEffect(() => {
+    if (activeTab === "blocked" && filterChannelId) fetchBlockList();
+    else if (activeTab !== "blocked") setBlockList([]);
+  }, [activeTab, filterChannelId, fetchBlockList]);
 
   const handleSync = async (channelId: string) => {
     setSyncing(channelId);
@@ -96,11 +166,23 @@ export default function ContatosPage() {
     }
   };
 
+  const handleSyncAll = async () => {
+    if (channels.length === 0) return;
+    for (const ch of channels) {
+      await handleSync(ch.id);
+    }
+  };
+
   const channelName = (id: string) => channels.find((c) => c.id === id)?.name ?? id.slice(0, 8);
 
   const openDetail = (contact: Contact) => {
     setDetailContact(contact);
     setDetailOpen(true);
+  };
+
+  const openGroupDetail = (group: Group) => {
+    setDetailGroup(group);
+    setDetailGroupOpen(true);
   };
 
   const handleDeleteContact = async () => {
@@ -181,9 +263,65 @@ export default function ContatosPage() {
     [channels]
   );
 
+  const groupColumns = useMemo<ColumnDef<Group>[]>(
+    () => [
+      {
+        header: "Nome",
+        accessorFn: (g) => g.name ?? "—",
+        cell: ({ getValue }) => (
+          <span className="font-medium text-[#1E293B]">{String(getValue())}</span>
+        ),
+      },
+      {
+        header: "Descrição",
+        accessorFn: (g) => g.topic ?? "—",
+        cell: ({ getValue }) => (
+          <span className="text-sm text-[#64748B] max-w-[200px] truncate block" title={String(getValue())}>
+            {String(getValue())}
+          </span>
+        ),
+      },
+      {
+        header: "Conexão",
+        accessorKey: "channel_id",
+        cell: ({ row }) => (
+          <span className="inline-flex items-center gap-1 text-sm text-[#64748B]">
+            <Plug className="h-4 w-4 text-clicvend-orange" />
+            {channelName(row.original.channel_id)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => (
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => openGroupDetail(row.original)}
+              className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+              title="Ver detalhes"
+            >
+              <Eye className="h-4 w-4" />
+            </button>
+          </div>
+        ),
+      },
+    ],
+    [channels]
+  );
+
   const table = useReactTable({
     data: contacts,
     columns: contactColumns,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    initialState: { pagination: { pageSize: PAGE_SIZE } },
+  });
+
+  const groupsTable = useReactTable({
+    data: groups,
+    columns: groupColumns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize: PAGE_SIZE } },
@@ -217,6 +355,17 @@ export default function ContatosPage() {
               Sincronizar {ch.name}
             </button>
           ))}
+          {channels.length > 1 && (
+            <button
+              type="button"
+              onClick={handleSyncAll}
+              disabled={syncing !== null}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-clicvend-orange bg-white px-3 py-2 text-sm font-medium text-clicvend-orange hover:bg-[#FFF7ED] disabled:opacity-60"
+            >
+              {syncing !== null ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Sincronizar todos
+            </button>
+          )}
           {channels.length === 0 && !loading && (
             <Link
               href={slug ? `/${slug}/conexoes` : "/conexoes"}
@@ -252,6 +401,16 @@ export default function ContatosPage() {
         >
           <MessageCircle className="h-4 w-4" />
           Grupos ({groups.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("blocked")}
+          className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            activeTab === "blocked" ? "border-clicvend-orange text-clicvend-orange" : "border-transparent text-[#64748B] hover:text-[#1E293B]"
+          }`}
+        >
+          <Ban className="h-4 w-4" />
+          Bloqueados {filterChannelId ? `(${blockList.length})` : ""}
         </button>
       </div>
 
@@ -327,8 +486,8 @@ export default function ContatosPage() {
             </>
           )}
         </div>
-      ) : (
-        <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
+      ) : activeTab === "groups" ? (
+        <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden flex flex-col">
           {groups.length === 0 ? (
             <div className="p-8 text-center text-[#64748B]">
               <MessageCircle className="mx-auto h-12 w-12 text-[#94A3B8]" />
@@ -336,36 +495,106 @@ export default function ContatosPage() {
               <p className="mt-1 text-sm">Quando o número for adicionado a grupos, sincronize para listar aqui.</p>
             </div>
           ) : (
+            <>
+              <div className="overflow-auto max-h-[60vh] min-h-[200px]">
+                <table className="w-full min-w-[520px] border-collapse">
+                  <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+                    {groupsTable.getHeaderGroups().map((hg) => (
+                      <tr key={hg.id} className="border-b border-[#E2E8F0]">
+                        {hg.headers.map((h) => (
+                          <th
+                            key={h.id}
+                            className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]"
+                          >
+                            {flexRender(h.column.columnDef.header, h.getContext())}
+                          </th>
+                        ))}
+                      </tr>
+                    ))}
+                  </thead>
+                  <tbody>
+                    {groupsTable.getRowModel().rows.map((row) => (
+                      <tr
+                        key={row.id}
+                        className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]"
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} className="px-4 py-3">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
+                <span className="text-sm text-[#64748B]">
+                  Página {groupsTable.getState().pagination.pageIndex + 1} de {groupsTable.getPageCount() || 1} ({groups.length} grupos)
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => groupsTable.previousPage()}
+                    disabled={!groupsTable.getCanPreviousPage()}
+                    className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => groupsTable.nextPage()}
+                    disabled={!groupsTable.getCanNextPage()}
+                    className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      ) : activeTab === "blocked" ? (
+        <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
+          {!filterChannelId ? (
+            <div className="p-8 text-center text-[#64748B]">
+              <Ban className="mx-auto h-12 w-12 text-[#94A3B8]" />
+              <p className="mt-2">Selecione uma conexão para ver contatos bloqueados.</p>
+            </div>
+          ) : blockListLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
+            </div>
+          ) : blockList.length === 0 ? (
+            <div className="p-8 text-center text-[#64748B]">
+              <Ban className="mx-auto h-12 w-12 text-[#94A3B8]" />
+              <p className="mt-2">Nenhum contato bloqueado nesta conexão.</p>
+            </div>
+          ) : (
             <div className="overflow-auto max-h-[60vh]">
-              <table className="w-full min-w-[520px]">
+              <table className="w-full min-w-[400px]">
                 <thead>
                   <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Nome</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Descrição</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Conexão</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Número / JID</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">Ação</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {groups.map((g) => (
-                    <tr key={g.id} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
-                      <td className="px-4 py-3 font-medium text-[#1E293B]">{g.name || "—"}</td>
-                      <td className="px-4 py-3 text-sm text-[#64748B] max-w-[200px] truncate" title={g.topic ?? undefined}>
-                        {g.topic || "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1 text-sm text-[#64748B]">
-                          <Plug className="h-4 w-4 text-clicvend-orange" />
-                          {channelName(g.channel_id)}
-                        </span>
-                      </td>
-                    </tr>
+                  {blockList.map((jid) => (
+                    <BlockedRow
+                      key={jid}
+                      jid={jid}
+                      channelId={filterChannelId}
+                      apiHeaders={apiHeaders}
+                      onUnblock={() => fetchBlockList()}
+                    />
                   ))}
                 </tbody>
               </table>
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
       <ContactDetailSideOver
         open={detailOpen}
@@ -373,6 +602,16 @@ export default function ContatosPage() {
         contact={detailContact}
         channelName={detailContact ? channelName(detailContact.channel_id) : ""}
         companySlug={slug}
+        onBlockChange={() => { if (activeTab === "blocked") fetchBlockList(); }}
+      />
+
+      <GroupDetailSideOver
+        open={detailGroupOpen}
+        onClose={() => { setDetailGroupOpen(false); setDetailGroup(null); }}
+        group={detailGroup}
+        channelName={detailGroup ? channelName(detailGroup.channel_id) : ""}
+        companySlug={slug}
+        onLeaveSuccess={() => { fetchGroups(); setDetailGroupOpen(false); setDetailGroup(null); }}
       />
 
       <ConfirmDialog

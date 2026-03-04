@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { SideOver } from "@/components/SideOver";
-import { Loader2, User } from "lucide-react";
+import { Loader2, User, Ban } from "lucide-react";
 
 export type Contact = {
   id: string;
@@ -38,6 +38,7 @@ type ContactDetailSideOverProps = {
   contact: Contact | null;
   channelName: string;
   companySlug: string;
+  onBlockChange?: () => void;
 };
 
 function numberForApi(contact: Contact): string {
@@ -53,12 +54,17 @@ export function ContactDetailSideOver({
   contact,
   channelName,
   companySlug,
+  onBlockChange,
 }: ContactDetailSideOverProps) {
   const [details, setDetails] = useState<ChatDetails | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [blockLoading, setBlockLoading] = useState(false);
 
-  const apiHeaders = companySlug ? { "X-Company-Slug": companySlug } : undefined;
+  const apiHeaders = useMemo(
+    () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
+    [companySlug]
+  );
 
   const fetchDetails = useCallback(() => {
     if (!contact) return;
@@ -88,6 +94,29 @@ export function ContactDetailSideOver({
       setError(null);
     }
   }, [open, contact, fetchDetails]);
+
+  const handleBlockToggle = async () => {
+    if (!contact) return;
+    setBlockLoading(true);
+    try {
+      const r = await fetch("/api/contacts/block", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_id: contact.channel_id,
+          number: numberForApi(contact),
+          block: !details?.wa_isBlocked,
+        }),
+      });
+      if (r.ok) {
+        setDetails((d) => (d ? { ...d, wa_isBlocked: !d.wa_isBlocked } : d));
+        onBlockChange?.();
+      }
+    } finally {
+      setBlockLoading(false);
+    }
+  };
 
   const displayName =
     details?.name ?? details?.wa_name ?? details?.wa_contactName ?? contact?.contact_name ?? contact?.first_name ?? "—";
@@ -130,6 +159,21 @@ export function ContactDetailSideOver({
                   <p className="font-semibold text-[#1E293B]">{displayName}</p>
                   <p className="text-sm text-[#64748B]">{displayPhone}</p>
                   <p className="mt-1 text-xs text-[#94A3B8]">{channelName}</p>
+                  {details && (
+                    <button
+                      type="button"
+                      onClick={handleBlockToggle}
+                      disabled={blockLoading}
+                      className={`mt-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
+                        details.wa_isBlocked
+                          ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          : "bg-red-50 text-red-700 hover:bg-red-100"
+                      } disabled:opacity-60`}
+                    >
+                      {blockLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                      {details.wa_isBlocked ? "Desbloquear" : "Bloquear"}
+                    </button>
+                  )}
                 </div>
               </div>
               {details && (
