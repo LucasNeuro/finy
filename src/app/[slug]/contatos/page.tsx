@@ -82,11 +82,22 @@ function GroupsManageActions({
 }) {
   const [createName, setCreateName] = useState("");
   const [selectedParticipants, setSelectedParticipants] = useState<Contact[]>([]);
+  const [participantSearch, setParticipantSearch] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
 
   const channelContacts = contacts.filter((c) => c.channel_id === channelId);
+  const participantSearchLower = participantSearch.trim().toLowerCase();
+  const availableContacts = channelContacts.filter(
+    (c) =>
+      !selectedParticipants.some((p) => p.id === c.id) &&
+      (!participantSearchLower ||
+        (c.contact_name?.toLowerCase().includes(participantSearchLower) ||
+          c.first_name?.toLowerCase().includes(participantSearchLower) ||
+          c.phone?.toLowerCase().includes(participantSearchLower) ||
+          c.jid?.toLowerCase().includes(participantSearchLower)))
+  );
   const addParticipant = (contact: Contact) => {
     if (selectedParticipants.some((p) => p.id === contact.id || p.jid === contact.jid)) return;
     setSelectedParticipants((prev) => [...prev, contact]);
@@ -174,6 +185,13 @@ function GroupsManageActions({
           className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-3"
         />
         <label className="block text-xs font-medium text-[#64748B] mb-1.5">Participantes (contatos da instância)</label>
+        <input
+          type="search"
+          value={participantSearch}
+          onChange={(e) => setParticipantSearch(e.target.value)}
+          placeholder="Buscar contato por nome ou telefone..."
+          className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-2"
+        />
         <select
           value=""
           onChange={(e) => {
@@ -185,15 +203,17 @@ function GroupsManageActions({
           }}
           className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] mb-2"
         >
-          <option value="">Selecione um contato para adicionar</option>
-          {channelContacts
-            .filter((c) => !selectedParticipants.some((p) => p.id === c.id))
-            .map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.contact_name || c.first_name || c.phone || c.jid}
-                {c.phone ? ` (${c.phone})` : ""}
-              </option>
-            ))}
+          <option value="">
+            {availableContacts.length === 0 && channelContacts.length > 0
+              ? "Nenhum contato encontrado para a busca"
+              : "Selecione um contato para adicionar"}
+          </option>
+          {availableContacts.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.contact_name || c.first_name || c.phone || c.jid}
+              {c.phone ? ` (${c.phone})` : ""}
+            </option>
+          ))}
         </select>
         {channelContacts.length === 0 && (
           <p className="text-xs text-amber-600 mb-2">Nenhum contato nesta conexão. Sincronize contatos na aba Contatos primeiro.</p>
@@ -287,6 +307,7 @@ export default function ContatosPage() {
   const [deleting, setDeleting] = useState(false);
   const [blockList, setBlockList] = useState<string[]>([]);
   const [blockListLoading, setBlockListLoading] = useState(false);
+  const [listSearch, setListSearch] = useState("");
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -512,8 +533,31 @@ export default function ContatosPage() {
     [channels]
   );
 
+  const searchLower = listSearch.trim().toLowerCase();
+  const filteredContacts = useMemo(() => {
+    if (!searchLower) return contacts;
+    return contacts.filter(
+      (c) =>
+        (c.contact_name?.toLowerCase().includes(searchLower) ||
+          c.first_name?.toLowerCase().includes(searchLower) ||
+          c.phone?.toLowerCase().includes(searchLower) ||
+          c.jid?.toLowerCase().includes(searchLower))
+    );
+  }, [contacts, searchLower]);
+  const filteredGroups = useMemo(() => {
+    if (!searchLower) return groups;
+    return groups.filter(
+      (g) =>
+        (g.name?.toLowerCase().includes(searchLower) || g.topic?.toLowerCase().includes(searchLower))
+    );
+  }, [groups, searchLower]);
+  const filteredBlockList = useMemo(() => {
+    if (!searchLower) return blockList;
+    return blockList.filter((jid) => jid.toLowerCase().includes(searchLower));
+  }, [blockList, searchLower]);
+
   const table = useReactTable({
-    data: contacts,
+    data: filteredContacts,
     columns: contactColumns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -521,7 +565,7 @@ export default function ContatosPage() {
   });
 
   const groupsTable = useReactTable({
-    data: groups,
+    data: filteredGroups,
     columns: groupColumns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -544,6 +588,21 @@ export default function ContatosPage() {
               <option key={ch.id} value={ch.id}>{ch.name}</option>
             ))}
           </select>
+          <input
+            type="search"
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            placeholder={
+              activeTab === "contacts"
+                ? "Buscar contatos..."
+                : activeTab === "groups" || activeTab === "groupsManage"
+                  ? "Buscar grupos..."
+                  : activeTab === "blocked"
+                    ? "Buscar bloqueados..."
+                    : "Buscar..."
+            }
+            className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange min-w-[180px]"
+          />
           {channels.map((ch) => (
             <button
               key={ch.id}
@@ -611,7 +670,7 @@ export default function ContatosPage() {
           }`}
         >
           <Ban className="h-4 w-4" />
-          Bloqueados {filterChannelId ? `(${blockList.length})` : ""}
+          Bloqueados {filterChannelId ? `(${listSearch.trim() ? filteredBlockList.length : blockList.length})` : ""}
         </button>
         <button
           type="button"
@@ -776,10 +835,14 @@ export default function ContatosPage() {
             <div className="flex justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
             </div>
-          ) : blockList.length === 0 ? (
+          ) : filteredBlockList.length === 0 ? (
             <div className="p-8 text-center text-[#64748B]">
               <Ban className="mx-auto h-12 w-12 text-[#94A3B8]" />
-              <p className="mt-2">Nenhum contato bloqueado nesta conexão.</p>
+              <p className="mt-2">
+                {blockList.length === 0
+                  ? "Nenhum contato bloqueado nesta conexão."
+                  : "Nenhum resultado para a busca."}
+              </p>
             </div>
           ) : (
             <div className="overflow-auto max-h-[60vh]">
@@ -791,7 +854,7 @@ export default function ContatosPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {blockList.map((jid) => (
+                  {filteredBlockList.map((jid) => (
                     <BlockedRow
                       key={jid}
                       jid={jid}
@@ -824,8 +887,12 @@ export default function ContatosPage() {
               />
               <div>
                 <h2 className="text-lg font-semibold text-[#1E293B] mb-3">Seus grupos nesta conexão</h2>
-                {groups.filter((g) => g.channel_id === filterChannelId).length === 0 ? (
-                  <p className="text-sm text-[#64748B]">Nenhum grupo nesta conexão. Crie um ou entre por link acima.</p>
+                {filteredGroups.filter((g) => g.channel_id === filterChannelId).length === 0 ? (
+                  <p className="text-sm text-[#64748B]">
+                    {groups.filter((g) => g.channel_id === filterChannelId).length === 0
+                      ? "Nenhum grupo nesta conexão. Crie um ou entre por link acima."
+                      : "Nenhum resultado para a busca."}
+                  </p>
                 ) : (
                   <div className="overflow-auto max-h-[40vh] rounded-lg border border-[#E2E8F0]">
                     <table className="w-full min-w-[400px]">
@@ -837,7 +904,7 @@ export default function ContatosPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {groups
+                        {filteredGroups
                           .filter((g) => g.channel_id === filterChannelId)
                           .map((group) => (
                             <tr key={group.jid} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
