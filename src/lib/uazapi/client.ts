@@ -1114,7 +1114,77 @@ export async function getGlobalWebhook(): Promise<{
 }
 
 /**
+ * Busca chats com filtros (POST /chat/find).
+ * Útil para sincronizar histórico ao conectar.
+ */
+export type UazapiChat = {
+  wa_chatid?: string;
+  wa_contactName?: string;
+  wa_name?: string;
+  wa_isGroup?: boolean;
+  wa_lastMsgTimestamp?: number;
+  [key: string]: unknown;
+};
+
+export async function findChats(
+  token: string,
+  opts?: { limit?: number; offset?: number; sort?: string; wa_isGroup?: boolean }
+): Promise<{ ok: boolean; data?: { chats?: UazapiChat[] }; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ chats?: UazapiChat[] }>("/chat/find", {
+    method: "POST",
+    token,
+    body: {
+      limit: opts?.limit ?? 50,
+      offset: opts?.offset ?? 0,
+      sort: opts?.sort ?? "-wa_lastMsgTimestamp",
+      ...(opts?.wa_isGroup !== undefined && { wa_isGroup: opts.wa_isGroup }),
+    },
+  });
+  return {
+    ok,
+    data,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Busca mensagens de um chat (POST /message/find).
+ */
+export type UazapiMessage = {
+  id?: string;
+  chatid?: string;
+  from?: string;
+  fromMe?: boolean;
+  body?: string;
+  text?: string;
+  timestamp?: number;
+  [key: string]: unknown;
+};
+
+export async function findMessages(
+  token: string,
+  chatid: string,
+  opts?: { limit?: number; offset?: number }
+): Promise<{ ok: boolean; data?: { messages?: UazapiMessage[] }; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<{ messages?: UazapiMessage[] }>("/message/find", {
+    method: "POST",
+    token,
+    body: {
+      chatid: chatid.trim(),
+      limit: opts?.limit ?? 100,
+      offset: opts?.offset ?? 0,
+    },
+  });
+  return {
+    ok,
+    data,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
  * Envia mensagem de texto (token da instância).
+ * number: telefone ou JID (ex: 5511999999999 ou 120363...@g.us para grupos).
  */
 export async function sendText(
   token: string,
@@ -1122,7 +1192,7 @@ export async function sendText(
   text: string,
   opts?: { replyid?: string; delay?: number }
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  const normalizedNumber = number.replace(/\D/g, "");
+  const normalizedNumber = number.includes("@") ? number : number.replace(/\D/g, "");
   const { data, ok, error, status } = await uazapiFetch("/send/text", {
     method: "POST",
     token,

@@ -13,11 +13,11 @@ export default function AppLayout({
       <div className="flex flex-1 overflow-hidden pt-14">
         <AppSidebar />
         <div className="ml-16 flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Barra de abas fixa no layout (mesma cor do minidrawer) */}
-          <header className="sticky top-0 z-30 shrink-0">
+          {/* Barra de abas fixa ao rolar (sempre visível abaixo do header) */}
+          <header className="fixed left-16 right-0 top-14 z-30 shrink-0 border-b border-white/10 bg-[#0a0a0a]">
             <AppNavTabs />
           </header>
-          <main className="min-h-0 flex-1 overflow-auto bg-[#FAFBFC]">{children}</main>
+          <main className="min-h-0 flex-1 overflow-auto bg-[#FAFBFC] pt-12">{children}</main>
         </div>
       </div>
     </div>

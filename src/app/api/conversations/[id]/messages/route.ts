@@ -1,4 +1,4 @@
-import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
+import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { createClient } from "@/lib/supabase/server";
 import { sendText } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
@@ -7,7 +7,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -26,7 +26,7 @@ export async function POST(
   const supabase = await createClient();
   const { data: conversation, error: convError } = await supabase
     .from("conversations")
-    .select("id, company_id, channel_id, customer_phone")
+    .select("id, company_id, channel_id, customer_phone, wa_chat_jid, is_group")
     .eq("id", conversationId)
     .eq("company_id", companyId)
     .single();
@@ -48,7 +48,10 @@ export async function POST(
   }
 
   const token = channel.uazapi_token_encrypted;
-  const number = conversation.customer_phone;
+  const number =
+    conversation.is_group && conversation.wa_chat_jid
+      ? conversation.wa_chat_jid
+      : conversation.customer_phone;
   const result = await sendText(token, number, content);
   if (!result.ok) {
     return NextResponse.json(

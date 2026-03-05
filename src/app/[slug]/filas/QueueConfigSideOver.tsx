@@ -43,6 +43,12 @@ export function QueueConfigSideOver({
   const [specialDates, setSpecialDates] = useState<SpecialDateItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
 
+  const [companyUsers, setCompanyUsers] = useState<{ user_id: string; full_name?: string; email?: string }[]>([]);
+  const [assignedUserIds, setAssignedUserIds] = useState<Set<string>>(new Set());
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [assignmentsSaving, setAssignmentsSaving] = useState(false);
+  const [assignmentsError, setAssignmentsError] = useState("");
+
   const apiHeaders = companySlug ? { "X-Company-Slug": companySlug } : undefined;
 
   const fetchQueue = useCallback(async () => {
@@ -76,6 +82,70 @@ export function QueueConfigSideOver({
       fetchQueue();
     }
   }, [open, queue?.id, fetchQueue]);
+
+  const fetchAssignments = useCallback(async () => {
+    if (!queue?.id || !companySlug) return;
+    setAssignmentsLoading(true);
+    setAssignmentsError("");
+    const headers = { "X-Company-Slug": companySlug };
+    try {
+      const r = await fetch(`/api/queues/${encodeURIComponent(queue.id)}/assignments`, { credentials: "include", headers });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        if (Array.isArray(data?.all_users)) {
+          setCompanyUsers(data.all_users.map((u: { user_id: string; full_name?: string; email?: string }) => ({ user_id: u.user_id, full_name: u.full_name, email: u.email })));
+        } else {
+          setCompanyUsers([]);
+        }
+        setAssignedUserIds(new Set(Array.isArray(data?.user_ids) ? data.user_ids : []));
+      } else {
+        setCompanyUsers([]);
+        setAssignedUserIds(new Set());
+        setAssignmentsError(data?.error ?? "Falha ao carregar atribuições");
+      }
+    } catch {
+      setCompanyUsers([]);
+      setAssignedUserIds(new Set());
+      setAssignmentsError("Erro de rede. Tente novamente.");
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }, [queue?.id, companySlug]);
+
+  useEffect(() => {
+    if (open && queue?.id && activeTab === "atribuicoes") fetchAssignments();
+  }, [open, queue?.id, activeTab, fetchAssignments]);
+
+  const toggleAssignment = (userId: string) => {
+    setAssignedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
+
+  const saveAssignments = async () => {
+    if (!queue?.id) return;
+    setError("");
+    setAssignmentsSaving(true);
+    try {
+      const r = await fetch(`/api/queues/${encodeURIComponent(queue.id)}/assignments`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ user_ids: Array.from(assignedUserIds) }),
+        credentials: "include",
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        setError(data?.error ?? "Falha ao salvar atribuições");
+      }
+    } catch {
+      setError("Erro de rede.");
+    } finally {
+      setAssignmentsSaving(false);
+    }
+  };
 
   const saveConfig = async () => {
     if (!queue?.id) return;
@@ -265,12 +335,59 @@ export function QueueConfigSideOver({
 
             {/* Aba Atribuições */}
             {activeTab === "atribuicoes" && (
-              <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-6 text-center">
-                <Users className="mx-auto h-12 w-12 text-[#94A3B8]" />
-                <p className="mt-3 font-medium text-[#334155]">Atribuições de atendentes</p>
-                <p className="mt-1 text-sm text-[#64748B]">
-                  Em breve você poderá vincular atendentes e usuários a esta caixa.
+              <div className="space-y-4">
+                <p className="text-sm text-[#64748B]">
+                  Atendentes atribuídos a esta caixa poderão ver e atender as conversas (incluindo grupos, se for a caixa Grupos).
                 </p>
+                {assignmentsError && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {assignmentsError}
+                  </div>
+                )}
+                {assignmentsLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-[#64748B]">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    Carregando…
+                  </div>
+                ) : companyUsers.length === 0 && !assignmentsError ? (
+                  <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-6 text-center">
+                    <Users className="mx-auto h-10 w-10 text-[#94A3B8]" />
+                    <p className="mt-2 text-sm text-[#64748B]">Nenhum usuário cadastrado na empresa.</p>
+                    <p className="mt-1 text-xs text-[#94A3B8]">Cadastre atendentes em Cargos e usuários.</p>
+                  </div>
+                ) : (
+                  <>
+                    <ul className="space-y-2 rounded-lg border border-[#E2E8F0] bg-white divide-y divide-[#E2E8F0]">
+                      {companyUsers.map((u) => (
+                        <li key={u.user_id} className="flex items-center gap-3 px-3 py-2.5">
+                          <input
+                            type="checkbox"
+                            id={`assign-${u.user_id}`}
+                            checked={assignedUserIds.has(u.user_id)}
+                            onChange={() => toggleAssignment(u.user_id)}
+                            className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                          />
+                          <label htmlFor={`assign-${u.user_id}`} className="flex-1 cursor-pointer text-sm">
+                            <span className="font-medium text-[#1E293B]">{u.full_name || u.email || u.user_id}</span>
+                            {u.email && u.full_name && <span className="ml-1 text-[#64748B]">({u.email})</span>}
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                    {error && <p className="text-sm text-red-600">{error}</p>}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={saveAssignments}
+                        disabled={assignmentsSaving}
+                        className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                      >
+                        {assignmentsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        Salvar atribuições
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

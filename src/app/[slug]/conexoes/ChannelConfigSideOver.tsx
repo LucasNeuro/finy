@@ -97,6 +97,7 @@ export function ChannelConfigSideOver({
   const [connectStatus, setConnectStatus] = useState<"connected" | "connecting" | "disconnected" | null>(null);
   const onSavedRef = useRef(onSaved);
   const onCloseRef = useRef(onClose);
+  const hasAutoSyncedRef = useRef(false);
   onSavedRef.current = onSaved;
   onCloseRef.current = onClose;
   const [qrcode, setQrcode] = useState<string | null>(null);
@@ -156,9 +157,24 @@ export function ChannelConfigSideOver({
     setActiveTab("conectar");
     setQrcode(null);
     setPaircode(null);
+    hasAutoSyncedRef.current = false;
     fetchConnectStatus();
     fetchPrivacy();
   }, [open, channelId, fetchConnectStatus]);
+
+  // Sincronizar histórico automaticamente ao detectar canal conectado (para popular Conversas)
+  useEffect(() => {
+    if (!open || !channelId || connectStatus !== "connected" || hasAutoSyncedRef.current) return;
+    const apiHeaders = companySlug ? { "X-Company-Slug": companySlug } : undefined;
+    hasAutoSyncedRef.current = true;
+    fetch(`/api/channels/${channelId}/sync-history`, {
+      method: "POST",
+      credentials: "include",
+      headers: apiHeaders,
+    })
+      .then(() => onSavedRef.current?.())
+      .catch(() => {});
+  }, [open, channelId, connectStatus, companySlug]);
 
   useEffect(() => {
     if (!open || activeTab !== "chatbot" || !channelId) return;
@@ -699,9 +715,48 @@ export function ChannelConfigSideOver({
         {activeTab === "conectar" && (
           <div className="space-y-4">
             {connectStatus === "connected" ? (
-              <div className="rounded-lg bg-[#DCFCE7] p-4 text-center">
-                <p className="font-medium text-[#16A34A]">WhatsApp conectado</p>
-                <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens.</p>
+              <div className="space-y-3">
+                <div className="rounded-lg bg-[#DCFCE7] p-4 text-center">
+                  <p className="font-medium text-[#16A34A]">WhatsApp conectado</p>
+                  <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setLoading(true);
+                    setError("");
+                    try {
+                      const base = companySlug ? `/${companySlug}` : "";
+                      const r = await fetch(`/api/channels/${channelId}/sync-history`, {
+                        method: "POST",
+                        credentials: "include",
+                        headers: base ? { "X-Company-Slug": companySlug } : undefined,
+                      });
+                      const j = await r.json().catch(() => ({}));
+                      if (!r.ok) {
+                        setError(j?.error ?? "Falha ao sincronizar histórico");
+                        return;
+                      }
+                      onSaved?.();
+                    } catch {
+                      setError("Falha ao sincronizar histórico");
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  disabled={loading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Sincronizando…
+                    </>
+                  ) : (
+                    "Sincronizar histórico de mensagens"
+                  )}
+                </button>
+                {error && <p className="text-sm text-red-600">{error}</p>}
               </div>
             ) : connectStatus === "connecting" || qrcode || paircode ? (
               <>

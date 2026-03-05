@@ -1,14 +1,15 @@
-import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
+import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -20,13 +21,30 @@ export async function GET(
   const supabase = await createClient();
   const { data: conversation, error: convError } = await supabase
     .from("conversations")
-    .select("id, channel_id, external_id, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at")
+    .select("id, channel_id, external_id, wa_chat_jid, kind, is_group, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at")
     .eq("id", id)
     .eq("company_id", companyId)
     .single();
   if (convError || !conversation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  const [channelRes, queueRes, assigneeRes] = await Promise.all([
+    conversation.channel_id
+      ? supabase.from("channels").select("name").eq("id", conversation.channel_id).eq("company_id", companyId).single()
+      : { data: null },
+    conversation.queue_id
+      ? supabase.from("queues").select("name").eq("id", conversation.queue_id).single()
+      : { data: null },
+    conversation.assigned_to
+      ? supabase.from("profiles").select("full_name").eq("user_id", conversation.assigned_to).eq("company_id", companyId).single()
+      : { data: null },
+  ]);
+
+  const channel_name = (channelRes.data as { name?: string } | null)?.name ?? null;
+  const queue_name = (queueRes.data as { name?: string } | null)?.name ?? null;
+  const assigned_to_name = (assigneeRes.data as { full_name?: string } | null)?.full_name ?? null;
+
   const { data: messages, error: msgError } = await supabase
     .from("messages")
     .select("id, direction, content, external_id, sent_at, created_at")
@@ -35,14 +53,20 @@ export async function GET(
   if (msgError) {
     return NextResponse.json({ error: msgError.message }, { status: 500 });
   }
-  return NextResponse.json({ ...conversation, messages: messages ?? [] });
+  return NextResponse.json({
+    ...conversation,
+    channel_name,
+    queue_name,
+    assigned_to_name,
+    messages: messages ?? [],
+  });
 }
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -73,18 +97,18 @@ export async function PATCH(
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
   // Controle de permissão por tipo de atualização
   if (body.status !== undefined && typeof body.status === "string" && body.status.trim()) {
-    const newStatus = body.status.trim();
+    const newStatus = body.status.trim().toLowerCase();
     if (newStatus !== existing.status) {
       if (newStatus === "closed") {
         const err = await requirePermission(companyId, PERMISSIONS.inbox.close);
-        if (err) {
-          return NextResponse.json({ error: err.error }, { status: err.status });
-        }
+        if (err) return NextResponse.json({ error: err.error }, { status: err.status });
       } else if (existing.status === "closed") {
         const err = await requirePermission(companyId, PERMISSIONS.inbox.reopen);
-        if (err) {
-          return NextResponse.json({ error: err.error }, { status: err.status });
-        }
+        if (err) return NextResponse.json({ error: err.error }, { status: err.status });
+      } else if (["in_progress", "waiting", "open"].includes(newStatus)) {
+        const errAssign = await requirePermission(companyId, PERMISSIONS.inbox.assign);
+        const errManage = await requirePermission(companyId, PERMISSIONS.inbox.manage_tickets);
+        if (errAssign && errManage) return NextResponse.json({ error: errAssign.error }, { status: errAssign.status });
       }
       updates.status = newStatus;
     }
@@ -100,10 +124,11 @@ export async function PATCH(
           return NextResponse.json({ error: err.error }, { status: err.status });
         }
       } else {
-        // Atribuir para outro atendente
-        const err = await requirePermission(companyId, PERMISSIONS.inbox.assign);
-        if (err) {
-          return NextResponse.json({ error: err.error }, { status: err.status });
+        // Atribuir para outro atendente (assign ou visão gerencial)
+        const errAssign = await requirePermission(companyId, PERMISSIONS.inbox.assign);
+        const errManage = await requirePermission(companyId, PERMISSIONS.inbox.manage_tickets);
+        if (errAssign && errManage) {
+          return NextResponse.json({ error: errAssign.error }, { status: errAssign.status });
         }
       }
       updates.assigned_to = newAssigned;
@@ -125,10 +150,11 @@ export async function PATCH(
     .update(updates)
     .eq("id", id)
     .eq("company_id", companyId)
-    .select("id, channel_id, external_id, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at, updated_at")
+    .select("id, channel_id, external_id, wa_chat_jid, kind, is_group, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at, updated_at")
     .single();
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
+  await invalidateConversationList(companyId);
   return NextResponse.json(updated);
 }

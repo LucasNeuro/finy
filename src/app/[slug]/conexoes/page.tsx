@@ -19,7 +19,10 @@ type Channel = {
 
 type Queue = { id: string; name: string; slug: string };
 
-type ChannelStatus = "connected" | "connecting" | "disconnected" | null;
+// Estado de conexão do canal com a instância UAZAPI.
+// "error" indica falha ao consultar o status (por ex. token inválido ou API indisponível),
+// não necessariamente que o WhatsApp esteja desconectado.
+type ChannelStatus = "connected" | "connecting" | "disconnected" | "error" | null;
 
 const MAX_CHANNELS_PER_COMPANY = 3;
 
@@ -63,9 +66,13 @@ export default function ConexoesPage() {
         const s: ChannelStatus = data.connected || data.loggedIn ? "connected" : data.qrcode || data.paircode ? "connecting" : "disconnected";
         setChannelStatuses((prev) => ({ ...prev, [chId]: s }));
         return data;
+      } else {
+        // Falha ao consultar status – marcamos como "error" em vez de "disconnected"
+        setChannelStatuses((prev) => ({ ...prev, [chId]: "error" }));
       }
     } catch {
-      setChannelStatuses((prev) => ({ ...prev, [chId]: "disconnected" }));
+      // Erro de rede ou similar – não sabemos o estado real da instância
+      setChannelStatuses((prev) => ({ ...prev, [chId]: "error" }));
     }
     return null;
   }, [slug]);
@@ -255,6 +262,7 @@ export default function ConexoesPage() {
       connected: "Conectado",
       connecting: "Conectando…",
       disconnected: "Desconectado",
+      error: "Indisponível",
     };
     return status ? map[status] ?? "—" : "—";
   };
@@ -264,6 +272,7 @@ export default function ConexoesPage() {
       connected: "text-[#16A34A] bg-[#DCFCE7]",
       connecting: "text-[#CA8A04] bg-[#FEF9C3]",
       disconnected: "text-[#DC2626] bg-[#FEE2E2]",
+      error: "text-[#DC2626] bg-[#FEF2F2]",
     };
     return status ? map[status] ?? "text-[#64748B] bg-[#F1F5F9]" : "text-[#64748B] bg-[#F1F5F9]";
   };

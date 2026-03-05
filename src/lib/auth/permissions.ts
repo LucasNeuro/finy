@@ -14,6 +14,8 @@ export const PERMISSIONS = {
     reopen: "inbox.reopen",
     see_all: "inbox.see_all",
     export: "inbox.export",
+    /** Owner/Admin: ver todos os tickets, quem atende, data, mudar status e reatribuir (visão Kanban gerencial) */
+    manage_tickets: "inbox.manage_tickets",
   },
   // Conexões
   channels: { view: "channels.view", manage: "channels.manage" },
@@ -54,6 +56,7 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.inbox.reopen,
   PERMISSIONS.inbox.see_all,
   PERMISSIONS.inbox.export,
+  PERMISSIONS.inbox.manage_tickets,
   PERMISSIONS.channels.view,
   PERMISSIONS.channels.manage,
   PERMISSIONS.queues.view,
@@ -89,6 +92,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       PERMISSIONS.inbox.reopen,
       PERMISSIONS.inbox.see_all,
       PERMISSIONS.inbox.export,
+      PERMISSIONS.inbox.manage_tickets,
     ],
   },
   { label: "Conexões", keys: [PERMISSIONS.channels.view, PERMISSIONS.channels.manage] },
@@ -111,6 +115,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.inbox.reopen]: "Reabrir conversa",
   [PERMISSIONS.inbox.see_all]: "Ver todas as conversas (todas as caixas)",
   [PERMISSIONS.inbox.export]: "Exportar conversas",
+  [PERMISSIONS.inbox.manage_tickets]: "Visão gerencial: ver todos os tickets, quem atende, data, mudar status e reatribuir",
   [PERMISSIONS.channels.view]: "Ver Conexões",
   [PERMISSIONS.channels.manage]: "Gerenciar Conexões",
   [PERMISSIONS.queues.view]: "Ver Filas",

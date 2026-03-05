@@ -28,6 +28,7 @@ export default function FilasPage() {
 
   const [newQueueOpen, setNewQueueOpen] = useState(false);
   const [newName, setNewName] = useState("");
+  const [useGroups, setUseGroups] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
@@ -101,7 +102,7 @@ export default function FilasPage() {
       const r = await fetch("/api/queues", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ name: n, slug: slugVal }),
+        body: JSON.stringify({ name: n, slug: slugVal, use_groups: useGroups }),
         credentials: "include",
       });
       const data = await r.json();
@@ -113,7 +114,9 @@ export default function FilasPage() {
       setQueues((prev) => [...prev, { id: data.id, name: data.name, slug: data.slug }]);
       setQueueChannelCount((prev) => ({ ...prev, [data.id]: 0 }));
       setNewName("");
+      setUseGroups(false);
       setNewQueueOpen(false);
+      if (useGroups) fetchQueues();
     } catch {
       setError("Erro de rede.");
     }
@@ -153,6 +156,7 @@ export default function FilasPage() {
             setNewQueueOpen(true);
             setError("");
             setNewName("");
+            setUseGroups(false);
           }}
           className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-clicvend-orange-dark"
         >
@@ -260,6 +264,15 @@ export default function FilasPage() {
               className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
             />
           </div>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={useGroups}
+              onChange={(e) => setUseGroups(e.target.checked)}
+              className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+            />
+            <span className="text-sm text-[#334155]">Vai usar grupos? (cria a fila &quot;Grupos&quot; automaticamente)</span>
+          </label>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <button

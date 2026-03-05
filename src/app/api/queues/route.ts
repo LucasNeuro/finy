@@ -38,13 +38,13 @@ export async function GET(request: Request) {
     }
   }
 
-  type Row = { id: string; name: string; slug: string; created_at?: string; business_hours?: unknown; special_dates?: unknown };
+  type Row = { id: string; name: string; slug: string; kind?: string; created_at?: string; business_hours?: unknown; special_dates?: unknown };
   let data: Row[] | null = null;
   let error: { message: string } | null = null;
 
   let q = supabase
     .from("queues")
-    .select("id, name, slug, created_at, business_hours, special_dates")
+    .select("id, name, slug, kind, created_at, business_hours, special_dates")
     .eq("company_id", companyId)
     .order("name");
   if (allowedQueueIds !== null) {
@@ -68,6 +68,7 @@ export async function GET(request: Request) {
     }
     const withExtras = (fallback.data ?? []).map((row) => ({
       ...row,
+      kind: "ticket" as string,
       business_hours: [] as unknown,
       special_dates: [] as unknown,
     }));
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
   if (adminError) {
     return NextResponse.json({ error: adminError.error }, { status: adminError.status });
   }
-  let body: { name?: string; slug?: string };
+  let body: { name?: string; slug?: string; use_groups?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -100,10 +101,29 @@ export async function POST(request: Request) {
   }
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const slug = typeof body?.slug === "string" ? body.slug.trim().toLowerCase().replace(/\s+/g, "-") : "";
+  const useGroups = body?.use_groups === true;
   if (!name || !slug) {
     return NextResponse.json({ error: "name and slug required" }, { status: 400 });
   }
   const supabase = await createClient();
+
+  if (useGroups) {
+    const { data: existing } = await supabase
+      .from("queues")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("slug", "groups")
+      .maybeSingle();
+    if (!existing) {
+      const { error: groupErr } = await supabase
+        .from("queues")
+        .insert({ company_id: companyId, name: "Grupos", slug: "groups", kind: "group" });
+      if (groupErr) {
+        return NextResponse.json({ error: groupErr.message }, { status: 500 });
+      }
+    }
+  }
+
   const { data, error } = await supabase
     .from("queues")
     .insert({ company_id: companyId, name, slug })
