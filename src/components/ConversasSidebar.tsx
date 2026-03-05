@@ -2,8 +2,10 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import useSWR from "swr";
 import { MoreVertical, Search, Plus } from "lucide-react";
+import { ConversationListSkeleton } from "@/components/Skeleton";
 
 type Queue = { id: string; name: string; slug: string };
 type Conversation = {
@@ -14,39 +16,38 @@ type Conversation = {
   status: string;
 };
 
+function fetcher(url: string, headers?: Record<string, string>) {
+  return fetch(url, { credentials: "include", headers }).then((r) => r.json());
+}
+
+/** Cache de 30s, revalida ao focar a janela; evita carregamento lento ao trocar de aba */
+const swrOpts = { revalidateOnFocus: true, dedupingInterval: 30_000 };
+
 export function ConversasSidebar() {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
-  const [queues, setQueues] = useState<Queue[]>([]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [queueId, setQueueId] = useState<string>("");
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!slug) return;
-    fetch("/api/queues?for_inbox=1", { credentials: "include", headers: apiHeaders })
-      .then((r) => r.json())
-      .then((data) => setQueues(Array.isArray(data) ? data : []))
-      .catch(() => setQueues([]));
-  }, [slug]);
+  const { data: queuesData } = useSWR<Queue[]>(
+    slug ? ["/api/queues?for_inbox=1", slug] : null,
+    ([url]) => fetcher(url, apiHeaders),
+    swrOpts
+  );
+  const queues = Array.isArray(queuesData) ? queuesData : [];
 
-  useEffect(() => {
-    if (!slug) return;
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (queueId) params.set("queue_id", queueId);
-    fetch(`/api/conversations?${params}`, { credentials: "include", headers: apiHeaders })
-      .then((r) => r.json())
-      .then((res) => {
-        setConversations(res.data ?? []);
-      })
-      .catch(() => setConversations([]))
-      .finally(() => setLoading(false));
-  }, [slug, queueId]);
+  const conversationsParams = new URLSearchParams();
+  if (queueId) conversationsParams.set("queue_id", queueId);
+  const conversationsUrl = slug ? `/api/conversations?${conversationsParams}` : null;
+  const { data: conversationsRes, isLoading: loading } = useSWR<{ data?: Conversation[] }>(
+    conversationsUrl ? [conversationsUrl, slug, queueId] : null,
+    ([url]) => fetcher(url, apiHeaders),
+    swrOpts
+  );
+  const conversations = Array.isArray(conversationsRes?.data) ? conversationsRes.data : [];
 
   const filtered = search.trim()
     ? conversations.filter(
@@ -109,7 +110,7 @@ export function ConversasSidebar() {
       </div>
       <div className="flex-1 overflow-y-auto">
         {loading ? (
-          <div className="p-4 text-center text-sm text-[#64748B]">Carregando…</div>
+          <ConversationListSkeleton count={8} />
         ) : filtered.length === 0 ? (
           <div className="p-4 text-center text-sm text-[#64748B]">Nenhuma conversa</div>
         ) : (

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useMemo } from "react";
+import useSWR from "swr";
 import {
   MessageSquare,
   Plug,
@@ -14,6 +15,13 @@ import {
   UserCog,
   Ticket,
 } from "lucide-react";
+
+const fetcher = (url: string, slug: string) =>
+  fetch(url, { credentials: "include", headers: { "X-Company-Slug": slug } }).then((r) => r.json());
+
+const PERMISSIONS_KEY = "/api/auth/permissions";
+/** Cache de permissões para a barra de abas carregar rápido (evita “demora”) */
+const swrOpts = { revalidateOnFocus: false, dedupingInterval: 60_000 };
 
 const ALL_TABS = [
   // Atendimento / Conversas
@@ -39,21 +47,12 @@ export function AppNavTabs() {
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
 
-  const [permissions, setPermissions] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!slug) {
-      setPermissions([]);
-      return;
-    }
-    fetch("/api/auth/permissions", {
-      credentials: "include",
-      headers: { "X-Company-Slug": slug },
-    })
-      .then((r) => r.json())
-      .then((data) => setPermissions(Array.isArray(data?.permissions) ? data.permissions : []))
-      .catch(() => setPermissions([]));
-  }, [slug]);
+  const { data } = useSWR<{ permissions?: string[] }>(
+    base ? [PERMISSIONS_KEY, slug] : null,
+    ([url]) => fetcher(url, slug),
+    swrOpts
+  );
+  const permissions = Array.isArray(data?.permissions) ? data.permissions : [];
 
   const tabs = useMemo(() => {
     return ALL_TABS.filter((t) => {
@@ -65,7 +64,7 @@ export function AppNavTabs() {
   if (!base) return null;
 
   return (
-    <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-[#E2E8F0] bg-white px-4 scrollbar-thin">
+    <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/10 bg-[#0a0a0a] px-4 scrollbar-thin scrollbar-track-[#0a0a0a] scrollbar-thumb-white/20">
       {tabs.map(({ href, label, icon: Icon }) => {
         const fullHref = `${base}${href}`;
         const isActive = pathname === fullHref || (href !== "/" && pathname?.startsWith(fullHref));
@@ -76,7 +75,7 @@ export function AppNavTabs() {
             className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-3.5 text-sm font-medium transition-colors ${
               isActive
                 ? "border-clicvend-green text-clicvend-green"
-                : "border-transparent text-[#64748B] hover:border-[#E2E8F0] hover:text-[#0a0a0a]"
+                : "border-transparent text-white/60 hover:border-white/20 hover:text-white"
             }`}
           >
             <Icon className="h-4 w-4 shrink-0" />

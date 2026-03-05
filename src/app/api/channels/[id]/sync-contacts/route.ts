@@ -1,5 +1,6 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
-import { requireAdmin } from "@/lib/auth/get-profile";
+import { requirePermission } from "@/lib/auth/get-profile";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { listContacts, listGroups } from "@/lib/uazapi/client";
 import { createClient } from "@/lib/supabase/server";
@@ -8,7 +9,7 @@ import { NextResponse } from "next/server";
 /**
  * POST /api/channels/[id]/sync-contacts
  * Sincroniza contatos e grupos da instância UAZAPI para channel_contacts e channel_groups.
- * Requer admin. O canal deve estar conectado.
+ * Requer permissão channels.manage. O canal deve estar conectado.
  */
 export async function POST(
   request: Request,
@@ -18,9 +19,9 @@ export async function POST(
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const adminErr = await requireAdmin(companyId);
-  if (adminErr) {
-    return NextResponse.json({ error: adminErr.error }, { status: adminErr.status });
+  const permErr = await requirePermission(companyId, PERMISSIONS.channels.manage);
+  if (permErr) {
+    return NextResponse.json({ error: permErr.error }, { status: permErr.status });
   }
 
   const { id: channelId } = await params;

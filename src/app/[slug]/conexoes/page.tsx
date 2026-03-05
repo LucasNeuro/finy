@@ -5,6 +5,7 @@ import { RefreshCw, Smartphone, Plus, Loader2, Settings, Wifi, WifiOff, Link2, T
 import { usePathname } from "next/navigation";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ChannelTableSkeleton } from "@/components/Skeleton";
 import { ChannelConfigSideOver } from "./ChannelConfigSideOver";
 
 type Channel = {
@@ -294,12 +295,7 @@ export default function ConexoesPage() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-clicvend-orange border-t-transparent" />
-            <span className="text-sm text-[#64748B]">Carregando…</span>
-          </div>
-        </div>
+        <ChannelTableSkeleton rows={4} />
       ) : channels.length === 0 ? (
         <div className="rounded-xl border border-[#E2E8F0] bg-white p-8 text-center">
           <Smartphone className="mx-auto h-12 w-12 text-[#94A3B8]" />
