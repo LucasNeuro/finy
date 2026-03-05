@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     }
 
     const isHistory = event === "history";
-    const isMessageEvent = event === "messages";
+    const isMessageEvent = event === "messages" || event === "message";
     if (!isMessageEvent && !isHistory) {
       return NextResponse.json({ ok: true });
     }

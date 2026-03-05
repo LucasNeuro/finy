@@ -6,21 +6,23 @@ import { NextResponse } from "next/server";
 /**
  * GET /api/auth/permissions
  * Retorna as permissões do usuário na empresa (header X-Company-Slug ou cookie).
- * Usado no front para esconder abas (ex.: Cargos e usuários) para quem não tem users.manage.
+ * inbox_see_all: true para owner/admin — podem ver todas as conversas e filtrar por fila.
  */
 export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
-    return NextResponse.json({ permissions: [] });
+    return NextResponse.json({ permissions: [], inbox_see_all: false });
   }
   const profile = await getProfileForCompany(companyId);
   if (!profile) {
-    return NextResponse.json({ permissions: [] });
+    return NextResponse.json({ permissions: [], inbox_see_all: false });
   }
-  if (profile.is_owner || (profile.role === "admin" && !profile.role_id)) {
-    return NextResponse.json({ permissions: getAllPermissionKeys() });
+  const isOwnerOrAdmin = profile.is_owner || (profile.role === "admin" && !profile.role_id);
+  if (isOwnerOrAdmin) {
+    return NextResponse.json({ permissions: getAllPermissionKeys(), inbox_see_all: true });
   }
   const perms = profile.roles?.permissions ?? [];
   const list = Array.isArray(perms) ? perms : [];
-  return NextResponse.json({ permissions: list });
+  const inboxSeeAll = list.includes("inbox.see_all") || list.includes("inbox.manage_tickets");
+  return NextResponse.json({ permissions: list, inbox_see_all: inboxSeeAll });
 }

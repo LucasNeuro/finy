@@ -162,15 +162,15 @@ export function ChannelConfigSideOver({
     fetchPrivacy();
   }, [open, channelId, fetchConnectStatus]);
 
-  // Sincronizar histórico automaticamente ao detectar canal conectado (para popular Conversas)
+  // Sincronizar conversas antigas em segundo plano ao abrir o sidebar (não bloqueia a UI)
   useEffect(() => {
     if (!open || !channelId || connectStatus !== "connected" || hasAutoSyncedRef.current) return;
-    const apiHeaders = companySlug ? { "X-Company-Slug": companySlug } : undefined;
     hasAutoSyncedRef.current = true;
+    const base = companySlug ? `/${companySlug}` : "";
     fetch(`/api/channels/${channelId}/sync-history`, {
       method: "POST",
       credentials: "include",
-      headers: apiHeaders,
+      headers: base ? { "X-Company-Slug": companySlug } : undefined,
     })
       .then(() => onSavedRef.current?.())
       .catch(() => {});
@@ -718,28 +718,38 @@ export function ChannelConfigSideOver({
               <div className="space-y-3">
                 <div className="rounded-lg bg-[#DCFCE7] p-4 text-center">
                   <p className="font-medium text-[#16A34A]">WhatsApp conectado</p>
-                  <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens.</p>
+                  <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens. Novas mensagens e grupos entram automaticamente nas filas. Ao abrir esta tela, as conversas antigas deste número são sincronizadas em segundo plano.</p>
                 </div>
+                <p className="text-xs text-[#64748B]">Para forçar de novo o histórico antigo, use o botão abaixo. Pode levar até 2 minutos.</p>
                 <button
                   type="button"
                   onClick={async () => {
                     setLoading(true);
                     setError("");
+                    const ctrl = new AbortController();
+                    const timeoutId = setTimeout(() => ctrl.abort(), 120_000);
                     try {
                       const base = companySlug ? `/${companySlug}` : "";
                       const r = await fetch(`/api/channels/${channelId}/sync-history`, {
                         method: "POST",
                         credentials: "include",
                         headers: base ? { "X-Company-Slug": companySlug } : undefined,
+                        signal: ctrl.signal,
                       });
+                      clearTimeout(timeoutId);
                       const j = await r.json().catch(() => ({}));
                       if (!r.ok) {
                         setError(j?.error ?? "Falha ao sincronizar histórico");
                         return;
                       }
                       onSaved?.();
-                    } catch {
-                      setError("Falha ao sincronizar histórico");
+                    } catch (e) {
+                      clearTimeout(timeoutId);
+                      if ((e as Error)?.name === "AbortError") {
+                        setError("Demorou mais que 2 min. Novas mensagens já entram sozinhas pelo WhatsApp.");
+                      } else {
+                        setError("Falha ao sincronizar histórico");
+                      }
                     } finally {
                       setLoading(false);
                     }

@@ -40,7 +40,7 @@ export async function POST(
   const supabase = createServiceRoleClient();
 
   const { data: chatsData, ok: chatsOk, error: chatsError } = await findChats(token, {
-    limit: 100,
+    limit: 40,
     offset: 0,
     sort: "-wa_lastMsgTimestamp",
   });
@@ -64,7 +64,7 @@ export async function POST(
 
     const isGroup = chat.wa_isGroup === true || waChatid.endsWith("@g.us");
 
-    const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, { limit: 100, offset: 0 });
+    const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, { limit: 40, offset: 0 });
     const messages = (msgOk && msgData?.messages ? msgData.messages : []) as UazapiMessage[];
 
     const { data: channelRow } = await supabase
