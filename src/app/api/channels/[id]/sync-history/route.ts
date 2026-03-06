@@ -61,7 +61,7 @@ export async function POST(
   const supabase = createServiceRoleClient();
 
   const { data: chatsData, ok: chatsOk, error: chatsError } = await findChats(token, {
-    limit: 40,
+    limit: 100,
     offset: 0,
     sort: "-wa_lastMsgTimestamp",
   });
@@ -75,18 +75,20 @@ export async function POST(
     });
   }
 
+  const MAX_MESSAGES_PER_INSTANCE = 15_000;
+  const MESSAGES_PAGE_SIZE = 100;
+
   const chats = chatsData.chats as UazapiChat[];
   let conversationsCreated = 0;
   let messagesInserted = 0;
 
   for (const chat of chats) {
+    if (messagesInserted >= MAX_MESSAGES_PER_INSTANCE) break;
+
     const waChatid = (chat.wa_chatid ?? "").toString().trim();
     if (!waChatid) continue;
 
     const isGroup = chat.wa_isGroup === true || waChatid.endsWith("@g.us");
-
-    const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, { limit: 40, offset: 0 });
-    const messages = (msgOk && msgData?.messages ? msgData.messages : []) as UazapiMessage[];
 
     const { data: channelRow } = await supabase
       .from("channels")
@@ -206,14 +208,79 @@ export async function POST(
 
     if (!conversationId) continue;
 
-    const latestSentAt = messages.length > 0
-      ? Math.max(
-          ...messages.map((m) => {
-            const ts = m.timestamp;
-            return typeof ts === "number" ? ts * 1000 : 0;
-          })
-        )
-      : 0;
+    const mediaTypeMap: Record<string, string> = {
+      image: "image", video: "video", audio: "audio", myaudio: "audio", ptt: "ptt", ptv: "video",
+      document: "document", sticker: "sticker",
+    };
+    let msgOffset = 0;
+    let latestSentAt = 0;
+
+    while (messagesInserted < MAX_MESSAGES_PER_INSTANCE) {
+      const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, {
+        limit: MESSAGES_PAGE_SIZE,
+        offset: msgOffset,
+      });
+      const messages = (msgOk && msgData?.messages ? msgData.messages : []) as UazapiMessage[];
+      if (messages.length === 0) break;
+
+      for (const msg of messages) {
+        const fromMe = msg.fromMe === true;
+        const body = (msg.body ?? msg.text ?? "").toString().trim();
+        const rawType = (msg.type ?? msg.mediaType ?? "") as string;
+        const msgMediaUrl = (msg.mediaUrl ?? msg.file ?? msg.url ?? msg.image ?? msg.base64 ?? (msg as { media?: { url?: string } }).media?.url ?? "") as string;
+        const msgCaption = (msg.caption ?? msg.body ?? msg.text ?? "").toString().trim();
+        const msgFileName = (msg.fileName ?? msg.filename ?? msg.docName ?? "") as string;
+        const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
+        const isMedia = messageType !== "text" && msgMediaUrl;
+        const content = body || (isMedia ? `[${messageType}]` : "");
+        const rawTs = msg.timestamp;
+        const sentAt =
+          rawTs != null && typeof rawTs === "number"
+            ? new Date(rawTs * 1000).toISOString()
+            : new Date().toISOString();
+        if (typeof rawTs === "number" && rawTs * 1000 > latestSentAt) latestSentAt = rawTs * 1000;
+        const extId = (msg.id ?? "").toString() || null;
+
+        if (extId) {
+          const { data: existingByExt } = await supabase
+            .from("messages")
+            .select("id")
+            .eq("conversation_id", conversationId)
+            .eq("external_id", extId)
+            .limit(1)
+            .single();
+          if (existingByExt) continue;
+        } else {
+          const { data: existingBySent } = await supabase
+            .from("messages")
+            .select("id")
+            .eq("conversation_id", conversationId)
+            .eq("sent_at", sentAt)
+            .limit(1)
+            .single();
+          if (existingBySent) continue;
+        }
+
+        const insertPayload: Record<string, unknown> = {
+          conversation_id: conversationId,
+          direction: fromMe ? "out" : "in",
+          content: content.slice(0, 10000),
+          message_type: isMedia ? messageType : "text",
+          external_id: extId,
+          sent_at: sentAt,
+        };
+        if (isMedia && msgMediaUrl.trim()) insertPayload.media_url = msgMediaUrl.trim().slice(0, 10000);
+        if (isMedia && msgCaption) insertPayload.caption = msgCaption.slice(0, 2000);
+        if (msgFileName && typeof msgFileName === "string") insertPayload.file_name = msgFileName.slice(0, 255);
+
+        const { error: msgInsErr } = await supabase.from("messages").insert(insertPayload);
+        if (!msgInsErr) messagesInserted++;
+      }
+
+      if (messages.length < MESSAGES_PAGE_SIZE) break;
+      msgOffset += MESSAGES_PAGE_SIZE;
+    }
+
     if (latestSentAt > 0) {
       await supabase
         .from("conversations")
@@ -222,46 +289,6 @@ export async function POST(
           updated_at: new Date().toISOString(),
         })
         .eq("id", conversationId);
-    }
-
-    for (const msg of messages) {
-      const fromMe = msg.fromMe === true;
-      const body = (msg.body ?? msg.text ?? "").toString().trim();
-      const rawTs = msg.timestamp;
-      const sentAt =
-        rawTs != null && typeof rawTs === "number"
-          ? new Date(rawTs * 1000).toISOString()
-          : new Date().toISOString();
-      const extId = (msg.id ?? "").toString() || null;
-
-      if (extId) {
-        const { data: existingByExt } = await supabase
-          .from("messages")
-          .select("id")
-          .eq("conversation_id", conversationId)
-          .eq("external_id", extId)
-          .limit(1)
-          .single();
-        if (existingByExt) continue;
-      } else {
-        const { data: existingBySent } = await supabase
-          .from("messages")
-          .select("id")
-          .eq("conversation_id", conversationId)
-          .eq("sent_at", sentAt)
-          .limit(1)
-          .single();
-        if (existingBySent) continue;
-      }
-
-      const { error: msgInsErr } = await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        direction: fromMe ? "out" : "in",
-        content: body.slice(0, 10000),
-        external_id: extId,
-        sent_at: sentAt,
-      });
-      if (!msgInsErr) messagesInserted++;
     }
   }
 

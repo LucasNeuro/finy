@@ -4,10 +4,9 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo } from "react";
 import useSWR from "swr";
-import { MoreVertical, Search, Plus } from "lucide-react";
+import { MoreVertical, Search, RefreshCw, Users, Inbox, UserCheck, User } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
 
-type Queue = { id: string; name: string; slug: string; kind?: string };
 type Conversation = {
   id: string;
   channel_id?: string;
@@ -18,6 +17,7 @@ type Conversation = {
   last_message_preview?: string | null;
   status: string;
   avatar_url?: string | null;
+  is_group?: boolean;
 };
 
 function fetcher(url: string, headers?: Record<string, string>) {
@@ -37,6 +37,9 @@ function formatLastMessageTime(iso: string): string {
 const swrOpts = { revalidateOnFocus: false, dedupingInterval: 90_000, errorRetryCount: 2 };
 
 type ViewMode = "mine" | "queues";
+type ConversationTypeFilter = "all" | "individual" | "group";
+/** Tab ativa: só ícones — Filas, Meus atendimentos, Contatos (individuais), Grupos */
+type TabId = "queues" | "mine" | "contacts" | "groups";
 
 const ConversationListItem = memo(function ConversationListItem({
   conversation: c,
@@ -50,6 +53,7 @@ const ConversationListItem = memo(function ConversationListItem({
   const href = `${base}/conversas/${c.id}`;
   const displayName = (c.customer_name ?? c.customer_phone) ?? "?";
   const initial = displayName.slice(0, 1).toUpperCase();
+  const isGroup = c.is_group === true;
 
   return (
     <li>
@@ -60,6 +64,8 @@ const ConversationListItem = memo(function ConversationListItem({
         <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
           {c.avatar_url ? (
             <img src={c.avatar_url} alt="" className="h-full w-full object-cover" />
+          ) : isGroup ? (
+            <Users className="h-5 w-5" />
           ) : (
             initial
           )}
@@ -74,7 +80,12 @@ const ConversationListItem = memo(function ConversationListItem({
               {formatLastMessageTime(c.last_message_at)}
             </span>
           </div>
-          <p className="truncate text-xs text-[#64748B]">
+          <p className="truncate text-xs text-[#64748B] flex items-center gap-1.5">
+            {isGroup && (
+              <span className="shrink-0 rounded bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] font-medium text-[#64748B]">
+                Grupo
+              </span>
+            )}
             {c.last_message_preview != null && c.last_message_preview !== ""
               ? c.last_message_preview
               : c.status === "open"
@@ -96,12 +107,14 @@ export function ConversasSidebar() {
   const base = slug ? `/${slug}` : "";
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
-  const [viewMode, setViewMode] = useState<ViewMode>("mine");
-  const [queueId, setQueueId] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<TabId>("mine");
   const [search, setSearch] = useState("");
+  const viewMode: ViewMode = activeTab === "queues" ? "queues" : "mine";
+  const typeFilter: ConversationTypeFilter =
+    activeTab === "groups" ? "group" : activeTab === "contacts" ? "individual" : "all";
   const [moreConversations, setMoreConversations] = useState<Conversation[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const { data: permissionsData } = useSWR<{ permissions?: string[]; inbox_see_all?: boolean }>(
     slug ? ["/api/auth/permissions", slug] : null,
@@ -110,29 +123,32 @@ export function ConversasSidebar() {
   );
   const inboxSeeAll = permissionsData?.inbox_see_all === true;
 
-  const { data: queuesData } = useSWR<Queue[]>(
-    slug ? ["/api/queues?for_inbox=1", slug] : null,
-    ([url]) => fetcher(url, apiHeaders),
-    swrOpts
-  );
-  const queues = Array.isArray(queuesData) ? queuesData : [];
-
   const conversationsParams = new URLSearchParams();
   conversationsParams.set("limit", "100");
   if (viewMode === "mine") {
     conversationsParams.set("only_assigned_to_me", "1");
   }
-  if (inboxSeeAll && queueId) {
-    conversationsParams.set("queue_id", queueId);
-  }
-  if (statusFilter) conversationsParams.set("status", statusFilter);
+  // Não enviamos queue_id: quem está em várias filas vê tudo na lista; não precisa escolher fila.
 
   const conversationsUrl = slug ? `/api/conversations?${conversationsParams}` : null;
   useEffect(() => {
     setMoreConversations([]);
   }, [conversationsUrl]);
+
+  const { data: countsData, mutate: mutateCounts } = useSWR<{ mine?: number; queues?: number; individual?: number; groups?: number }>(
+    slug ? ["/api/conversations/counts", slug] : null,
+    ([url]) => fetcher(url, apiHeaders),
+    { ...swrOpts, dedupingInterval: 30_000 }
+  );
+  const counts = {
+    mine: typeof countsData?.mine === "number" ? countsData.mine : 0,
+    queues: typeof countsData?.queues === "number" ? countsData.queues : 0,
+    individual: typeof countsData?.individual === "number" ? countsData.individual : 0,
+    groups: typeof countsData?.groups === "number" ? countsData.groups : 0,
+  };
+
   const { data: conversationsRes, error: conversationsError, isLoading: loading, mutate: mutateConversations } = useSWR<{ data?: Conversation[]; total?: number; error?: string }>(
-    conversationsUrl ? [conversationsUrl, slug, viewMode, queueId, statusFilter] : null,
+    conversationsUrl ? [conversationsUrl, slug, viewMode, activeTab] : null,
     async ([url]) => {
       const res = await fetch(url as string, { credentials: "include", headers: apiHeaders });
       const json = await res.json().catch(() => ({}));
@@ -175,23 +191,56 @@ export function ConversasSidebar() {
       ? "Erro de conexão. Verifique sua internet ou se o servidor está no ar."
       : conversationsError?.message ?? "Não foi possível carregar as conversas.";
 
-  const filtered = search.trim()
-    ? allConversations.filter(
-        (c) =>
-          (c.customer_name ?? "").toLowerCase().includes(search.toLowerCase()) ||
-          (c.customer_phone ?? "").includes(search)
-      )
-    : allConversations;
+  const filtered = (() => {
+    let list = search.trim()
+      ? allConversations.filter(
+          (c) =>
+            (c.customer_name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+            (c.customer_phone ?? "").includes(search)
+        )
+      : allConversations;
+    if (typeFilter === "group") list = list.filter((c) => c.is_group === true);
+    else if (typeFilter === "individual") list = list.filter((c) => c.is_group !== true);
+    return list;
+  })();
 
   const currentId = pathname?.split("/")[3] ?? null;
+
+  const refreshList = async () => {
+    if (!conversationsUrl || refreshing) return;
+    setRefreshing(true);
+    try {
+      const url = `${conversationsUrl}${conversationsUrl.includes("?") ? "&" : "?"}skip_cache=1`;
+      const res = await fetch(url, { credentials: "include", headers: apiHeaders });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        mutateConversations(json, { revalidate: false });
+        mutateCounts();
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   return (
     <aside className="flex min-h-0 w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden self-stretch">
       <div className="flex shrink-0 items-center justify-between border-b border-[#E2E8F0] p-3">
         <h2 className="text-lg font-semibold text-[#1E293B]">Conversas</h2>
-        <button type="button" className="text-[#64748B] hover:text-[#1E293B] transition-colors" aria-label="Menu">
-          <MoreVertical className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={refreshList}
+            disabled={refreshing || !conversationsUrl}
+            className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors disabled:opacity-50"
+            aria-label="Atualizar lista (carrega fotos e dados frescos)"
+            title="Atualizar lista (carrega fotos e dados frescos)"
+          >
+            <RefreshCw className={`h-5 w-5 ${refreshing ? "animate-spin" : ""}`} />
+          </button>
+          <button type="button" className="rounded p-2 text-[#64748B] hover:text-[#1E293B] transition-colors" aria-label="Menu">
+            <MoreVertical className="h-5 w-5" />
+          </button>
+        </div>
       </div>
       <div className="shrink-0 p-2">
         <div className="relative">
@@ -205,68 +254,82 @@ export function ConversasSidebar() {
           />
         </div>
       </div>
-      {/* Abas: Meus atendimentos, Filas e Contatos (link para página de contatos) */}
-      <div className="flex shrink-0 border-b border-[#E2E8F0] px-2 pb-1">
-        <button
-          type="button"
-          onClick={() => setViewMode("mine")}
-          className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-            viewMode === "mine"
-              ? "border-clicvend-orange text-clicvend-orange"
-              : "border-transparent text-[#64748B] hover:text-[#1E293B]"
-          }`}
-        >
-          Meus atendimentos
-        </button>
-        <button
-          type="button"
-          onClick={() => setViewMode("queues")}
-          className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-            viewMode === "queues"
-              ? "border-clicvend-orange text-clicvend-orange"
-              : "border-transparent text-[#64748B] hover:text-[#1E293B]"
-          }`}
-        >
-          Filas
-        </button>
-        <Link
-          href={`${base}/contatos`}
-          className="border-b-2 border-transparent px-3 py-2 text-sm font-medium text-[#64748B] hover:text-[#1E293B] transition-colors"
-        >
-          Contatos
-        </Link>
-      </div>
-      <div className="shrink-0 flex flex-wrap gap-2 px-2 py-2">
-        {/* Só ADM/OWNER (inbox_see_all) veem o filtro por fila */}
-        {inboxSeeAll && (
-          <select
-            value={queueId}
-            onChange={(e) => setQueueId(e.target.value)}
-            className="flex-1 min-w-0 rounded border border-[#E2E8F0] bg-white px-2 py-1.5 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+      {/* Tabs só com ícones + badges: Filas, Meus atendimentos, Contatos, Grupos — clicar filtra a lista */}
+      <div className="flex shrink-0 border-b border-[#E2E8F0] px-2 py-2">
+        <div className="flex items-center gap-1 rounded-lg bg-[#F1F5F9] p-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab("queues")}
+            className={`relative rounded-md p-2 transition-colors ${
+              activeTab === "queues"
+                ? "bg-white text-clicvend-orange shadow-sm"
+                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+            }`}
+            title="Filas"
+            aria-label="Filas"
           >
-            <option value="">Todas as filas</option>
-            {queues.map((q) => (
-              <option key={q.id} value={q.id}>{q.name}</option>
-            ))}
-          </select>
-        )}
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="w-24 rounded border border-[#E2E8F0] bg-white px-2 py-1.5 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-        >
-          <option value="">Todos</option>
-          <option value="open">Abertos</option>
-          <option value="closed">Fechados</option>
-        </select>
-        <button
-          type="button"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white hover:bg-clicvend-orange-dark transition-colors"
-          aria-label="Criar novo"
-        >
-          <Plus className="h-4 w-4 shrink-0" />
-          Criar novo
-        </button>
+            <Inbox className="h-5 w-5" />
+            {counts.queues > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
+                {counts.queues > 99 ? "99+" : counts.queues}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("mine")}
+            className={`relative rounded-md p-2 transition-colors ${
+              activeTab === "mine"
+                ? "bg-white text-clicvend-orange shadow-sm"
+                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+            }`}
+            title="Meus atendimentos"
+            aria-label="Meus atendimentos"
+          >
+            <UserCheck className="h-5 w-5" />
+            {counts.mine > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
+                {counts.mine > 99 ? "99+" : counts.mine}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("contacts")}
+            className={`relative rounded-md p-2 transition-colors ${
+              activeTab === "contacts"
+                ? "bg-white text-clicvend-orange shadow-sm"
+                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+            }`}
+            title="Contatos (conversas individuais)"
+            aria-label="Contatos"
+          >
+            <User className="h-5 w-5" />
+            {counts.individual > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
+                {counts.individual > 99 ? "99+" : counts.individual}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("groups")}
+            className={`relative rounded-md p-2 transition-colors ${
+              activeTab === "groups"
+                ? "bg-white text-clicvend-orange shadow-sm"
+                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+            }`}
+            title="Grupos"
+            aria-label="Grupos"
+          >
+            <Users className="h-5 w-5" />
+            {counts.groups > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
+                {counts.groups > 99 ? "99+" : counts.groups}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
       {/* Lista com rolagem própria — scrollbar sempre visível na janela da lista */}
       <div className="scroll-area-conversas scroll-area flex-1 min-h-0 overflow-x-hidden overscroll-contain">
@@ -291,9 +354,10 @@ export function ConversasSidebar() {
           <div className="p-4 text-center text-sm text-[#64748B]">
             <p className="font-medium text-[#1E293B]">Nenhuma conversa</p>
             <p className="mt-1 text-xs">
-              {viewMode === "mine"
-                ? "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."
-                : "Nenhuma conversa nas suas filas no momento."}
+              {activeTab === "mine" && "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."}
+              {activeTab === "queues" && "Nenhuma conversa nas suas filas no momento."}
+              {activeTab === "contacts" && "Nenhuma conversa individual."}
+              {activeTab === "groups" && "Nenhum grupo."}
             </p>
             <p className="mt-2 text-xs">
               Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link> recebem mensagens e histórico em segundo plano.

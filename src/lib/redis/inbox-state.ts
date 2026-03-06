@@ -3,7 +3,8 @@
 import { getRedisClient } from "@/lib/redis/client";
 
 const KEY_PREFIX = "inbox:list:";
-const TTL_SECONDS = 45;
+/** Lista de conversas: TTL curto para dados mais atualizados (fotos, status, atribuição). */
+const TTL_SECONDS = 30;
 
 /**
  * Chave de cache para lista de conversas (estado quente).
@@ -76,7 +77,8 @@ export async function invalidateConversationList(companyId: string): Promise<voi
 }
 
 const DETAIL_KEY_PREFIX = "inbox:detail:";
-const DETAIL_TTL_SECONDS = 90;
+/** Detalhe da conversa (chat): TTL curto para mensagens e avatar atualizados. */
+const DETAIL_TTL_SECONDS = 60;
 
 /**
  * Cache do detalhe da conversa (mensagens + metadados) para abrir o chat rápido.

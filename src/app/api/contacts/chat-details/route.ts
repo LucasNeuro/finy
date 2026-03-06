@@ -1,15 +1,17 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { getChatDetails } from "@/lib/uazapi/client";
+import { invalidateConversationDetail } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 /**
  * POST /api/contacts/chat-details
- * Body: { channel_id: string, number: string, preview?: boolean }
+ * Body: { channel_id: string, number: string, preview?: boolean, conversation_id?: string }
  * number: telefone (ex: 5511999999999) ou jid do grupo (ex: 120363123456789012@g.us).
  * Retorna detalhes completos do chat/contato via UAZAPI /chat/details.
  * Se a UAZAPI retornar foto (imagePreview/image), grava em channel_contacts.avatar_url para exibir na lista.
+ * Se conversation_id for enviado e a foto for gravada, invalida o cache do detalhe da conversa para o Chat atualizar.
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -17,7 +19,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { channel_id?: string; number?: string; preview?: boolean };
+  let body: { channel_id?: string; number?: string; preview?: boolean; conversation_id?: string };
   try {
     body = await request.json();
   } catch {
@@ -26,6 +28,7 @@ export async function POST(request: Request) {
 
   const channelId = typeof body?.channel_id === "string" ? body.channel_id.trim() : "";
   const number = typeof body?.number === "string" ? body.number.trim() : "";
+  const conversationId = typeof body?.conversation_id === "string" ? body.conversation_id.trim() : "";
   if (!channelId || !number) {
     return NextResponse.json(
       { error: "channel_id e number são obrigatórios" },
@@ -63,6 +66,9 @@ export async function POST(request: Request) {
       .eq("channel_id", channelId)
       .eq("company_id", companyId)
       .in("jid", jids);
+    if (conversationId) {
+      await invalidateConversationDetail(conversationId);
+    }
   }
 
   return NextResponse.json(data);

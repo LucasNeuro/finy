@@ -30,6 +30,8 @@ Para a API do app conseguir criar instâncias, conectar números e usar o webhoo
 | `UAZAPI_ADMIN_TOKEN` | Sim | Admin Token do painel uazapiGO (mesmo servidor) |
 | `UAZAPI_WEBHOOK_URL` | Recomendado | URL da Edge Function para webhook global (veja abaixo) |
 | `NEXT_PUBLIC_APP_URL` | Recomendado em produção | URL pública do app (ex: `https://app.seudominio.com`) |
+| `APP_URL` | Para sync ao reconectar | Mesma URL do app (ex: `https://clicvend.onrender.com`). Usada pelo webhook para chamar sync-history quando o WhatsApp conecta. |
+| `INTERNAL_SYNC_SECRET` | Para sync ao reconectar | Senha secreta; o webhook envia no header `X-Internal-Sync-Secret` ao chamar POST /api/channels/[id]/sync-history. Sem APP_URL + INTERNAL_SYNC_SECRET, o sync de conversas antigas só roda ao abrir "Configurar" do canal ou ao clicar em "Sincronizar histórico de mensagens". |
 
 ### UAZAPI_WEBHOOK_URL (webhook global)
 

@@ -160,8 +160,10 @@ async function processOneMessage(
 
   const externalId = (data.chatId ?? data.chatid ?? "") as string;
   const customerPhone = (data.from ?? data.number ?? data.wa_id ?? "") as string;
-  const rawType = (data.type ?? data.mediaType ?? "") as string;
-  const mediaUrl = (data.mediaUrl ?? data.file ?? data.url ?? "") as string;
+  const rawType = (data.type ?? data.mediaType ?? data.messageType ?? "") as string;
+  const mediaUrl = (
+    data.mediaUrl ?? data.file ?? data.url ?? data.image ?? data.base64 ?? (data as { media?: { url?: string } }).media?.url ?? ""
+  ) as string;
   const caption = (data.caption ?? data.text ?? data.body ?? data.content ?? "") as string;
   const textContent = (data.text ?? data.body ?? data.content ?? "") as string;
   const content = textContent || caption || (rawType && mediaUrl ? `[${rawType}]` : "");
@@ -177,11 +179,11 @@ async function processOneMessage(
     image: "image", video: "video", audio: "audio", myaudio: "audio", ptt: "ptt", ptv: "video",
     document: "document", sticker: "sticker",
   };
-  const messageType = rawType ? (mediaTypeMap[rawType.toLowerCase()] ?? "text") : "text";
+  const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
   const isMedia = messageType !== "text" && (mediaUrl || content === `[${rawType}]`);
   const finalContent = isMedia ? (caption || textContent || `[${messageType}]`).slice(0, 10000) : content.slice(0, 10000);
   const finalMessageType = isMedia ? messageType : "text";
-  const finalMediaUrl = isMedia && mediaUrl ? mediaUrl : null;
+  const finalMediaUrl = isMedia && mediaUrl ? String(mediaUrl).trim() : null;
   const finalCaption = isMedia && (caption || textContent) ? (caption || textContent).slice(0, 2000) : null;
   const fileName = (data.fileName ?? data.filename ?? data.docName) as string | undefined;
   const finalFileName = fileName && typeof fileName === "string" ? fileName.slice(0, 255) : null;
@@ -446,6 +448,17 @@ async function processOneMessage(
 
       if (insertConvError || !inserted) return false;
       conversationId = inserted.id;
+      // Garante que o contato exista em channel_contacts para depois preencher avatar_url (sync-contacts ou chat-details).
+      await supabase.from("channel_contacts").upsert(
+        {
+          channel_id: channelId,
+          company_id: companyId,
+          jid: externalId,
+          phone: customerPhone || null,
+          contact_name: customerName || null,
+        },
+        { onConflict: "channel_id,jid", ignoreDuplicates: false }
+      );
     }
 
   await supabase.from("messages").insert({

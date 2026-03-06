@@ -32,6 +32,7 @@ type ConversationDetail = {
   channel_name?: string | null;
   queue_name?: string | null;
   assigned_to_name?: string | null;
+  contact_avatar_url?: string | null;
   messages: Message[];
 };
 
@@ -150,6 +151,7 @@ export default function ConversaThreadPage({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteOptions, setDeleteOptions] = useState({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
   const [chatActionLoading, setChatActionLoading] = useState<string | null>(null);
+  const [canTransfer, setCanTransfer] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -160,6 +162,16 @@ export default function ConversaThreadPage({
   const slug = resolved?.slug ?? pathname?.split("/")[1] ?? "";
   const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+
+  useEffect(() => {
+    fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders })
+      .then((r) => r.json())
+      .then((d) => {
+        const perms = Array.isArray(d?.permissions) ? d.permissions : [];
+        setCanTransfer(perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets") || perms.includes("inbox.transfer"));
+      })
+      .catch(() => {});
+  }, [apiHeaders]);
 
   const fetchConversation = useCallback(async (id: string, options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -184,10 +196,31 @@ export default function ConversaThreadPage({
     }
   }, [slug]);
 
+  const claimAttemptedRef = useRef(false);
+  const avatarFetchAttemptedRef = useRef(false);
+
   useEffect(() => {
     if (!resolved?.id) return;
     fetchConversation(resolved.id);
   }, [resolved?.id, fetchConversation]);
+
+  useEffect(() => {
+    if (!resolved?.id || !conv || claimAttemptedRef.current || conv.assigned_to != null) return;
+    claimAttemptedRef.current = true;
+    fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders })
+      .then((r) => r.json())
+      .then((d) => {
+        const perms = Array.isArray(d?.permissions) ? d.permissions : [];
+        if (!perms.includes("inbox.claim")) return;
+        return fetch(`/api/conversations/${resolved.id}/claim`, {
+          method: "POST",
+          credentials: "include",
+          headers: apiHeaders,
+        });
+      })
+      .then((r) => (r && typeof r.ok !== "undefined" && r.ok ? fetchConversation(resolved.id) : undefined))
+      .catch(() => {});
+  }, [resolved?.id, conv, apiHeaders, fetchConversation]);
 
   useEffect(() => {
     if (!resolved?.id || !conv) return;
@@ -196,6 +229,30 @@ export default function ConversaThreadPage({
     }, 15_000);
     return () => clearInterval(interval);
   }, [resolved?.id, conv, fetchConversation]);
+
+  // Na aba Contatos a foto vem do chat-details (UAZAPI). No Chat usamos channel_contacts.avatar_url;
+  // se estiver vazio, chamamos chat-details uma vez para buscar e gravar no banco, igual à aba Contatos.
+  useEffect(() => {
+    if (!resolved?.id || !conv?.channel_id || conv.is_group || avatarFetchAttemptedRef.current) return;
+    const hasAvatar = !!(conv.contact_avatar_url && conv.contact_avatar_url.trim());
+    if (hasAvatar) return;
+    avatarFetchAttemptedRef.current = true;
+    const number = (conv.customer_phone || conv.external_id || "").replace(/\D/g, "").trim() || conv.external_id || conv.customer_phone;
+    if (!number) return;
+    fetch("/api/contacts/chat-details", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...apiHeaders },
+      body: JSON.stringify({
+        channel_id: conv.channel_id,
+        number,
+        preview: true,
+        conversation_id: resolved.id,
+      }),
+    })
+      .then((r) => (r.ok ? fetchConversation(resolved.id) : undefined))
+      .catch(() => {});
+  }, [resolved?.id, conv?.id, conv?.channel_id, conv?.is_group, conv?.contact_avatar_url, conv?.customer_phone, conv?.external_id, apiHeaders, fetchConversation]);
 
   const fetchContactDetails = useCallback(() => {
     if (!conv?.channel_id) return;
@@ -454,10 +511,10 @@ export default function ConversaThreadPage({
   }
 
   const name = conv.customer_name || conv.customer_phone;
-  const showTransfer = !!conv.assigned_to;
+  const showTransfer = !!conv.assigned_to && canTransfer;
   const displayName = contactDetails?.name ?? contactDetails?.wa_name ?? contactDetails?.wa_contactName ?? name;
   const displayPhone = contactDetails?.phone ?? conv.customer_phone;
-  const imageUrl = contactDetails?.imagePreview ?? contactDetails?.image ?? null;
+  const imageUrl = (conv.contact_avatar_url && conv.contact_avatar_url.trim()) ? conv.contact_avatar_url : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F1F5F9]">
@@ -469,11 +526,15 @@ export default function ConversaThreadPage({
         >
           <ArrowLeft className="h-5 w-5" />
         </a>
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
-          {name.slice(0, 1).toUpperCase()}
+        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+          {imageUrl ? (
+            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            name.slice(0, 1).toUpperCase()
+          )}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-[#1E293B]">{name}</p>
+          <p className="font-medium text-[#1E293B]">{displayName || name}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {conv.channel_name && (
               <span className="rounded bg-clicvend-green/15 px-1.5 py-0.5 text-xs font-medium text-clicvend-green">

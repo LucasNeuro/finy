@@ -159,3 +159,75 @@ No diagrama tipo Chatwoot, o **Redis** aparece para **filas de jobs** (Sidekiq):
 **Resumo:**  
 - **Controle de filas e caixas de entrada** (até 8 por número, caixa padrão, vinculação) fica **só no Supabase**. Não há gargalo típico: são poucas linhas por canal e poucas escritas por minuto.  
 - **Redis** (ou outro sistema de fila de jobs) entra se no futuro quisermos **processar tarefas em background** (ex.: enviar mensagem pela UAZAPI sem travar a requisição, reprocessar webhooks). Com o volume atual, dá para seguir só com Supabase e considerar Redis/job queue quando houver necessidade real de workers assíncronos.
+
+---
+
+## 10. Fluxo de atendimento (atendente)
+
+Este é o fluxo na tela de **Conversas**: como o atendente vê as conversas, assume e transfere.
+
+### 10.1 Abas na sidebar
+
+| Aba | O que mostra | API |
+|-----|----------------|-----|
+| **Meus atendimentos** | Conversas em que **eu** sou o atendente (`assigned_to` = meu usuário). | `GET /api/conversations?only_assigned_to_me=1` |
+| **Filas** | Conversas da **fila** escolhida no dropdown (e, se o usuário não for owner/admin, só das filas em que está atribuído). | `GET /api/conversations?queue_id=...` |
+| **Contatos** | Link para a página de Contatos (não é lista de conversas). | — |
+
+### 10.2 Fluxo: da fila para “Meus atendimentos”
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  CONVERSAS (sidebar)                                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│  [ Meus atendimentos ]  [ Filas ]  [ Contatos ]                           │
+│  Filtro: Todas as filas ▼   Todos ▼    [+ Criar novo]                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  Aba "Filas" → listagem por queue_id (conversas daquela fila).           │
+│  Muitas podem estar sem atendente (assigned_to = null).                  │
+│                                                                          │
+│  Atendente CLICA numa conversa da fila                                   │
+│       ↓                                                                  │
+│  Abre o chat (página /conversas/[id])                                     │
+│       ↓                                                                  │
+│  Se a conversa não tem atendente E o usuário tem permissão inbox.claim:  │
+│       → POST /api/conversations/[id]/claim (automático, uma vez)        │
+│       → assigned_to = eu, status = in_progress                           │
+│       → conversa “sai” da fila (para quem filtra “só minha fila”)        │
+│       → e passa a aparecer em “Meus atendimentos”                        │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Ticket = conversa:** no nosso modelo, cada conversa é um “ticket”. Ao assumir, ela fica **atribuída** a você e o **status** vai para `in_progress`.
+- Quem **não** tem `inbox.claim` pode abrir a conversa para ler, mas **não** assume automaticamente (a conversa continua na fila até alguém com permissão assumir ou um supervisor atribuir).
+
+### 10.3 Quem pode transferir
+
+Só podem **transferir** (reatribuir o chamado para outra pessoa ou mudar fila) quem tem uma destas permissões:
+
+- **inbox.assign** – Atribuir atendimento  
+- **inbox.manage_tickets** – Visão gerencial (owner/admin)  
+- **inbox.transfer** – Transferir atendimento  
+
+Na tela do chat, o botão **“Transferir chamado”** só aparece para usuários com uma dessas permissões. O backend (PATCH em `/api/conversations/[id]`) já valida ao alterar `assigned_to` ou `queue_id`.
+
+### 10.4 Status do ticket (conversa)
+
+| Status | Quando |
+|--------|--------|
+| `waiting` / `open` | Conversa na fila, sem atendente ou recém-criada. |
+| `in_progress` | Atendente assumiu (claim ou atribuição manual). |
+| `closed` | Atendimento encerrado (exige `inbox.close`). |
+
+Reabrir uma conversa `closed` exige permissão **inbox.reopen**.
+
+### 10.5 Resumo do fluxo para o atendente
+
+1. Entro em **Conversas** e escolho a aba **Filas** e a fila (ex.: “Atendimentos gerais”).  
+2. Vejo as conversas daquela fila (algumas sem atendente).  
+3. Clico numa conversa → abre o chat.  
+4. Se eu tiver **Pegar chamado da fila** (`inbox.claim`) e a conversa estiver sem atendente, **assumo automaticamente**: a conversa fica em **Meus atendimentos** e o status vai para **em atendimento**.  
+5. Só **supervisor / ADM / owner** (ou quem tiver `inbox.assign` ou `inbox.transfer`) pode **transferir** esse chamado para outro atendente.  
+6. Ao encerrar, mudo o status para **closed** (quem tem `inbox.close`).
