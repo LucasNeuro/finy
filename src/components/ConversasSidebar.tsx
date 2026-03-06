@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo, useRef } from "react";
 import useSWR from "swr";
-import { MoreVertical, Search, RefreshCw, Users, Inbox, UserCheck, User } from "lucide-react";
+import { Search, Users, Inbox, UserCheck, User } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
 
 type Conversation = {
@@ -115,7 +115,6 @@ export function ConversasSidebar() {
     activeTab === "groups" ? "group" : activeTab === "contacts" ? "individual" : "all";
   const [moreConversations, setMoreConversations] = useState<Conversation[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const avatarRequestedRef = useRef<Set<string>>(new Set());
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const MAX_AVATAR_PREFETCH = 8;
@@ -281,42 +280,10 @@ export function ConversasSidebar() {
     return () => { cancelled = true; };
   }, [loading, slug, baseList, apiHeaders, mutateConversations]);
 
-  const refreshList = async () => {
-    if (!conversationsUrl || refreshing) return;
-    setRefreshing(true);
-    avatarRequestedRef.current.clear();
-    try {
-      const url = `${conversationsUrl}${conversationsUrl.includes("?") ? "&" : "?"}skip_cache=1`;
-      const res = await fetch(url, { credentials: "include", headers: apiHeaders });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok) {
-        mutateConversations(json, { revalidate: false });
-        mutateCounts();
-      }
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   return (
     <aside className="flex min-h-0 w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden self-stretch">
-      <div className="flex shrink-0 items-center justify-between border-b border-[#E2E8F0] p-3">
+      <div className="flex shrink-0 items-center border-b border-[#E2E8F0] p-3">
         <h2 className="text-lg font-semibold text-[#1E293B]">Conversas</h2>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={refreshList}
-            disabled={refreshing || !conversationsUrl}
-            className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors disabled:opacity-50"
-            aria-label="Atualizar lista (carrega fotos e dados frescos)"
-            title="Atualizar lista (carrega fotos e dados frescos)"
-          >
-            <RefreshCw className={`h-5 w-5 ${refreshing ? "animate-spin" : ""}`} />
-          </button>
-          <button type="button" className="rounded p-2 text-[#64748B] hover:text-[#1E293B] transition-colors" aria-label="Menu">
-            <MoreVertical className="h-5 w-5" />
-          </button>
-        </div>
       </div>
       <div className="shrink-0 p-2">
         <div className="relative">

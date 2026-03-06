@@ -8,6 +8,7 @@ import {
   invalidateConversationDetail,
 } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
 export async function GET(
@@ -77,12 +78,28 @@ export async function GET(
     if (name) contact_name_from_cc = name;
   }
 
-  const { data: messages, error: msgError } = await supabase
-    .from("messages")
-    .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
-    .eq("conversation_id", id)
-    .order("sent_at", { ascending: true })
-    .limit(2000);
+  let messages: unknown[] | null = null;
+  let msgError: { message: string } | null = null;
+  try {
+    const adminSupabase = createServiceRoleClient();
+    const res = await adminSupabase
+      .from("messages")
+      .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
+      .eq("conversation_id", id)
+      .order("sent_at", { ascending: true })
+      .limit(2000);
+    messages = res.data ?? null;
+    msgError = res.error;
+  } catch {
+    const res = await supabase
+      .from("messages")
+      .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
+      .eq("conversation_id", id)
+      .order("sent_at", { ascending: true })
+      .limit(2000);
+    messages = res.data ?? null;
+    msgError = res.error;
+  }
   if (msgError) {
     return NextResponse.json({ error: msgError.message }, { status: 500 });
   }
