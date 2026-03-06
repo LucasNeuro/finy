@@ -1,10 +1,78 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
+import { requirePermission } from "@/lib/auth/get-profile";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
 const MEDIA_TYPES = ["image", "video", "audio", "ptt", "myaudio", "ptv", "document", "sticker"] as const;
+const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
+const MESSAGES_PAGE_LIMIT = 1000;
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const companyId = await getCompanyIdFromRequest(request);
+  if (!companyId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const readErr = await requirePermission(companyId, PERMISSIONS.inbox.read);
+  if (readErr) {
+    return NextResponse.json({ error: readErr.error }, { status: readErr.status });
+  }
+  const { id: conversationId } = await params;
+  const { searchParams } = new URL(request.url);
+  const before = searchParams.get("before");
+  const limit = Math.min(Number(searchParams.get("limit")) || MESSAGES_PAGE_LIMIT, 2000);
+
+  const supabase = await createClient();
+  const { data: conversation, error: convError } = await supabase
+    .from("conversations")
+    .select("id")
+    .eq("id", conversationId)
+    .eq("company_id", companyId)
+    .single();
+  if (convError || !conversation) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  let messages: unknown[] = [];
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const adminSupabase = createServiceRoleClient();
+      let q = adminSupabase
+        .from("messages")
+        .select(MESSAGES_SELECT)
+        .eq("conversation_id", conversationId)
+        .order("sent_at", { ascending: true })
+        .limit(limit);
+      if (before) q = q.lt("sent_at", before);
+      const res = await q;
+      if (!res.error && res.data) messages = Array.isArray(res.data) ? res.data : [];
+    } catch {
+      // fallback below
+    }
+  }
+  if (messages.length === 0) {
+    let q = supabase
+      .from("messages")
+      .select(MESSAGES_SELECT)
+      .eq("conversation_id", conversationId)
+      .order("sent_at", { ascending: true })
+      .limit(limit);
+    if (before) q = q.lt("sent_at", before);
+    const res = await q;
+    if (res.error) {
+      return NextResponse.json({ error: res.error.message }, { status: 500 });
+    }
+    messages = Array.isArray(res.data) ? res.data : [];
+  }
+
+  return NextResponse.json({ messages });
+}
 
 export async function POST(
   request: Request,

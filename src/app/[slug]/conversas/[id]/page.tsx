@@ -154,6 +154,8 @@ export default function ConversaThreadPage({
   const [deleteOptions, setDeleteOptions] = useState({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
   const [chatActionLoading, setChatActionLoading] = useState<string | null>(null);
   const [canTransfer, setCanTransfer] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [hasMoreOlderMessages, setHasMoreOlderMessages] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -214,8 +216,45 @@ export default function ConversaThreadPage({
 
   useEffect(() => {
     if (!resolved?.id) return;
+    setHasMoreOlderMessages(true);
     fetchConversation(resolved.id, { skipCache: true });
   }, [resolved?.id, fetchConversation]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!resolved?.id || !conv?.messages?.length || loadingOlderMessages || !hasMoreOlderMessages) return;
+    const first = conv.messages[0] as { sent_at?: string };
+    const before = first?.sent_at;
+    if (!before) return;
+    setLoadingOlderMessages(true);
+    try {
+      const url = `/api/conversations/${resolved.id}/messages?before=${encodeURIComponent(before)}&limit=1000`;
+      const res = await fetch(url, { credentials: "include", headers: apiHeaders });
+      if (!res.ok) return;
+      const data = await res.json();
+      const older = Array.isArray(data?.messages) ? data.messages : [];
+      if (older.length === 0) setHasMoreOlderMessages(false);
+      else {
+        const scrollEl = messagesScrollRef.current;
+        const prevHeight = scrollEl?.scrollHeight ?? 0;
+        const prevScroll = scrollEl?.scrollTop ?? 0;
+        setConv((c) => {
+          if (!c) return c;
+          const existing = Array.isArray(c.messages) ? c.messages : [];
+          const merged = [...older, ...existing];
+          return { ...c, messages: merged };
+        });
+        requestAnimationFrame(() => {
+          if (scrollEl) {
+            const newHeight = scrollEl.scrollHeight;
+            scrollEl.scrollTop = prevScroll + (newHeight - prevHeight);
+          }
+        });
+        if (older.length < 1000) setHasMoreOlderMessages(false);
+      }
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders]);
 
   useEffect(() => {
     if (!conv?.messages?.length) return;
@@ -654,6 +693,18 @@ export default function ConversaThreadPage({
       <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
         <div ref={messagesScrollRef} className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
           <div className="space-y-3">
+            {conv.messages?.length > 0 && hasMoreOlderMessages && (
+              <div className="flex justify-center py-2">
+                <button
+                  type="button"
+                  onClick={loadOlderMessages}
+                  disabled={loadingOlderMessages}
+                  className="text-sm text-clicvend-orange hover:underline disabled:opacity-50"
+                >
+                  {loadingOlderMessages ? "Carregando…" : "Carregar mensagens antigas"}
+                </button>
+              </div>
+            )}
             {(Array.isArray(conv.messages) ? conv.messages : []).map((m) => (
               <div
                 key={m.id}

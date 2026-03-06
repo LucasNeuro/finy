@@ -78,30 +78,35 @@ export async function GET(
     if (name) contact_name_from_cc = name;
   }
 
-  let messages: unknown[] | null = null;
-  let msgError: { message: string } | null = null;
-  try {
-    const adminSupabase = createServiceRoleClient();
-    const res = await adminSupabase
-      .from("messages")
-      .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
-      .eq("conversation_id", id)
-      .order("sent_at", { ascending: true })
-      .limit(2000);
-    messages = res.data ?? null;
-    msgError = res.error;
-  } catch {
+  const MESSAGES_LIMIT = 5000;
+  const messagesSelect = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
+  let messages: unknown[] = [];
+
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const adminSupabase = createServiceRoleClient();
+      const res = await adminSupabase
+        .from("messages")
+        .select(messagesSelect)
+        .eq("conversation_id", id)
+        .order("sent_at", { ascending: true })
+        .limit(MESSAGES_LIMIT);
+      if (!res.error && res.data) messages = Array.isArray(res.data) ? res.data : [];
+    } catch {
+      // fallback to user client below
+    }
+  }
+  if (messages.length === 0) {
     const res = await supabase
       .from("messages")
-      .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
+      .select(messagesSelect)
       .eq("conversation_id", id)
       .order("sent_at", { ascending: true })
-      .limit(2000);
-    messages = res.data ?? null;
-    msgError = res.error;
-  }
-  if (msgError) {
-    return NextResponse.json({ error: msgError.message }, { status: 500 });
+      .limit(MESSAGES_LIMIT);
+    if (res.error) {
+      return NextResponse.json({ error: res.error.message }, { status: 500 });
+    }
+    messages = Array.isArray(res.data) ? res.data : [];
   }
 
   const payload = {
@@ -111,7 +116,7 @@ export async function GET(
     queue_name,
     assigned_to_name,
     contact_avatar_url,
-    messages: messages ?? [],
+    messages,
   };
   await setCachedConversationDetail(id, payload as Record<string, unknown>);
   return NextResponse.json(payload);
