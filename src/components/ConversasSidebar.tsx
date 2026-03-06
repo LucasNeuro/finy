@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useState, useEffect, memo } from "react";
+import { useState, useEffect, memo, useRef } from "react";
 import useSWR from "swr";
 import { MoreVertical, Search, RefreshCw, Users, Inbox, UserCheck, User } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
@@ -13,6 +13,7 @@ type Conversation = {
   customer_phone: string;
   customer_name: string | null;
   wa_chat_jid?: string | null;
+  external_id?: string | null;
   last_message_at: string;
   last_message_preview?: string | null;
   status: string;
@@ -115,6 +116,9 @@ export function ConversasSidebar() {
   const [moreConversations, setMoreConversations] = useState<Conversation[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const avatarRequestedRef = useRef<Set<string>>(new Set());
+  const MAX_AVATAR_PREFETCH = 8;
+  const AVATAR_PREFETCH_DELAY_MS = 600;
 
   const { data: permissionsData } = useSWR<{ permissions?: string[]; inbox_see_all?: boolean }>(
     slug ? ["/api/auth/permissions", slug] : null,
@@ -206,9 +210,63 @@ export function ConversasSidebar() {
 
   const currentId = pathname?.split("/")[3] ?? null;
 
+  // Preenche fotos progressivamente: para as primeiras conversas sem avatar (e não grupo), chama chat-details e atualiza a lista.
+  useEffect(() => {
+    if (loading || !slug || !apiHeaders || baseList.length === 0) return;
+    const needAvatar = baseList.filter(
+      (c) => !c.is_group && !(c.avatar_url && c.avatar_url.trim()) && c.channel_id && !avatarRequestedRef.current.has(c.id)
+    );
+    const toFetch = needAvatar.slice(0, MAX_AVATAR_PREFETCH);
+    if (toFetch.length === 0) return;
+    let cancelled = false;
+    const run = async () => {
+      for (let i = 0; i < toFetch.length && !cancelled; i++) {
+        const c = toFetch[i];
+        const number = (c.customer_phone || c.wa_chat_jid || c.external_id || "").replace(/\D/g, "").trim()
+          || (c.wa_chat_jid || c.external_id || "");
+        if (!number) continue;
+        avatarRequestedRef.current.add(c.id);
+        try {
+          const res = await fetch("/api/contacts/chat-details", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({
+              channel_id: c.channel_id,
+              number,
+              preview: true,
+              conversation_id: c.id,
+            }),
+          });
+          if (cancelled) return;
+          const data = await res.json().catch(() => ({}));
+          const url =
+            (res.ok && data && typeof (data.imagePreview ?? data.image) === "string")
+              ? (data.imagePreview ?? data.image)
+              : null;
+          if (url) {
+            mutateConversations((prev) => {
+              if (!prev?.data) return prev ?? { data: [], total: 0 };
+              return {
+                ...prev,
+                data: prev.data.map((item) => (item.id === c.id ? { ...item, avatar_url: url } : item)),
+              };
+            }, { revalidate: false });
+          }
+        } catch {
+          avatarRequestedRef.current.delete(c.id);
+        }
+        if (i < toFetch.length - 1) await new Promise((r) => setTimeout(r, AVATAR_PREFETCH_DELAY_MS));
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [loading, slug, baseList, apiHeaders, mutateConversations]);
+
   const refreshList = async () => {
     if (!conversationsUrl || refreshing) return;
     setRefreshing(true);
+    avatarRequestedRef.current.clear();
     try {
       const url = `${conversationsUrl}${conversationsUrl.includes("?") ? "&" : "?"}skip_cache=1`;
       const res = await fetch(url, { credentials: "include", headers: apiHeaders });

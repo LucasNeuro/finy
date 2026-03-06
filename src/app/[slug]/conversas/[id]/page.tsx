@@ -197,7 +197,8 @@ export default function ConversaThreadPage({
   }, [slug]);
 
   const claimAttemptedRef = useRef(false);
-  const avatarFetchAttemptedRef = useRef(false);
+  const avatarFetchAttemptedRef = useRef<string | null>(null);
+  const contactDetailsFetchedForRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!resolved?.id) return;
@@ -231,12 +232,13 @@ export default function ConversaThreadPage({
   }, [resolved?.id, conv, fetchConversation]);
 
   // Na aba Contatos a foto vem do chat-details (UAZAPI). No Chat usamos channel_contacts.avatar_url;
-  // se estiver vazio, chamamos chat-details uma vez para buscar e gravar no banco, igual à aba Contatos.
+  // se estiver vazio, chamamos chat-details UMA VEZ por conversa para buscar e gravar no banco.
   useEffect(() => {
-    if (!resolved?.id || !conv?.channel_id || conv.is_group || avatarFetchAttemptedRef.current) return;
+    if (!resolved?.id || !conv?.channel_id || conv.is_group) return;
     const hasAvatar = !!(conv.contact_avatar_url && conv.contact_avatar_url.trim());
     if (hasAvatar) return;
-    avatarFetchAttemptedRef.current = true;
+    if (avatarFetchAttemptedRef.current === conv.id) return;
+    avatarFetchAttemptedRef.current = conv.id;
     const number = (conv.customer_phone || conv.external_id || "").replace(/\D/g, "").trim() || conv.external_id || conv.customer_phone;
     if (!number) return;
     fetch("/api/contacts/chat-details", {
@@ -254,20 +256,32 @@ export default function ConversaThreadPage({
       .catch(() => {});
   }, [resolved?.id, conv?.id, conv?.channel_id, conv?.is_group, conv?.contact_avatar_url, conv?.customer_phone, conv?.external_id, apiHeaders, fetchConversation]);
 
-  const fetchContactDetails = useCallback(() => {
-    if (!conv?.channel_id) return;
-    const number = conv.is_group && conv.wa_chat_jid
-      ? conv.wa_chat_jid
-      : (conv.customer_phone || conv.external_id || "").replace(/\D/g, "").trim() || conv.external_id || conv.customer_phone;
-    if (!number) return;
+  // Só busca detalhes do contato quando o painel ABRE ou quando troca de conversa — evita ficar batendo na API a cada refetch.
+  useEffect(() => {
+    if (!infoOpen) {
+      setContactDetails(null);
+      setContactDetailsError(null);
+      contactDetailsFetchedForRef.current = null;
+      return;
+    }
+    if (!conv?.channel_id || !conv?.id) return;
+    if (contactDetailsFetchedForRef.current === conv.id) return;
+    contactDetailsFetchedForRef.current = conv.id;
     setContactDetailsLoading(true);
     setContactDetailsError(null);
     setContactDetails(null);
+    const number = conv.is_group && conv.wa_chat_jid
+      ? conv.wa_chat_jid
+      : (conv.customer_phone || conv.external_id || "").replace(/\D/g, "").trim() || conv.external_id || conv.customer_phone;
+    if (!number) {
+      setContactDetailsLoading(false);
+      return;
+    }
     fetch("/api/contacts/chat-details", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json", ...apiHeaders },
-      body: JSON.stringify({ channel_id: conv.channel_id, number, preview: true }),
+      body: JSON.stringify({ channel_id: conv.channel_id, number, preview: true, conversation_id: resolved?.id ?? undefined }),
     })
       .then(async (r) => {
         const data = await r.json();
@@ -276,15 +290,7 @@ export default function ConversaThreadPage({
       })
       .catch(() => setContactDetailsError("Erro de rede"))
       .finally(() => setContactDetailsLoading(false));
-  }, [conv, apiHeaders]);
-
-  useEffect(() => {
-    if (infoOpen && conv?.channel_id) fetchContactDetails();
-    if (!infoOpen) {
-      setContactDetails(null);
-      setContactDetailsError(null);
-    }
-  }, [infoOpen, conv?.channel_id, fetchContactDetails]);
+  }, [infoOpen, conv?.id, conv?.channel_id, conv?.is_group, conv?.customer_phone, conv?.external_id, conv?.wa_chat_jid, apiHeaders, resolved?.id]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
