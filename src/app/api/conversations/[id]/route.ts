@@ -23,10 +23,11 @@ export async function GET(
     return NextResponse.json({ error: readErr.error }, { status: readErr.status });
   }
   const { id } = await params;
+  const skipCache = new URL(request.url).searchParams.get("skip_cache") === "1" || new URL(request.url).searchParams.get("nocache") === "1";
 
-  const cached = await getCachedConversationDetail(id);
-  if (cached) {
-    return NextResponse.json(cached);
+  if (!skipCache) {
+    const cached = await getCachedConversationDetail(id);
+    if (cached) return NextResponse.json(cached);
   }
 
   const supabase = await createClient();
@@ -80,7 +81,8 @@ export async function GET(
     .from("messages")
     .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
     .eq("conversation_id", id)
-    .order("sent_at", { ascending: true });
+    .order("sent_at", { ascending: true })
+    .limit(2000);
   if (msgError) {
     return NextResponse.json({ error: msgError.message }, { status: 500 });
   }

@@ -155,6 +155,8 @@ export default function ConversaThreadPage({
   const [chatActionLoading, setChatActionLoading] = useState<string | null>(null);
   const [canTransfer, setCanTransfer] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -182,13 +184,14 @@ export default function ConversaThreadPage({
     setCanTransfer(perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets") || perms.includes("inbox.transfer"));
   }, [permissionsData?.permissions]);
 
-  const fetchConversation = useCallback(async (id: string, options?: { silent?: boolean }) => {
+  const fetchConversation = useCallback(async (id: string, options?: { silent?: boolean; skipCache?: boolean }) => {
     if (!options?.silent) {
       setLoading(true);
       setError(null);
     }
     try {
-      const res = await fetch(`/api/conversations/${id}`, {
+      const url = options?.skipCache ? `/api/conversations/${id}?skip_cache=1` : `/api/conversations/${id}`;
+      const res = await fetch(url, {
         credentials: "include",
         headers: apiHeaders,
       });
@@ -211,8 +214,13 @@ export default function ConversaThreadPage({
 
   useEffect(() => {
     if (!resolved?.id) return;
-    fetchConversation(resolved.id);
+    fetchConversation(resolved.id, { skipCache: true });
   }, [resolved?.id, fetchConversation]);
+
+  useEffect(() => {
+    if (!conv?.messages?.length) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [conv?.id, conv?.messages?.length]);
 
   useEffect(() => {
     if (!resolved?.id || !conv || claimAttemptedRef.current || conv.assigned_to != null) return;
@@ -644,7 +652,7 @@ export default function ConversaThreadPage({
       </header>
 
       <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-        <div className="scroll-area flex-1 min-h-0 overflow-x-hidden overscroll-contain p-4">
+        <div ref={messagesScrollRef} className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
           <div className="space-y-3">
             {(Array.isArray(conv.messages) ? conv.messages : []).map((m) => (
               <div
@@ -654,6 +662,7 @@ export default function ConversaThreadPage({
                 <MessageBubble m={m} name={name} />
               </div>
             ))}
+            <div ref={messagesEndRef} />
           </div>
         </div>
 

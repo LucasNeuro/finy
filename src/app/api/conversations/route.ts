@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ data: [], total: 0 });
   }
 
-  const useCache = !skipCache && (canSeeAll || canManageTickets) && offset === 0;
+  const useCache = !skipCache && (canSeeAll || canManageTickets) && offset === 0 && limit <= 100;
   if (useCache) {
     const cached = await getCachedConversationList(
       companyId,
