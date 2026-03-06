@@ -25,3 +25,44 @@ body {
     @apply border-[#E2E8F0];
   }
 }
+
+/* Scrollbar sempre visível na lista de conversas e na janela do chat */
+.scroll-area {
+  overflow-y: scroll;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Lista de conversas: rolagem só aqui, scrollbar sempre visível e mais visível */
+.scroll-area-conversas {
+  overflow-y: scroll !important;
+  overflow-x: hidden;
+}
+.scroll-area-conversas::-webkit-scrollbar {
+  width: 10px;
+}
+.scroll-area-conversas::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 5px;
+}
+.scroll-area-conversas::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 5px;
+}
+.scroll-area-conversas::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}

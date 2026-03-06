@@ -1,7 +1,7 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 import { getRedisClient } from "@/lib/redis/client";
-import { invalidateConversationList } from "@/lib/redis/inbox-state";
+import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { NextResponse } from "next/server";
 
 type WebhookPayload = {
@@ -344,7 +344,10 @@ async function processOneMessage(
         external_id: messageExternalId,
         sent_at: sentAt,
       });
-      await invalidateConversationList(companyId);
+      await Promise.all([
+        invalidateConversationList(companyId),
+        invalidateConversationDetail(conversationId),
+      ]);
       return true;
     }
 
@@ -456,6 +459,9 @@ async function processOneMessage(
     external_id: messageExternalId,
     sent_at: sentAt,
   });
-  await invalidateConversationList(companyId);
+  await Promise.all([
+    invalidateConversationList(companyId),
+    invalidateConversationDetail(conversationId),
+  ]);
   return true;
 }

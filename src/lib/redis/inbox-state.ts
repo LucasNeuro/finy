@@ -74,3 +74,52 @@ export async function invalidateConversationList(companyId: string): Promise<voi
     // ignore
   }
 }
+
+const DETAIL_KEY_PREFIX = "inbox:detail:";
+const DETAIL_TTL_SECONDS = 90;
+
+/**
+ * Cache do detalhe da conversa (mensagens + metadados) para abrir o chat rápido.
+ * Evita múltiplas consultas ao banco ao clicar na conversa.
+ */
+export async function getCachedConversationDetail(
+  conversationId: string
+): Promise<Record<string, unknown> | null> {
+  const redis = await getRedisClient();
+  if (!redis) return null;
+  try {
+    const key = `${DETAIL_KEY_PREFIX}${conversationId}`;
+    const raw = await redis.get(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export async function setCachedConversationDetail(
+  conversationId: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const redis = await getRedisClient();
+  if (!redis) return;
+  try {
+    const key = `${DETAIL_KEY_PREFIX}${conversationId}`;
+    await redis.set(key, JSON.stringify(payload), { EX: DETAIL_TTL_SECONDS });
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Invalida o cache do detalhe de uma conversa (nova mensagem, PATCH).
+ */
+export async function invalidateConversationDetail(conversationId: string): Promise<void> {
+  const redis = await getRedisClient();
+  if (!redis) return;
+  try {
+    await redis.del(`${DETAIL_KEY_PREFIX}${conversationId}`);
+  } catch {
+    // ignore
+  }
+}

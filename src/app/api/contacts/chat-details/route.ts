@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { getChatDetails } from "@/lib/uazapi/client";
+import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 /**
@@ -8,6 +9,7 @@ import { NextResponse } from "next/server";
  * Body: { channel_id: string, number: string, preview?: boolean }
  * number: telefone (ex: 5511999999999) ou jid do grupo (ex: 120363123456789012@g.us).
  * Retorna detalhes completos do chat/contato via UAZAPI /chat/details.
+ * Se a UAZAPI retornar foto (imagePreview/image), grava em channel_contacts.avatar_url para exibir na lista.
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -47,5 +49,21 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(result.data ?? {});
+  const data = result.data ?? {};
+  const avatarUrl = (data as { imagePreview?: string; image?: string }).imagePreview
+    || (data as { image?: string }).image
+    || null;
+  if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
+    const supabase = await createClient();
+    const jidNorm = number.includes("@") ? number : `${number.replace(/\D/g, "")}@s.whatsapp.net`;
+    const jids = number === jidNorm ? [number] : [number, jidNorm];
+    await supabase
+      .from("channel_contacts")
+      .update({ avatar_url: avatarUrl.trim(), synced_at: new Date().toISOString() })
+      .eq("channel_id", channelId)
+      .eq("company_id", companyId)
+      .in("jid", jids);
+  }
+
+  return NextResponse.json(data);
 }

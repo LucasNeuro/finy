@@ -73,7 +73,7 @@ export function ChannelTableSkeleton({ rows = 3 }: { rows?: number }) {
 /** Skeleton da tela de chat (cabeçalho + bolhas de mensagem) */
 export function ChatThreadSkeleton() {
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[#F1F5F9]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F1F5F9]">
       <div className="flex shrink-0 items-center gap-3 border-b border-[#E2E8F0] bg-white px-4 py-3">
         <Skeleton className="h-5 w-5 shrink-0 rounded" />
         <Skeleton className="h-10 w-10 shrink-0 rounded-full" />

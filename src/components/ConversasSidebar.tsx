@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useState, useEffect, useRef, useMemo, memo } from "react";
+import { useState, useEffect, memo } from "react";
 import useSWR from "swr";
 import { MoreVertical, Search, Plus } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
@@ -17,6 +17,7 @@ type Conversation = {
   last_message_at: string;
   last_message_preview?: string | null;
   status: string;
+  avatar_url?: string | null;
 };
 
 function fetcher(url: string, headers?: Record<string, string>) {
@@ -37,65 +38,30 @@ const swrOpts = { revalidateOnFocus: false, dedupingInterval: 90_000, errorRetry
 
 type ViewMode = "mine" | "queues";
 
-const avatarCache = new Map<string, string>();
-
 const ConversationListItem = memo(function ConversationListItem({
   conversation: c,
   base,
   currentId,
-  apiHeaders,
 }: {
   conversation: Conversation;
   base: string;
   currentId: string | null;
-  apiHeaders?: Record<string, string>;
 }) {
-  const [avatar, setAvatar] = useState<string | null>(() => avatarCache.get(c.id) ?? null);
-  const fetched = useRef(false);
-  const liRef = useRef<HTMLLIElement>(null);
-  const number = c.wa_chat_jid || c.customer_phone || "";
-
-  useEffect(() => {
-    if (!c.channel_id || !number || avatar || fetched.current) return;
-    const el = liRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0]?.isIntersecting || fetched.current) return;
-        fetched.current = true;
-        fetch("/api/contacts/chat-details", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json", ...apiHeaders },
-          body: JSON.stringify({ channel_id: c.channel_id, number, preview: true }),
-        })
-          .then((r) => r.json())
-          .then((data) => {
-            const url = data?.imagePreview ?? data?.image ?? null;
-            if (url) {
-              avatarCache.set(c.id, url);
-              setAvatar(url);
-            }
-          })
-          .catch(() => {});
-      },
-      { rootMargin: "100px", threshold: 0 }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [c.id, c.channel_id, number, avatar, apiHeaders]);
+  const href = `${base}/conversas/${c.id}`;
+  const displayName = (c.customer_name ?? c.customer_phone) ?? "?";
+  const initial = displayName.slice(0, 1).toUpperCase();
 
   return (
-    <li ref={liRef}>
+    <li>
       <Link
-        href={`${base}/conversas/${c.id}`}
+        href={href}
         className={`flex items-center gap-3 p-3 hover:bg-[#F8FAFC] ${currentId === c.id ? "bg-clicvend-green/10" : ""}`}
       >
         <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
-          {avatar ? (
-            <img src={avatar} alt="" className="h-full w-full object-cover" />
+          {c.avatar_url ? (
+            <img src={c.avatar_url} alt="" className="h-full w-full object-cover" />
           ) : (
-            (c.customer_name ?? c.customer_phone).slice(0, 1).toUpperCase()
+            initial
           )}
         </span>
         <span className="inline-block h-4 w-4 shrink-0 rounded-full bg-clicvend-orange" title="WhatsApp" />
@@ -134,6 +100,8 @@ export function ConversasSidebar() {
   const [queueId, setQueueId] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [search, setSearch] = useState("");
+  const [moreConversations, setMoreConversations] = useState<Conversation[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const { data: permissionsData } = useSWR<{ permissions?: string[]; inbox_see_all?: boolean }>(
     slug ? ["/api/auth/permissions", slug] : null,
@@ -150,6 +118,7 @@ export function ConversasSidebar() {
   const queues = Array.isArray(queuesData) ? queuesData : [];
 
   const conversationsParams = new URLSearchParams();
+  conversationsParams.set("limit", "100");
   if (viewMode === "mine") {
     conversationsParams.set("only_assigned_to_me", "1");
   }
@@ -159,7 +128,10 @@ export function ConversasSidebar() {
   if (statusFilter) conversationsParams.set("status", statusFilter);
 
   const conversationsUrl = slug ? `/api/conversations?${conversationsParams}` : null;
-  const { data: conversationsRes, error: conversationsError, isLoading: loading, mutate: mutateConversations } = useSWR<{ data?: Conversation[]; error?: string }>(
+  useEffect(() => {
+    setMoreConversations([]);
+  }, [conversationsUrl]);
+  const { data: conversationsRes, error: conversationsError, isLoading: loading, mutate: mutateConversations } = useSWR<{ data?: Conversation[]; total?: number; error?: string }>(
     conversationsUrl ? [conversationsUrl, slug, viewMode, queueId, statusFilter] : null,
     async ([url]) => {
       const res = await fetch(url as string, { credentials: "include", headers: apiHeaders });
@@ -167,9 +139,36 @@ export function ConversasSidebar() {
       if (!res.ok) throw new Error(json?.error ?? "Falha ao carregar conversas");
       return json;
     },
-    swrOpts
+    {
+      ...swrOpts,
+      onErrorRetry(err, _key, _config, revalidate, { retryCount }) {
+        if (err?.name === "AbortError" || (err?.message && String(err.message).includes("Lock broken"))) return;
+        if (retryCount >= 2) return;
+        setTimeout(() => revalidate({ retryCount }), 3000);
+      },
+    }
   );
-  const conversations = Array.isArray(conversationsRes?.data) ? conversationsRes.data : [];
+  const baseList = Array.isArray(conversationsRes?.data) ? conversationsRes.data : [];
+  const totalFromApi = conversationsRes?.total ?? 0;
+  const allConversations = [...baseList, ...moreConversations];
+  const hasMore = totalFromApi > allConversations.length;
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore || !slug) return;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams(conversationsParams);
+      params.set("offset", String(allConversations.length));
+      params.set("limit", "100");
+      const res = await fetch(`/api/conversations?${params}`, { credentials: "include", headers: apiHeaders });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json?.data)) {
+        setMoreConversations((prev) => [...prev, ...json.data]);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const errorMessage =
     conversationsError?.message === "Failed to fetch"
@@ -177,17 +176,17 @@ export function ConversasSidebar() {
       : conversationsError?.message ?? "Não foi possível carregar as conversas.";
 
   const filtered = search.trim()
-    ? conversations.filter(
+    ? allConversations.filter(
         (c) =>
           (c.customer_name ?? "").toLowerCase().includes(search.toLowerCase()) ||
           (c.customer_phone ?? "").includes(search)
       )
-    : conversations;
+    : allConversations;
 
   const currentId = pathname?.split("/")[3] ?? null;
 
   return (
-    <aside className="flex w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden">
+    <aside className="flex min-h-0 w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden self-stretch">
       <div className="flex shrink-0 items-center justify-between border-b border-[#E2E8F0] p-3">
         <h2 className="text-lg font-semibold text-[#1E293B]">Conversas</h2>
         <button type="button" className="text-[#64748B] hover:text-[#1E293B] transition-colors" aria-label="Menu">
@@ -269,8 +268,8 @@ export function ConversasSidebar() {
           Criar novo
         </button>
       </div>
-      {/* Lista com rolagem própria — scrollbar na janela da lista, não na página */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain">
+      {/* Lista com rolagem própria — scrollbar sempre visível na janela da lista */}
+      <div className="scroll-area-conversas scroll-area flex-1 min-h-0 overflow-x-hidden overscroll-contain">
         {loading ? (
           <ConversationListSkeleton count={8} />
         ) : conversationsError ? (
@@ -301,6 +300,7 @@ export function ConversasSidebar() {
             </p>
           </div>
         ) : (
+          <>
           <ul className="divide-y divide-[#E2E8F0]">
             {filtered.map((c) => (
               <ConversationListItem
@@ -308,10 +308,22 @@ export function ConversasSidebar() {
                 conversation={c}
                 base={base}
                 currentId={currentId}
-                apiHeaders={apiHeaders}
               />
             ))}
           </ul>
+          {hasMore && (
+            <div className="border-t border-[#E2E8F0] p-2">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-60"
+              >
+                {loadingMore ? "Carregando…" : `Carregar mais (${totalFromApi - allConversations.length} restantes)`}
+              </button>
+            </div>
+          )}
+          </>
         )}
       </div>
     </aside>

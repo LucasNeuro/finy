@@ -1,4 +1,5 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
+import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
@@ -118,5 +119,9 @@ export async function POST(
     .update({ last_message_at: sentAt, updated_at: sentAt })
     .eq("id", conversationId);
 
+  await Promise.all([
+    invalidateConversationDetail(conversationId),
+    invalidateConversationList(companyId),
+  ]);
   return NextResponse.json({ ok: true });
 }

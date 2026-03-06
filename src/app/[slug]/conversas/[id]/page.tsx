@@ -460,7 +460,7 @@ export default function ConversaThreadPage({
   const imageUrl = contactDetails?.imagePreview ?? contactDetails?.image ?? null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[#F1F5F9]">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F1F5F9]">
       <header className="flex shrink-0 items-center gap-3 border-b border-[#E2E8F0] bg-white px-4 py-3">
         <a
           href={`${base}/conversas`}
@@ -571,8 +571,8 @@ export default function ConversaThreadPage({
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0 flex-col min-w-0">
-        <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
+        <div className="scroll-area flex-1 min-h-0 overflow-x-hidden overscroll-contain p-4">
           <div className="space-y-3">
             {conv.messages.map((m) => (
               <div

@@ -1,7 +1,12 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
-import { invalidateConversationList } from "@/lib/redis/inbox-state";
+import {
+  getCachedConversationDetail,
+  invalidateConversationList,
+  setCachedConversationDetail,
+  invalidateConversationDetail,
+} from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -18,6 +23,12 @@ export async function GET(
     return NextResponse.json({ error: readErr.error }, { status: readErr.status });
   }
   const { id } = await params;
+
+  const cached = await getCachedConversationDetail(id);
+  if (cached) {
+    return NextResponse.json(cached);
+  }
+
   const supabase = await createClient();
   const { data: conversation, error: convError } = await supabase
     .from("conversations")
@@ -45,6 +56,22 @@ export async function GET(
   const queue_name = (queueRes.data as { name?: string } | null)?.name ?? null;
   const assigned_to_name = (assigneeRes.data as { full_name?: string } | null)?.full_name ?? null;
 
+  const jid = conversation.wa_chat_jid || conversation.external_id || conversation.customer_phone || "";
+  const jidNorm = jid && !jid.includes("@") ? `${jid.replace(/\D/g, "")}@s.whatsapp.net` : jid;
+  const jids = jid && jidNorm && jid !== jidNorm ? [jid, jidNorm] : jid ? [jid] : [];
+  let contact_avatar_url: string | null = null;
+  if (conversation.channel_id && jids.length > 0) {
+    const { data: ccList } = await supabase
+      .from("channel_contacts")
+      .select("avatar_url")
+      .eq("channel_id", conversation.channel_id)
+      .eq("company_id", companyId)
+      .in("jid", jids)
+      .limit(1);
+    const cc = Array.isArray(ccList) ? ccList[0] : null;
+    contact_avatar_url = (cc as { avatar_url?: string } | null)?.avatar_url?.trim() ?? null;
+  }
+
   const { data: messages, error: msgError } = await supabase
     .from("messages")
     .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
@@ -53,13 +80,17 @@ export async function GET(
   if (msgError) {
     return NextResponse.json({ error: msgError.message }, { status: 500 });
   }
-  return NextResponse.json({
+
+  const payload = {
     ...conversation,
     channel_name,
     queue_name,
     assigned_to_name,
+    contact_avatar_url,
     messages: messages ?? [],
-  });
+  };
+  await setCachedConversationDetail(id, payload as Record<string, unknown>);
+  return NextResponse.json(payload);
 }
 
 export async function PATCH(
@@ -155,6 +186,6 @@ export async function PATCH(
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
-  await invalidateConversationList(companyId);
+  await Promise.all([invalidateConversationList(companyId), invalidateConversationDetail(id)]);
   return NextResponse.json(updated);
 }

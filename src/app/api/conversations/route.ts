@@ -194,7 +194,7 @@ export async function GET(request: Request) {
     document: "📎 Documento",
     sticker: "🖼 Figurinha",
   };
-  const listWithPreview = dataWithNames.map((c) => {
+  let listWithPreview = dataWithNames.map((c) => {
     const last = lastMessageByConv[c.id];
     let last_message_preview: string | null = null;
     if (last) {
@@ -207,6 +207,33 @@ export async function GET(request: Request) {
       }
     }
     return { ...c, last_message_preview };
+  });
+
+  const channelIds = [...new Set(listWithPreview.map((c) => c.channel_id))];
+  let contactByKey: Record<string, { contact_name: string | null; first_name: string | null; avatar_url: string | null }> = {};
+  if (channelIds.length > 0) {
+    const { data: contacts } = await supabase
+      .from("channel_contacts")
+      .select("channel_id, jid, contact_name, first_name, avatar_url")
+      .in("channel_id", channelIds)
+      .eq("company_id", companyId);
+    const list = (contacts ?? []) as { channel_id: string; jid: string; contact_name: string | null; first_name: string | null; avatar_url: string | null }[];
+    for (const row of list) {
+      const key = `${row.channel_id}|${row.jid}`;
+      contactByKey[key] = { contact_name: row.contact_name, first_name: row.first_name, avatar_url: row.avatar_url ?? null };
+    }
+  }
+  const normalizeJid = (v: string) => (v && !v.includes("@") ? `${v.replace(/\D/g, "")}@s.whatsapp.net` : v);
+  listWithPreview = listWithPreview.map((c) => {
+    const jid = c.wa_chat_jid || c.external_id || c.customer_phone || "";
+    const jidNorm = normalizeJid(jid);
+    const key1 = `${c.channel_id}|${jid}`;
+    const key2 = jid !== jidNorm ? `${c.channel_id}|${jidNorm}` : "";
+    const cc = contactByKey[key1] || (key2 ? contactByKey[key2] : null);
+    const fromDb = cc?.contact_name?.trim() || cc?.first_name?.trim() || null;
+    const customer_name = fromDb ?? c.customer_name;
+    const avatar_url = cc?.avatar_url?.trim() || null;
+    return { ...c, customer_name, avatar_url };
   });
 
   const payload = { data: listWithPreview, total: count ?? result.length };
