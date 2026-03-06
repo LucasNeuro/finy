@@ -653,6 +653,80 @@ export async function blockChat(
   return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
 }
 
+/** Arquivar ou desarquivar chat (POST /chat/archive). */
+export async function archiveChat(
+  token: string,
+  number: string,
+  archive: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/chat/archive", {
+    method: "POST",
+    token,
+    body: { number: number.trim(), archive },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/** Marcar chat como lido/não lido (POST /chat/read). */
+export async function markChatRead(
+  token: string,
+  number: string,
+  read: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/chat/read", {
+    method: "POST",
+    token,
+    body: { number: number.trim(), read },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/** Silenciar chat (POST /chat/mute). muteEndTime: 0=off, 8=8h, 168=1semana, -1=permanente. */
+export async function muteChat(
+  token: string,
+  number: string,
+  muteEndTime: number
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/chat/mute", {
+    method: "POST",
+    token,
+    body: { number: number.trim(), muteEndTime },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/** Fixar ou desafixar chat (POST /chat/pin). */
+export async function pinChat(
+  token: string,
+  number: string,
+  pin: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/chat/pin", {
+    method: "POST",
+    token,
+    body: { number: number.trim(), pin },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/** Deletar chat no WhatsApp (POST /chat/delete). */
+export async function deleteChat(
+  token: string,
+  number: string,
+  opts?: { deleteChatDB?: boolean; deleteMessagesDB?: boolean; deleteChatWhatsApp?: boolean }
+): Promise<{ ok: boolean; error?: string }> {
+  const body: Record<string, unknown> = { number: number.trim(), ...opts };
+  const { ok, error, status } = await uazapiFetch("/chat/delete", {
+    method: "POST",
+    token,
+    body,
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/** Alias para compatibilidade com imports antigos (ex.: deploy Render). */
+export { deleteChat as uazapiDeleteChat };
+
 /**
  * Lista contatos bloqueados (GET /chat/blocklist).
  */

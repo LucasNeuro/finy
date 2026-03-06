@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   const status = searchParams.get("status") ?? undefined;
   const onlyAssignedToMe = searchParams.get("only_assigned_to_me") === "1";
   const skipCache = searchParams.get("skip_cache") === "1" || searchParams.get("nocache") === "1";
-  const limit = Math.min(Number(searchParams.get("limit")) || 50, 100);
+  const limit = Math.min(Number(searchParams.get("limit")) || 200, 500);
   const offset = Number(searchParams.get("offset")) || 0;
 
   const supabase = await createClient();

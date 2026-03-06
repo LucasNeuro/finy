@@ -117,18 +117,19 @@ export function ConversasSidebar() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const avatarRequestedRef = useRef<Set<string>>(new Set());
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const MAX_AVATAR_PREFETCH = 8;
   const AVATAR_PREFETCH_DELAY_MS = 600;
 
   const { data: permissionsData } = useSWR<{ permissions?: string[]; inbox_see_all?: boolean }>(
     slug ? ["/api/auth/permissions", slug] : null,
     ([url]) => fetcher(url, apiHeaders),
-    swrOpts
+    { ...swrOpts, dedupingInterval: 120_000 }
   );
   const inboxSeeAll = permissionsData?.inbox_see_all === true;
 
   const conversationsParams = new URLSearchParams();
-  conversationsParams.set("limit", "100");
+  conversationsParams.set("limit", "500");
   if (viewMode === "mine") {
     conversationsParams.set("only_assigned_to_me", "1");
   }
@@ -179,7 +180,7 @@ export function ConversasSidebar() {
     try {
       const params = new URLSearchParams(conversationsParams);
       params.set("offset", String(allConversations.length));
-      params.set("limit", "100");
+      params.set("limit", "500");
       const res = await fetch(`/api/conversations?${params}`, { credentials: "include", headers: apiHeaders });
       const json = await res.json().catch(() => ({}));
       if (res.ok && Array.isArray(json?.data)) {
@@ -210,13 +211,30 @@ export function ConversasSidebar() {
 
   const currentId = pathname?.split("/")[3] ?? null;
 
-  // Preenche fotos progressivamente: para as primeiras conversas sem avatar (e não grupo), chama chat-details e atualiza a lista.
+  // Infinite scroll: ao chegar perto do fim da lista, carrega mais conversas automaticamente.
+  useEffect(() => {
+    if (!hasMore || loadingMore || loading) return;
+    const el = loadMoreSentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore();
+      },
+      { root: null, rootMargin: "200px", threshold: 0 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [hasMore, loadingMore, loading, filtered.length]);
+
+  // Preenche fotos progressivamente: no máximo MAX_AVATAR_PREFETCH por sessão; evita dezenas de chamadas.
   useEffect(() => {
     if (loading || !slug || !apiHeaders || baseList.length === 0) return;
+    if (avatarRequestedRef.current.size >= MAX_AVATAR_PREFETCH) return;
     const needAvatar = baseList.filter(
       (c) => !c.is_group && !(c.avatar_url && c.avatar_url.trim()) && c.channel_id && !avatarRequestedRef.current.has(c.id)
     );
-    const toFetch = needAvatar.slice(0, MAX_AVATAR_PREFETCH);
+    const remaining = MAX_AVATAR_PREFETCH - avatarRequestedRef.current.size;
+    const toFetch = needAvatar.slice(0, Math.min(remaining, MAX_AVATAR_PREFETCH));
     if (toFetch.length === 0) return;
     let cancelled = false;
     const run = async () => {
@@ -433,6 +451,7 @@ export function ConversasSidebar() {
               />
             ))}
           </ul>
+          {hasMore && <div ref={loadMoreSentinelRef} className="h-1" aria-hidden />}
           {hasMore && (
             <div className="border-t border-[#E2E8F0] p-2">
               <button

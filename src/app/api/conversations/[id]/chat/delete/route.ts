@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
-import { deleteChat as uazapiDeleteChat } from "@/lib/uazapi/client";
+import { deleteChat } from "@/lib/uazapi/client";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { NextResponse } from "next/server";
 
@@ -67,7 +67,7 @@ export async function POST(
   }
 
   if (deleteChatWhatsApp) {
-    const result = await uazapiDeleteChat(resolved.token, number, {
+    const result = await deleteChat(resolved.token, number, {
       deleteChatDB: deleteChatDB || undefined,
       deleteMessagesDB: deleteMessagesDB || undefined,
       deleteChatWhatsApp: true,

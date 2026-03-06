@@ -135,3 +135,29 @@ Em **Settings** do Web Service → **Custom Domains** → **Add Custom Domain**.
 | Env | Todas as variáveis do `.env` (Supabase, UAZAPI, APP_URL, INTERNAL_SYNC_SECRET, Redis) com a URL final do app |
 
 A Edge Function continua no Supabase; apenas o app Next.js roda no Render. O webhook global da UAZAPI deve apontar para a URL da Edge Function (não para a URL do Render).
+
+---
+
+## 8. Performance e travamentos
+
+### Cold start (plano Free)
+
+No **Free tier**, o Render desliga o serviço após ~15 min sem requisições. A primeira requisição depois disso pode levar **30s–1min** (cold start). Para ferramenta de atendimento isso gera “travamento” na primeira carga.
+
+- **Solução recomendada:** plano **Starter** (pago) ou usar **cron job** externo (ex.: UptimeRobot) para chamar a URL do app a cada 5–10 min e evitar o sleep.
+- Com Redis ativo (`USE_REDIS=true` + `REDIS_URL`), lista e detalhe de conversas usam cache; a primeira leitura após cold start continua indo ao banco, mas as seguintes ficam rápidas.
+
+### Cache (Redis) e estado
+
+- **Lista de conversas:** cache em Redis com TTL de 30s; primeiro request preenche o cache, os próximos leem do Redis.
+- **Detalhe da conversa (chat):** cache com TTL 60s; ao abrir o chat a resposta pode vir do cache.
+- No frontend, **permissões** e **conversa** usam SWR com `dedupingInterval` alto (2 min para permissions, 45s de polling para a conversa aberta), reduzindo chamadas repetidas à API.
+
+### Webhook UAZAPI chamado o tempo todo
+
+A UAZAPI envia um **POST** para o webhook a cada evento (mensagem, status, leitura, etc.). Várias requisições seguidas são **normais**. O que importa:
+
+- O handler responde **200 rápido** (resposta em poucos ms).
+- Trabalho pesado (sync de histórico, etc.) é feito em **background** (sem bloquear a resposta).
+
+Não é possível “reduzir” o número de chamadas que a UAZAPI faz; só garantir que o endpoint esteja leve e estável.

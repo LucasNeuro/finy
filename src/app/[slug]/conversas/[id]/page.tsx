@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useCallback, useRef } from "react";
+import useSWR from "swr";
 import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check } from "lucide-react";
 import { SideOver } from "@/components/SideOver";
 import { ChatThreadSkeleton } from "@/components/Skeleton";
@@ -133,9 +134,10 @@ function MessageBubble({ m, name }: { m: Message; name: string }) {
 export default function ConversaThreadPage({
   params,
 }: {
-  params: { slug: string; id: string };
+  params: { slug: string; id: string } | Promise<{ slug: string; id: string }>;
 }) {
   const pathname = usePathname();
+  const [resolvedParams, setResolvedParams] = useState<{ slug: string; id: string } | null>(null);
   const [conv, setConv] = useState<ConversationDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [sendValue, setSendValue] = useState("");
@@ -158,20 +160,27 @@ export default function ConversaThreadPage({
   const audioInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
 
-  const resolved = params;
+  useEffect(() => {
+    const p = Promise.resolve(params);
+    p.then((r) => setResolvedParams(r));
+  }, [params]);
+
+  const resolved =
+    resolvedParams ??
+    (typeof (params as { slug?: string; id?: string })?.id !== "undefined" ? (params as { slug: string; id: string }) : null);
   const slug = resolved?.slug ?? pathname?.split("/")[1] ?? "";
   const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
+  const { data: permissionsData } = useSWR<{ permissions?: string[] }>(
+    slug ? ["/api/auth/permissions", slug] : null,
+    ([url]) => fetch(url as string, { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    { revalidateOnFocus: false, dedupingInterval: 120_000 }
+  );
   useEffect(() => {
-    fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders })
-      .then((r) => r.json())
-      .then((d) => {
-        const perms = Array.isArray(d?.permissions) ? d.permissions : [];
-        setCanTransfer(perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets") || perms.includes("inbox.transfer"));
-      })
-      .catch(() => {});
-  }, [apiHeaders]);
+    const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+    setCanTransfer(perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets") || perms.includes("inbox.transfer"));
+  }, [permissionsData?.permissions]);
 
   const fetchConversation = useCallback(async (id: string, options?: { silent?: boolean }) => {
     if (!options?.silent) {
@@ -207,27 +216,23 @@ export default function ConversaThreadPage({
 
   useEffect(() => {
     if (!resolved?.id || !conv || claimAttemptedRef.current || conv.assigned_to != null) return;
+    const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+    if (!perms.includes("inbox.claim")) return;
     claimAttemptedRef.current = true;
-    fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders })
-      .then((r) => r.json())
-      .then((d) => {
-        const perms = Array.isArray(d?.permissions) ? d.permissions : [];
-        if (!perms.includes("inbox.claim")) return;
-        return fetch(`/api/conversations/${resolved.id}/claim`, {
-          method: "POST",
-          credentials: "include",
-          headers: apiHeaders,
-        });
-      })
-      .then((r) => (r && typeof r.ok !== "undefined" && r.ok ? fetchConversation(resolved.id) : undefined))
+    fetch(`/api/conversations/${resolved.id}/claim`, {
+      method: "POST",
+      credentials: "include",
+      headers: apiHeaders,
+    })
+      .then((r) => (r?.ok ? fetchConversation(resolved.id) : undefined))
       .catch(() => {});
-  }, [resolved?.id, conv, apiHeaders, fetchConversation]);
+  }, [resolved?.id, conv, permissionsData?.permissions, apiHeaders, fetchConversation]);
 
   useEffect(() => {
     if (!resolved?.id || !conv) return;
     const interval = setInterval(() => {
       fetchConversation(resolved.id, { silent: true });
-    }, 15_000);
+    }, 45_000);
     return () => clearInterval(interval);
   }, [resolved?.id, conv, fetchConversation]);
 
@@ -641,7 +646,7 @@ export default function ConversaThreadPage({
       <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
         <div className="scroll-area flex-1 min-h-0 overflow-x-hidden overscroll-contain p-4">
           <div className="space-y-3">
-            {conv.messages.map((m) => (
+            {(Array.isArray(conv.messages) ? conv.messages : []).map((m) => (
               <div
                 key={m.id}
                 className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
