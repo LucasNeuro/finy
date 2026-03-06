@@ -6,9 +6,11 @@ export default function ConversasLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex min-h-0 h-full w-full flex-1 flex-col overflow-hidden">
       <ConversasSidebar />
-      {children}
+      <div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-hidden">
+        {children}
+      </div>
     </div>
   );
 }

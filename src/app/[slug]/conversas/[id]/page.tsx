@@ -1,9 +1,10 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check } from "lucide-react";
 import { SideOver } from "@/components/SideOver";
+import { ChatThreadSkeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
 
 type Message = {
@@ -11,6 +12,10 @@ type Message = {
   direction: "in" | "out";
   content: string;
   sent_at: string;
+  message_type?: string;
+  media_url?: string | null;
+  caption?: string | null;
+  file_name?: string | null;
 };
 
 type ConversationDetail = {
@@ -47,6 +52,83 @@ type ChatDetails = {
   [key: string]: unknown;
 };
 
+function MessageBubble({ m, name }: { m: Message; name: string }) {
+  const type = m.message_type ?? "text";
+  const rawMediaUrl = m.media_url;
+  const mediaUrl = rawMediaUrl && (rawMediaUrl.startsWith("http") || rawMediaUrl.startsWith("data:"))
+    ? rawMediaUrl
+    : rawMediaUrl
+      ? (type === "image"
+          ? `data:image/jpeg;base64,${rawMediaUrl}`
+          : type === "audio" || type === "ptt"
+            ? `data:audio/ogg;base64,${rawMediaUrl}`
+            : type === "video"
+              ? `data:video/mp4;base64,${rawMediaUrl}`
+              : rawMediaUrl)
+      : null;
+  const caption = m.caption ?? m.content;
+
+  return (
+    <div
+      className={`max-w-[80%] rounded-lg px-3 py-2 ${
+        m.direction === "out"
+          ? "bg-[#DCFCE7] text-[#1E293B]"
+          : "bg-white border border-[#E2E8F0] text-[#1E293B]"
+      }`}
+    >
+      <p className="text-xs font-medium text-[#64748B] mb-0.5">
+        {m.direction === "out" ? "Você" : name}
+      </p>
+      {type === "image" && mediaUrl && (
+        <div className="space-y-1">
+          <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="block rounded overflow-hidden">
+            <img src={mediaUrl} alt="" className="max-h-64 w-full object-contain rounded" />
+          </a>
+          {caption && caption !== "[image]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+        </div>
+      )}
+      {type === "video" && mediaUrl && (
+        <div className="space-y-1">
+          <video src={mediaUrl} controls className="max-h-64 w-full rounded" />
+          {caption && caption !== "[video]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+        </div>
+      )}
+      {(type === "audio" || type === "ptt") && mediaUrl && (
+        <div className="space-y-1">
+          <audio src={mediaUrl} controls className="w-full max-w-sm" />
+          {caption && caption !== "[audio]" && caption !== "[ptt]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+        </div>
+      )}
+      {type === "document" && (
+        <div className="space-y-1">
+          {mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? (
+            <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-clicvend-orange hover:underline">
+              📎 {m.file_name || "Documento"}
+            </a>
+          ) : (
+            <span className="text-sm">📎 {m.file_name || caption || "Documento"}</span>
+          )}
+          {caption && caption !== "[document]" && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+        </div>
+      )}
+      {type === "sticker" && mediaUrl && (
+        <img src={mediaUrl} alt="" className="max-h-32 w-auto" />
+      )}
+      {(type === "text" || !mediaUrl) && (
+        <p className="whitespace-pre-wrap text-sm">{m.content}</p>
+      )}
+      <div className="mt-1 flex items-center justify-end gap-1">
+        <span className="text-xs text-[#64748B]">
+          {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+        </span>
+        {m.direction === "out" && (
+          <CheckCheck className="h-3.5 w-3.5 text-[#64748B]" aria-hidden />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ConversaThreadPage({
   params,
 }: {
@@ -62,9 +144,21 @@ export default function ConversaThreadPage({
   const [contactDetails, setContactDetails] = useState<ChatDetails | null>(null);
   const [contactDetailsLoading, setContactDetailsLoading] = useState(false);
   const [contactDetailsError, setContactDetailsError] = useState<string | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteOptions, setDeleteOptions] = useState({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
+  const [chatActionLoading, setChatActionLoading] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
 
   const resolved = params;
   const slug = resolved?.slug ?? pathname?.split("/")[1] ?? "";
+  const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
   const fetchConversation = useCallback(async (id: string, options?: { silent?: boolean }) => {
@@ -135,25 +229,117 @@ export default function ConversaThreadPage({
     }
   }, [infoOpen, conv?.channel_id, fetchContactDetails]);
 
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (chatMenuOpen && menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setChatMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [chatMenuOpen]);
+
+  async function chatAction(
+    action: "read" | "archive" | "mute" | "pin" | "delete",
+    payload?: Record<string, unknown>
+  ) {
+    if (!resolved?.id) return;
+    setChatActionLoading(action);
+    setChatMenuOpen(false);
+    try {
+      const baseUrl = `/api/conversations/${resolved.id}/chat`;
+      const method = "POST";
+      const body = payload ?? {};
+      let url = baseUrl;
+      if (action === "read") url = `${baseUrl}/read`;
+      else if (action === "archive") url = `${baseUrl}/archive`;
+      else if (action === "mute") url = `${baseUrl}/mute`;
+      else if (action === "pin") url = `${baseUrl}/pin`;
+      else if (action === "delete") {
+        url = `${baseUrl}/delete`;
+        const res = await fetch(url, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...apiHeaders },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          setError(err?.error ?? "Falha ao excluir");
+          return;
+        }
+        router.push(`${base}/conversas`);
+        return;
+      }
+      const res = await fetch(url, {
+        method,
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err?.error ?? `Falha em ${action}`);
+        return;
+      }
+      await fetchConversation(resolved.id);
+    } finally {
+      setChatActionLoading(null);
+    }
+  }
+
+  function openDeleteConfirm() {
+    setChatMenuOpen(false);
+    setDeleteOptions({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
+    setDeleteConfirmOpen(true);
+  }
+
+  async function confirmDelete() {
+    if (!resolved?.id) return;
+    setChatActionLoading("delete");
+    setDeleteConfirmOpen(false);
+    try {
+      const res = await fetch(`/api/conversations/${resolved.id}/chat/delete`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify(deleteOptions),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err?.error ?? "Falha ao excluir");
+        return;
+      }
+      router.push(`${base}/conversas`);
+    } finally {
+      setChatActionLoading(null);
+    }
+  }
+
+  async function handleSend(e?: React.FormEvent, payload?: { type: string; file: string; caption?: string; docName?: string }) {
+    e?.preventDefault();
+    if (!resolved?.id || sending) return;
+    const isMedia = payload && payload.type && payload.file;
     const text = sendValue.trim();
-    if (!text || !resolved?.id || sending) return;
+    if (!isMedia && !text) return;
     setSending(true);
     setError(null);
     try {
+      const body = isMedia
+        ? { type: payload!.type, file: payload!.file, caption: payload!.caption || "", docName: payload!.docName || "" }
+        : { content: text };
       const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError(err?.error ?? "Falha ao enviar");
         return;
       }
-      setSendValue("");
+      if (!isMedia) setSendValue("");
       await fetchConversation(resolved.id);
     } catch {
       setError("Falha ao enviar");
@@ -162,14 +348,99 @@ export default function ConversaThreadPage({
     }
   }
 
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.includes(",") ? result.split(",")[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function onFileChoose(type: "image" | "document" | "audio", e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !resolved?.id) return;
+    e.target.value = "";
+    setSending(true);
+    setError(null);
+    try {
+      const base64 = await fileToBase64(file);
+      const uazType = type === "image" ? "image" : type === "audio" ? "audio" : "document";
+      await handleSend(undefined, {
+        type: uazType,
+        file: base64,
+        docName: type === "document" ? file.name : undefined,
+      });
+    } catch {
+      setError("Falha ao enviar arquivo");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: "audio/ogg; codecs=opus" });
+        const base64 = await new Promise<string>((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res((r.result as string).split(",")[1] || "");
+          r.onerror = rej;
+          r.readAsDataURL(blob);
+        });
+        if (base64 && resolved?.id) {
+          setSending(true);
+          try {
+            const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json", ...apiHeaders },
+              body: JSON.stringify({ type: "ptt", file: base64 }),
+            });
+            if (res.ok) await fetchConversation(resolved.id);
+            else setError("Falha ao enviar áudio");
+          } finally {
+            setSending(false);
+          }
+        }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    } catch {
+      setError("Não foi possível acessar o microfone");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && recording) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+      setRecording(false);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && recording) {
+        mediaRecorderRef.current.stop();
+      }
+    };
+  }, [recording]);
+
   const base = slug ? `/${slug}` : "";
 
   if (loading && !conv) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center bg-[#F1F5F9] text-[#64748B]">
-        Carregando…
-      </div>
-    );
+    return <ChatThreadSkeleton />;
   }
   if (!conv) {
     return (
@@ -189,7 +460,7 @@ export default function ConversaThreadPage({
   const imageUrl = contactDetails?.imagePreview ?? contactDetails?.image ?? null;
 
   return (
-    <div className="flex flex-1 flex-col bg-[#F1F5F9]">
+    <div className="flex min-h-0 flex-1 flex-col bg-[#F1F5F9]">
       <header className="flex shrink-0 items-center gap-3 border-b border-[#E2E8F0] bg-white px-4 py-3">
         <a
           href={`${base}/conversas`}
@@ -221,7 +492,7 @@ export default function ConversaThreadPage({
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1" ref={menuRef}>
           <button type="button" className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]" aria-label="Buscar">
             <Search className="h-4 w-4" />
           </button>
@@ -236,9 +507,67 @@ export default function ConversaThreadPage({
           >
             <User className="h-4 w-4" />
           </button>
-          <button type="button" className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]" aria-label="Mais">
-            <MoreVertical className="h-4 w-4" />
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setChatMenuOpen((o) => !o)}
+              className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
+              aria-label="Mais opções"
+              aria-expanded={chatMenuOpen}
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+            {chatMenuOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-[#E2E8F0] bg-white py-1 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => chatAction("read", { read: true })}
+                  disabled={!!chatActionLoading}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  <Check className="h-4 w-4 shrink-0" />
+                  Marcar como lido
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chatAction("archive", { archive: true })}
+                  disabled={!!chatActionLoading}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  <Archive className="h-4 w-4 shrink-0" />
+                  Arquivar conversa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chatAction("mute", { muteEndTime: 8 })}
+                  disabled={!!chatActionLoading}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  <BellOff className="h-4 w-4 shrink-0" />
+                  Silenciar (8h)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chatAction("pin", { pin: true })}
+                  disabled={!!chatActionLoading}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  <Pin className="h-4 w-4 shrink-0" />
+                  Fixar conversa
+                </button>
+                <hr className="my-1 border-[#E2E8F0]" />
+                <button
+                  type="button"
+                  onClick={openDeleteConfirm}
+                  disabled={!!chatActionLoading}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#EF4444] hover:bg-[#FEF2F2] disabled:opacity-60"
+                >
+                  <Trash2 className="h-4 w-4 shrink-0" />
+                  Excluir conversa
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -250,29 +579,7 @@ export default function ConversaThreadPage({
                 key={m.id}
                 className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
               >
-                <div
-                  className={`max-w-[80%] rounded-lg px-3 py-2 ${
-                    m.direction === "out"
-                      ? "bg-[#DCFCE7] text-[#1E293B]"
-                      : "bg-white border border-[#E2E8F0] text-[#1E293B]"
-                  }`}
-                >
-                  <p className="text-xs font-medium text-[#64748B] mb-0.5">
-                    {m.direction === "out" ? "Você" : name}
-                  </p>
-                  <p className="whitespace-pre-wrap text-sm">{m.content}</p>
-                  <div className="mt-1 flex items-center justify-end gap-1">
-                    <span className="text-xs text-[#64748B]">
-                      {new Date(m.sent_at).toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                    {m.direction === "out" && (
-                      <CheckCheck className="h-3.5 w-3.5 text-[#64748B]" aria-hidden />
-                    )}
-                  </div>
-                </div>
+                <MessageBubble m={m} name={name} />
               </div>
             ))}
           </div>
@@ -288,7 +595,45 @@ export default function ConversaThreadPage({
             </p>
           )}
           {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
-          <form onSubmit={handleSend} className="flex gap-2">
+          <form onSubmit={(e) => handleSend(e)} className="flex gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onFileChoose("image", e)}
+            />
+            <input
+              type="file"
+              ref={audioInputRef}
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => onFileChoose("audio", e)}
+            />
+            <input
+              type="file"
+              ref={docInputRef}
+              accept=".pdf,.doc,.docx,.xls,.xlsx"
+              className="hidden"
+              onChange={(e) => onFileChoose("document", e)}
+            />
+            <div className="flex shrink-0 items-center gap-0.5 border border-[#E2E8F0] rounded-lg overflow-hidden bg-white">
+              <button
+                type="button"
+                onClick={() => setAttachOpen(!attachOpen)}
+                className="p-2 text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B]"
+                aria-label="Anexar"
+              >
+                <Paperclip className="h-5 w-5" />
+              </button>
+              {attachOpen && (
+                <div className="flex items-center border-l border-[#E2E8F0]">
+                  <button type="button" onClick={() => { fileInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Imagem</button>
+                  <button type="button" onClick={() => { audioInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Áudio</button>
+                  <button type="button" onClick={() => { docInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Documento</button>
+                </div>
+              )}
+            </div>
             <input
               type="text"
               value={sendValue}
@@ -297,6 +642,25 @@ export default function ConversaThreadPage({
               className="flex-1 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
               disabled={sending}
             />
+            {recording ? (
+              <button
+                type="button"
+                onClick={stopRecording}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
+              >
+                <Square className="h-4 w-4" />
+                Parar
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={startRecording}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+                aria-label="Enviar áudio"
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+            )}
             <button
               type="submit"
               disabled={!sendValue.trim() || sending}
@@ -411,6 +775,73 @@ export default function ConversaThreadPage({
             {!conv.channel_id && !contactDetailsLoading && (
               <p className="text-sm text-[#64748B]">Canal não disponível para detalhes.</p>
             )}
+          </div>
+        </div>
+      </SideOver>
+
+      {/* Modal de exclusão: opções WhatsApp / banco */}
+      <SideOver
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        title="Excluir conversa"
+        width={400}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-[#64748B]">
+            Escolha o que deseja remover. Pode marcar mais de uma opção.
+          </p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={deleteOptions.deleteChatDB}
+              onChange={(e) => setDeleteOptions((o) => ({ ...o, deleteChatDB: e.target.checked }))}
+              className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+            />
+            <span className="text-sm text-[#1E293B]">Remover conversa do painel (banco de dados)</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={deleteOptions.deleteMessagesDB}
+              onChange={(e) => setDeleteOptions((o) => ({ ...o, deleteMessagesDB: e.target.checked }))}
+              className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+            />
+            <span className="text-sm text-[#1E293B]">Remover mensagens do banco de dados</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={deleteOptions.deleteChatWhatsApp}
+              onChange={(e) => setDeleteOptions((o) => ({ ...o, deleteChatWhatsApp: e.target.checked }))}
+              className="rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+            />
+            <span className="text-sm text-[#1E293B]">Remover também no WhatsApp</span>
+          </label>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setDeleteConfirmOpen(false)}
+              className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmDelete}
+              disabled={
+                !deleteOptions.deleteChatDB && !deleteOptions.deleteMessagesDB && !deleteOptions.deleteChatWhatsApp
+              }
+              className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {chatActionLoading === "delete" ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  Excluindo…
+                </span>
+              ) : (
+                "Excluir"
+              )}
+            </button>
           </div>
         </div>
       </SideOver>

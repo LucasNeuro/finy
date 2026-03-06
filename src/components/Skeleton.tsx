@@ -69,3 +69,47 @@ export function ChannelTableSkeleton({ rows = 3 }: { rows?: number }) {
     </div>
   );
 }
+
+/** Skeleton da tela de chat (cabeçalho + bolhas de mensagem) */
+export function ChatThreadSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-[#F1F5F9]">
+      <div className="flex shrink-0 items-center gap-3 border-b border-[#E2E8F0] bg-white px-4 py-3">
+        <Skeleton className="h-5 w-5 shrink-0 rounded" />
+        <Skeleton className="h-10 w-10 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-4 w-40" />
+          <div className="flex gap-2">
+            <Skeleton className="h-5 w-24 rounded" />
+            <Skeleton className="h-5 w-28 rounded" />
+          </div>
+        </div>
+        <div className="flex gap-1">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-8 w-8 rounded" />
+          ))}
+        </div>
+      </div>
+      <div className="flex-1 overflow-hidden p-4 space-y-3">
+        <div className="flex justify-start">
+          <Skeleton className="h-16 w-[70%] max-w-xs rounded-lg" />
+        </div>
+        <div className="flex justify-end">
+          <Skeleton className="h-12 w-[50%] max-w-xs rounded-lg" />
+        </div>
+        <div className="flex justify-start">
+          <Skeleton className="h-20 w-[80%] max-w-sm rounded-lg" />
+        </div>
+        <div className="flex justify-end">
+          <Skeleton className="h-10 w-32 rounded-lg" />
+        </div>
+      </div>
+      <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-2">
+        <div className="flex gap-2">
+          <Skeleton className="h-10 flex-1 rounded-lg" />
+          <Skeleton className="h-10 w-24 rounded-lg" />
+        </div>
+      </div>
+    </div>
+  );
+}

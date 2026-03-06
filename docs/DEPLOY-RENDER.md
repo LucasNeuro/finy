@@ -49,27 +49,82 @@ Em **Environment** (Environment Variables) do Web Service, adicione as mesmas va
 | `SUPABASE_SERVICE_ROLE_KEY` | `eyJ...` |
 | `UAZAPI_BASE_URL` | `https://clicvend.uazapi.com` |
 | `UAZAPI_ADMIN_TOKEN` | seu admin token |
-| `UAZAPI_WEBHOOK_URL` | `https://SEU_REF.supabase.co/functions/v1/uazapi-webhook` |
-| `NEXT_PUBLIC_APP_URL` | **URL que o Render der** (ex: `https://finy.onrender.com`) |
+| `UAZAPI_WEBHOOK_URL` | (opcional) URL da Edge Function, se usar |
+| `NEXT_PUBLIC_APP_URL` | **URL do app no Render** (ex: `https://clicvend.onrender.com`) |
+| **`APP_URL`** | **Mesma URL do app** (ex: `https://clicvend.onrender.com`) — usada pelo webhook para chamar sync de histórico ao conectar |
+| **`INTERNAL_SYNC_SECRET`** | **Senha secreta** (ex: string longa aleatória) — autentica a chamada interna de sync (só o servidor deve saber) |
 
-**Importante:** depois do primeiro deploy, o Render mostra a URL do serviço (ex: `https://finy.onrender.com`). Atualize `NEXT_PUBLIC_APP_URL` para essa URL e faça um novo deploy (ou use **Manual Deploy**), para que redirecionamentos e links do app usem a URL correta.
+**Importante:** depois do primeiro deploy, o Render mostra a URL do serviço (ex: `https://clicvend.onrender.com`). Use essa URL em `NEXT_PUBLIC_APP_URL` e em `APP_URL`.
+
+### Redis: não use no Render (recomendado)
+
+**Filas, conversas e distribuição são 100% controlados pelo Supabase.** O Redis no projeto é só cache opcional (lista de conversas e webhook). Não é necessário para nada funcionar.
+
+Para **evitar o erro** `getaddrinfo ENOTFOUND redis-...` no Render:
+
+- **Não adicione** nenhuma variável `REDIS_*` no Environment do Render, **ou**
+- Se já tiver `REDIS_URL` / `REDIS_HOST` lá, adicione **`USE_REDIS`** = **`false`** (assim o app não tenta conectar).
+
+Sem Redis, o app usa só Supabase e tudo segue funcionando (listagem, webhook, filas, atribuições).
+
+Se no futuro quiser ativar Redis (ex.: Redis Labs acessível), use **`USE_REDIS`** = **`true`** e uma **`REDIS_URL`** válida no formato `redis://usuario:senha@host:porta` (host **sem** porta no meio, ex.: `redis://default:xxx@redis-15295.c98.us-east-1-4.ec2.cloud.redislabs.com:15295`).
+
+1. No **Dashboard** do Render, abra o **Web Service** do projeto (ex.: clicvend).
+2. No menu lateral, clique em **Environment**.
+3. Clique em **Add Environment Variable**.
+4. Adicione cada variável:
+   - **Key:** `APP_URL`  
+     **Value:** `https://clicvend.onrender.com` (troque pelo seu URL real).
+   - **Key:** `INTERNAL_SYNC_SECRET`  
+     **Value:** use um valor gerado como abaixo (não compartilhe essa chave).
+   - **Não adicione** variáveis Redis no Render (ou defina `USE_REDIS=false` para evitar erros de conexão).
+5. Clique em **Save Changes**. O Render pode fazer um **redeploy automático**; se não, use **Manual Deploy** para aplicar.
+
+Com `APP_URL` e `INTERNAL_SYNC_SECRET` definidos, quando a UAZAPI envia o evento de **conexão** (WhatsApp conectado), o webhook dispara a sincronização do histórico em background e as conversas antigas passam a aparecer sem o usuário clicar em "Sincronizar histórico".
+
+### Como gerar o INTERNAL_SYNC_SECRET
+
+Gere uma string aleatória de 64 caracteres (hex). **Não** coloque no código nem no Git; use só nas variáveis de ambiente do Render.
+
+**Com Node (funciona em qualquer OS, inclusive Windows):**
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**Com OpenSSL (se tiver instalado):**
+```bash
+openssl rand -hex 32
+```
+
+Copie a saída e cole no **Value** de `INTERNAL_SYNC_SECRET` no Render. Para gerar outro valor no futuro, rode o comando de novo.
 
 ---
 
-## 4. Deploy
+## 4. Banco de dados (migrations)
+
+Para a aplicação funcionar corretamente (conversas, mensagens, filas, contatos), as tabelas do Supabase precisam estar atualizadas. **Rode as migrations** antes ou logo após o primeiro deploy:
+
+- **Supabase CLI (recomendado):** na raiz do projeto: `npx supabase db push` (ou `supabase db push` se tiver o CLI instalado).
+- **Dashboard Supabase:** em **SQL Editor**, execute na ordem os arquivos em `supabase/migrations/` (cada arquivo `.sql` uma vez).
+
+Se você não alterou nenhuma tabela manualmente, não é obrigatório rodar nada novo no banco para as funcionalidades atuais (lista de conversas, abas, contatos, chat). Só aplique as migrations que ainda não foram aplicadas no seu projeto.
+
+---
+
+## 5. Deploy
 
 - Clique em **Create Web Service**. O Render vai rodar `npm install && npm run build` e depois `npm run start`.
 - O app fica disponível em `https://SEU-SERVICO.onrender.com` (ou no domínio customizado que configurar).
 
 ---
 
-## 5. Domínio customizado (opcional)
+## 6. Domínio customizado (opcional)
 
 Em **Settings** do Web Service → **Custom Domains** → **Add Custom Domain**. Informe o domínio (ex: `app.seudominio.com`) e configure o CNAME no seu DNS apontando para o endereço que o Render indicar. Depois defina `NEXT_PUBLIC_APP_URL=https://app.seudominio.com`.
 
 ---
 
-## 6. Resumo
+## 7. Resumo
 
 | Item | Configuração |
 |------|--------------|
@@ -77,6 +132,6 @@ Em **Settings** do Web Service → **Custom Domains** → **Add Custom Domain**.
 | Build | `npm install && npm run build` |
 | Start | `npm run start` |
 | Node | Recomendado: `NODE_VERSION=20` |
-| Env | Todas as variáveis do `.env.example` + `NEXT_PUBLIC_APP_URL` com a URL final do app |
+| Env | Todas as variáveis do `.env` (Supabase, UAZAPI, APP_URL, INTERNAL_SYNC_SECRET, Redis) com a URL final do app |
 
 A Edge Function continua no Supabase; apenas o app Next.js roda no Render. O webhook global da UAZAPI deve apontar para a URL da Edge Function (não para a URL do Render).

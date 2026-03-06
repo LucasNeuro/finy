@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:redis": "node scripts/test-redis.mjs",
     "clean": "node -e \"const fs=require('fs');['.next','node_modules/.cache'].forEach(p=>{if(fs.existsSync(p)){fs.rmSync(p,{recursive:true});console.log('Removed '+p)}})\"",
     "dev:clean": "npm run clean && next dev"
   },

@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, memo } from "react";
 import useSWR from "swr";
 import { MoreVertical, Search, Plus } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
@@ -10,9 +10,12 @@ import { ConversationListSkeleton } from "@/components/Skeleton";
 type Queue = { id: string; name: string; slug: string; kind?: string };
 type Conversation = {
   id: string;
+  channel_id?: string;
   customer_phone: string;
   customer_name: string | null;
+  wa_chat_jid?: string | null;
   last_message_at: string;
+  last_message_preview?: string | null;
   status: string;
 };
 
@@ -29,10 +32,96 @@ function formatLastMessageTime(iso: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-/** Cache de 30s, revalida ao focar a janela */
-const swrOpts = { revalidateOnFocus: true, dedupingInterval: 30_000 };
+/** Cache de 90s, sem revalidar ao focar (evita travamento ao alternar abas); retry em falha */
+const swrOpts = { revalidateOnFocus: false, dedupingInterval: 90_000, errorRetryCount: 2 };
 
 type ViewMode = "mine" | "queues";
+
+const avatarCache = new Map<string, string>();
+
+const ConversationListItem = memo(function ConversationListItem({
+  conversation: c,
+  base,
+  currentId,
+  apiHeaders,
+}: {
+  conversation: Conversation;
+  base: string;
+  currentId: string | null;
+  apiHeaders?: Record<string, string>;
+}) {
+  const [avatar, setAvatar] = useState<string | null>(() => avatarCache.get(c.id) ?? null);
+  const fetched = useRef(false);
+  const liRef = useRef<HTMLLIElement>(null);
+  const number = c.wa_chat_jid || c.customer_phone || "";
+
+  useEffect(() => {
+    if (!c.channel_id || !number || avatar || fetched.current) return;
+    const el = liRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting || fetched.current) return;
+        fetched.current = true;
+        fetch("/api/contacts/chat-details", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...apiHeaders },
+          body: JSON.stringify({ channel_id: c.channel_id, number, preview: true }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            const url = data?.imagePreview ?? data?.image ?? null;
+            if (url) {
+              avatarCache.set(c.id, url);
+              setAvatar(url);
+            }
+          })
+          .catch(() => {});
+      },
+      { rootMargin: "100px", threshold: 0 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [c.id, c.channel_id, number, avatar, apiHeaders]);
+
+  return (
+    <li ref={liRef}>
+      <Link
+        href={`${base}/conversas/${c.id}`}
+        className={`flex items-center gap-3 p-3 hover:bg-[#F8FAFC] ${currentId === c.id ? "bg-clicvend-green/10" : ""}`}
+      >
+        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+          {avatar ? (
+            <img src={avatar} alt="" className="h-full w-full object-cover" />
+          ) : (
+            (c.customer_name ?? c.customer_phone).slice(0, 1).toUpperCase()
+          )}
+        </span>
+        <span className="inline-block h-4 w-4 shrink-0 rounded-full bg-clicvend-orange" title="WhatsApp" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-1">
+            <p className="truncate text-sm font-medium text-[#1E293B]">
+              {c.customer_name || c.customer_phone}
+            </p>
+            <span className="shrink-0 text-xs text-[#64748B]">
+              {formatLastMessageTime(c.last_message_at)}
+            </span>
+          </div>
+          <p className="truncate text-xs text-[#64748B]">
+            {c.last_message_preview != null && c.last_message_preview !== ""
+              ? c.last_message_preview
+              : c.status === "open"
+                ? "Aberto"
+                : c.status === "closed"
+                  ? "Encerrado"
+                  : c.status}
+          </p>
+        </div>
+      </Link>
+    </li>
+  );
+});
 
 export function ConversasSidebar() {
   const pathname = usePathname();
@@ -70,7 +159,7 @@ export function ConversasSidebar() {
   if (statusFilter) conversationsParams.set("status", statusFilter);
 
   const conversationsUrl = slug ? `/api/conversations?${conversationsParams}` : null;
-  const { data: conversationsRes, error: conversationsError, isLoading: loading } = useSWR<{ data?: Conversation[]; error?: string }>(
+  const { data: conversationsRes, error: conversationsError, isLoading: loading, mutate: mutateConversations } = useSWR<{ data?: Conversation[]; error?: string }>(
     conversationsUrl ? [conversationsUrl, slug, viewMode, queueId, statusFilter] : null,
     async ([url]) => {
       const res = await fetch(url as string, { credentials: "include", headers: apiHeaders });
@@ -81,6 +170,11 @@ export function ConversasSidebar() {
     swrOpts
   );
   const conversations = Array.isArray(conversationsRes?.data) ? conversationsRes.data : [];
+
+  const errorMessage =
+    conversationsError?.message === "Failed to fetch"
+      ? "Erro de conexão. Verifique sua internet ou se o servidor está no ar."
+      : conversationsError?.message ?? "Não foi possível carregar as conversas.";
 
   const filtered = search.trim()
     ? conversations.filter(
@@ -93,7 +187,7 @@ export function ConversasSidebar() {
   const currentId = pathname?.split("/")[3] ?? null;
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden">
+    <aside className="flex w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden">
       <div className="flex shrink-0 items-center justify-between border-b border-[#E2E8F0] p-3">
         <h2 className="text-lg font-semibold text-[#1E293B]">Conversas</h2>
         <button type="button" className="text-[#64748B] hover:text-[#1E293B] transition-colors" aria-label="Menu">
@@ -112,7 +206,7 @@ export function ConversasSidebar() {
           />
         </div>
       </div>
-      {/* Abas: só Meus atendimentos e Filas; distribuição em background, sem precisar selecionar fila para usuário comum */}
+      {/* Abas: Meus atendimentos, Filas e Contatos (link para página de contatos) */}
       <div className="flex shrink-0 border-b border-[#E2E8F0] px-2 pb-1">
         <button
           type="button"
@@ -136,6 +230,12 @@ export function ConversasSidebar() {
         >
           Filas
         </button>
+        <Link
+          href={`${base}/contatos`}
+          className="border-b-2 border-transparent px-3 py-2 text-sm font-medium text-[#64748B] hover:text-[#1E293B] transition-colors"
+        >
+          Contatos
+        </Link>
       </div>
       <div className="shrink-0 flex flex-wrap gap-2 px-2 py-2">
         {/* Só ADM/OWNER (inbox_see_all) veem o filtro por fila */}
@@ -169,57 +269,47 @@ export function ConversasSidebar() {
           Criar novo
         </button>
       </div>
-      {/* Lista com rolagem própria */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      {/* Lista com rolagem própria — scrollbar na janela da lista, não na página */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain">
         {loading ? (
           <ConversationListSkeleton count={8} />
         ) : conversationsError ? (
           <div className="p-4 text-center text-sm">
             <p className="font-medium text-red-600">Não foi possível carregar as conversas</p>
-            <p className="mt-1 text-xs text-[#64748B]">{conversationsError.message}</p>
+            <p className="mt-1 text-xs text-[#64748B]">{errorMessage}</p>
             <p className="mt-2 text-xs text-[#64748B]">
               Confira as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline">Atribuições</Link> da fila.
             </p>
+            <button
+              type="button"
+              onClick={() => mutateConversations()}
+              className="mt-3 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark"
+            >
+              Tentar novamente
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="p-4 text-center text-sm text-[#64748B]">
             <p className="font-medium text-[#1E293B]">Nenhuma conversa</p>
             <p className="mt-1 text-xs">
               {viewMode === "mine"
-                ? "Você não tem conversas atribuídas. Novas conversas são distribuídas automaticamente pelas filas."
+                ? "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."
                 : "Nenhuma conversa nas suas filas no momento."}
             </p>
             <p className="mt-2 text-xs">
-              Conecte números em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link> e confira <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline">Filas</Link>.
+              Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link> recebem mensagens e histórico em segundo plano.
             </p>
           </div>
         ) : (
           <ul className="divide-y divide-[#E2E8F0]">
             {filtered.map((c) => (
-              <li key={c.id}>
-                <Link
-                  href={`${base}/conversas/${c.id}`}
-                  className={`flex items-center gap-3 p-3 hover:bg-[#F8FAFC] ${currentId === c.id ? "bg-clicvend-green/10" : ""}`}
-                >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
-                    {(c.customer_name ?? c.customer_phone).slice(0, 1).toUpperCase()}
-                  </span>
-                  <span className="inline-block h-4 w-4 shrink-0 rounded-full bg-clicvend-orange" title="WhatsApp" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="truncate text-sm font-medium text-[#1E293B]">
-                        {c.customer_name || c.customer_phone}
-                      </p>
-                      <span className="shrink-0 text-xs text-[#64748B]">
-                        {formatLastMessageTime(c.last_message_at)}
-                      </span>
-                    </div>
-                    <p className="truncate text-xs text-[#64748B]">
-                      {c.status === "open" ? "Aberto" : c.status === "closed" ? "Encerrado" : c.status}
-                    </p>
-                  </div>
-                </Link>
-              </li>
+              <ConversationListItem
+                key={c.id}
+                conversation={c}
+                base={base}
+                currentId={currentId}
+                apiHeaders={apiHeaders}
+              />
             ))}
           </ul>
         )}

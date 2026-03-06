@@ -35,6 +35,61 @@ type QueueRow = {
 
 type ChannelQueueRow = { queue_id: string; is_default: boolean; kind?: string };
 
+/** Evita disparar sync de histórico várias vezes seguidas para o mesmo canal (várias empresas/conexões). */
+const lastSyncTriggerByInstance = new Map<string, number>();
+const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
+
+/**
+ * Dispara sincronização de histórico em background quando o WhatsApp conecta.
+ * Chamado sem await para o webhook responder 200 rápido.
+ * Debounce: mesmo canal não dispara de novo antes de 5 min (evita gargalo com muitas empresas).
+ * No deploy (ex.: Render) defina: APP_URL=https://clicvend.onrender.com e INTERNAL_SYNC_SECRET=<senha secreta>.
+ */
+function triggerSyncHistoryForInstance(instanceId: string): void {
+  const now = Date.now();
+  const last = lastSyncTriggerByInstance.get(instanceId) ?? 0;
+  if (now - last < SYNC_DEBOUNCE_MS) return;
+  lastSyncTriggerByInstance.set(instanceId, now);
+
+  const baseUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
+  const secret = process.env.INTERNAL_SYNC_SECRET;
+  if (!baseUrl || !secret) return;
+
+  void (async () => {
+    try {
+      const supabase = createServiceRoleClient();
+      const { data: ch } = await supabase
+        .from("channels")
+        .select("id")
+        .eq("uazapi_instance_id", instanceId)
+        .eq("is_active", true)
+        .single();
+      const channelId = (ch as { id?: string } | null)?.id;
+      if (!channelId) return;
+
+      const url = `${baseUrl.replace(/\/$/, "")}/api/channels/${channelId}/sync-history`;
+      await fetch(url, {
+        method: "POST",
+        headers: { "X-Internal-Sync-Secret": secret, "Content-Type": "application/json" },
+      });
+    } catch {
+      // ignorar erros; sync pode ser refeito manualmente ou na próxima conexão
+    }
+  })();
+}
+
+/**
+ * Webhook global UAZAPI — uma URL para todas as empresas (ex.: 300 corretores).
+ *
+ * Eventos que ESCUTAMOS no painel e o que fazemos:
+ * - messages          → processamos: cria/atualiza conversa, insere mensagem, distribui fila (até 80 itens/request).
+ * - messages_update   → só 200 (status lido/entregue; não grava no nosso DB para não sobrecarregar).
+ * - contacts, groups, chats, chat_labels, leads → só 200 (não processamos; evita gargalo).
+ * - connection / connected / onconnection → 200 + dispara sync de histórico em background (com debounce 5 min).
+ * - history           → processamos como lote de mensagens (até 80 itens).
+ *
+ * Manter "wasSentByApi" excluído no painel para não entrar em loop.
+ */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as WebhookPayload;
@@ -50,16 +105,37 @@ export async function POST(request: Request) {
     }
 
     const isHistory = event === "history";
-    const isMessageEvent = event === "messages" || event === "message";
-    if (!isMessageEvent && !isHistory) {
+    const isMessageEvent =
+      event === "messages" ||
+      event === "message" ||
+      event === "onmessage" ||
+      event === "message.update" ||
+      event === "message_create" ||
+      event === "message.create";
+    const hasMessageLikeData =
+      (data?.chatId || data?.chatid) &&
+      (data?.text != null || data?.body != null || data?.content != null || data?.caption != null ||
+       data?.mediaUrl != null || data?.file != null || (data?.type && data?.type !== "conversation"));
+    const treatAsMessage = isMessageEvent || isHistory || (!event && hasMessageLikeData);
+
+    if (!treatAsMessage) {
+      if (event === "connection" || event === "connected" || event === "onconnection") {
+        triggerSyncHistoryForInstance(instanceId);
+      }
       return NextResponse.json({ ok: true });
     }
 
-    const items: WebhookPayload["data"][] = isHistory && Array.isArray(body.data)
-      ? (body.data as WebhookPayload["data"][])
-      : [data];
+    const items: WebhookPayload["data"][] =
+      isHistory && Array.isArray(body.data)
+        ? (body.data as WebhookPayload["data"][])
+        : Array.isArray((body as { messages?: unknown }).messages)
+          ? ((body as { messages: WebhookPayload["data"][] }).messages)
+          : [data];
 
-    for (const item of items) {
+    const MAX_ITEMS_PER_REQUEST = 80;
+    const toProcess = items.slice(0, MAX_ITEMS_PER_REQUEST);
+
+    for (const item of toProcess) {
       const ok = await processOneMessage(instanceId, item ?? {}, isHistory);
       if (!ok) break;
     }
@@ -83,15 +159,32 @@ async function processOneMessage(
   if (fromMe && !allowFromMe) return true;
 
   const externalId = (data.chatId ?? data.chatid ?? "") as string;
-    const customerPhone = (data.from ?? data.number ?? data.wa_id ?? "") as string;
-    const content = (data.text ?? data.body ?? data.content ?? "") as string;
-    const rawTs = data.timestamp ?? data.sent_at;
-    const sentAt =
-      rawTs != null && (typeof rawTs === "number" || typeof rawTs === "string")
-        ? new Date(typeof rawTs === "number" ? rawTs * 1000 : rawTs).toISOString()
-        : new Date().toISOString();
+  const customerPhone = (data.from ?? data.number ?? data.wa_id ?? "") as string;
+  const rawType = (data.type ?? data.mediaType ?? "") as string;
+  const mediaUrl = (data.mediaUrl ?? data.file ?? data.url ?? "") as string;
+  const caption = (data.caption ?? data.text ?? data.body ?? data.content ?? "") as string;
+  const textContent = (data.text ?? data.body ?? data.content ?? "") as string;
+  const content = textContent || caption || (rawType && mediaUrl ? `[${rawType}]` : "");
+  const rawTs = data.timestamp ?? data.sent_at;
+  const sentAt =
+    rawTs != null && (typeof rawTs === "number" || typeof rawTs === "string")
+      ? new Date(typeof rawTs === "number" ? rawTs * 1000 : rawTs).toISOString()
+      : new Date().toISOString();
 
-  if (!externalId || !content) return true;
+  if (!externalId || (!content && !mediaUrl)) return true;
+
+  const mediaTypeMap: Record<string, string> = {
+    image: "image", video: "video", audio: "audio", myaudio: "audio", ptt: "ptt", ptv: "video",
+    document: "document", sticker: "sticker",
+  };
+  const messageType = rawType ? (mediaTypeMap[rawType.toLowerCase()] ?? "text") : "text";
+  const isMedia = messageType !== "text" && (mediaUrl || content === `[${rawType}]`);
+  const finalContent = isMedia ? (caption || textContent || `[${messageType}]`).slice(0, 10000) : content.slice(0, 10000);
+  const finalMessageType = isMedia ? messageType : "text";
+  const finalMediaUrl = isMedia && mediaUrl ? mediaUrl : null;
+  const finalCaption = isMedia && (caption || textContent) ? (caption || textContent).slice(0, 2000) : null;
+  const fileName = (data.fileName ?? data.filename ?? data.docName) as string | undefined;
+  const finalFileName = fileName && typeof fileName === "string" ? fileName.slice(0, 255) : null;
 
     const isGroup =
       data.isGroup === true ||
@@ -243,7 +336,11 @@ async function processOneMessage(
       await supabase.from("messages").insert({
         conversation_id: conversationId,
         direction: fromMe ? "out" : "in",
-        content: content.slice(0, 10000),
+        content: finalContent,
+        message_type: finalMessageType,
+        ...(finalMediaUrl && { media_url: finalMediaUrl }),
+        ...(finalCaption && { caption: finalCaption }),
+        ...(finalFileName && { file_name: finalFileName }),
         external_id: messageExternalId,
         sent_at: sentAt,
       });
@@ -351,7 +448,11 @@ async function processOneMessage(
   await supabase.from("messages").insert({
     conversation_id: conversationId,
     direction: fromMe ? "out" : "in",
-    content: content.slice(0, 10000),
+    content: finalContent,
+    message_type: finalMessageType,
+    ...(finalMediaUrl && { media_url: finalMediaUrl }),
+    ...(finalCaption && { caption: finalCaption }),
+    ...(finalFileName && { file_name: finalFileName }),
     external_id: messageExternalId,
     sent_at: sentAt,
   });

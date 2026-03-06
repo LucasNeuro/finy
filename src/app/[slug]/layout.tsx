@@ -17,7 +17,9 @@ export default function AppLayout({
           <header className="fixed left-16 right-0 top-14 z-30 shrink-0 border-b border-white/10 bg-[#0a0a0a]">
             <AppNavTabs />
           </header>
-          <main className="min-h-0 flex-1 overflow-auto bg-[#FAFBFC] pt-12">{children}</main>
+          <main className="min-h-0 flex-1 flex flex-col overflow-hidden bg-[#FAFBFC] pt-12">
+            {children}
+          </main>
         </div>
       </div>
     </div>

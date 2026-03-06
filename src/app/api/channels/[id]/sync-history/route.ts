@@ -10,28 +10,49 @@ import { NextResponse } from "next/server";
 
 /**
  * POST /api/channels/[id]/sync-history
- * Sincroniza histórico de chats e mensagens da UAZAPI para conversations e messages,
- * para que todas as mensagens apareçam na tela de chat.
+ * Sincroniza histórico de chats e mensagens da UAZAPI para conversations e messages.
+ * Pode ser chamado:
+ * - Pelo usuário (auth + permission channels.manage)
+ * - Internamente pelo webhook ao receber "connection" (header X-Internal-Sync-Secret = INTERNAL_SYNC_SECRET).
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const companyId = await getCompanyIdFromRequest(_request);
-  if (!companyId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const permErr = await requirePermission(companyId, PERMISSIONS.channels.manage);
-  if (permErr) {
-    return NextResponse.json({ error: permErr.error }, { status: permErr.status });
-  }
-
   const { id: channelId } = await params;
   if (!channelId) {
     return NextResponse.json({ error: "channel id required" }, { status: 400 });
   }
 
-  const resolved = await getChannelToken(channelId, companyId);
+  const internalSecret = request.headers.get("X-Internal-Sync-Secret");
+  const expectedSecret = process.env.INTERNAL_SYNC_SECRET;
+  const isInternalCall = Boolean(expectedSecret && internalSecret === expectedSecret);
+
+  let companyId: string | null = null;
+
+  if (isInternalCall) {
+    const supabaseAdmin = createServiceRoleClient();
+    const { data: ch } = await supabaseAdmin
+      .from("channels")
+      .select("company_id")
+      .eq("id", channelId)
+      .single();
+    companyId = (ch as { company_id?: string } | null)?.company_id ?? null;
+    if (!companyId) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+  } else {
+    companyId = await getCompanyIdFromRequest(request);
+    if (!companyId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const permErr = await requirePermission(companyId, PERMISSIONS.channels.manage);
+    if (permErr) {
+      return NextResponse.json({ error: permErr.error }, { status: permErr.status });
+    }
+  }
+
+  const resolved = await getChannelToken(channelId, companyId!);
   if (!resolved) {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }

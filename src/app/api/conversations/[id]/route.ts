@@ -47,7 +47,7 @@ export async function GET(
 
   const { data: messages, error: msgError } = await supabase
     .from("messages")
-    .select("id, direction, content, external_id, sent_at, created_at")
+    .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
     .eq("conversation_id", id)
     .order("sent_at", { ascending: true });
   if (msgError) {

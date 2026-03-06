@@ -1211,6 +1211,45 @@ export async function sendText(
 }
 
 /**
+ * Envia mídia (imagem, vídeo, áudio, documento, PTT, sticker) via UAZAPI.
+ * number: telefone ou JID; type: image | video | document | audio | myaudio | ptt | ptv | sticker.
+ */
+export async function sendMedia(
+  token: string,
+  number: string,
+  payload: {
+    type: "image" | "video" | "document" | "audio" | "myaudio" | "ptt" | "ptv" | "sticker";
+    file: string;
+    text?: string;
+    docName?: string;
+    mimetype?: string;
+    replyid?: string;
+    delay?: number;
+  }
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  const normalizedNumber = number.includes("@") ? number : number.replace(/\D/g, "");
+  const { data, ok, error, status } = await uazapiFetch("/send/media", {
+    method: "POST",
+    token,
+    body: {
+      number: normalizedNumber,
+      type: payload.type,
+      file: payload.file,
+      ...(payload.text != null && payload.text !== "" && { text: payload.text }),
+      ...(payload.docName != null && payload.docName !== "" && { docName: payload.docName }),
+      ...(payload.mimetype != null && payload.mimetype !== "" && { mimetype: payload.mimetype }),
+      ...(payload.replyid && { replyid: payload.replyid }),
+      ...(payload.delay != null && { delay: payload.delay }),
+    },
+  });
+  return {
+    ok,
+    data,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
  * Envia menu interativo (botões com URL, etc.).
  * POST /send/menu - type: "button", choices: ["Texto do botão|https://url.com"]
  */
@@ -1260,6 +1299,7 @@ export const uazapi = {
   setGlobalWebhook,
   getGlobalWebhook,
   sendText,
+  sendMedia,
   sendMenu,
   listTriggers,
   editTrigger,

@@ -30,8 +30,12 @@ export async function GET(request: Request) {
   if (user) {
     const profile = await getProfileForCompany(companyId);
     if (profile) {
-      canSeeAll = requirePermission(companyId, PERMISSIONS.inbox.see_all) === null;
-      canManageTickets = requirePermission(companyId, PERMISSIONS.inbox.manage_tickets) === null;
+      const [seeAllErr, manageErr] = await Promise.all([
+        requirePermission(companyId, PERMISSIONS.inbox.see_all),
+        requirePermission(companyId, PERMISSIONS.inbox.manage_tickets),
+      ]);
+      canSeeAll = seeAllErr === null;
+      canManageTickets = manageErr === null;
       if (!canSeeAll && !canManageTickets) {
         const { data: assignments } = await supabase
           .from("queue_assignments")
@@ -106,7 +110,30 @@ export async function GET(request: Request) {
         gAssignedNames = (gProfiles ?? []).reduce((acc, p) => ({ ...acc, [(p as { user_id: string }).user_id]: ((p as { full_name?: string }).full_name ?? "").trim() || "—" }), {} as Record<string, string>);
       }
       const listWithNames = list.map((c) => ({ ...c, assigned_to_name: c.assigned_to ? gAssignedNames[c.assigned_to] ?? null : null }));
-      return NextResponse.json({ data: listWithNames, total: listWithNames.length });
+      const gConvIds = listWithNames.map((c) => c.id);
+      let gLastByConv: Record<string, { content: string; message_type?: string }> = {};
+      if (gConvIds.length > 0) {
+        const { data: gMsgs } = await supabase
+          .from("messages")
+          .select("conversation_id, content, message_type")
+          .in("conversation_id", gConvIds)
+          .order("sent_at", { ascending: false });
+        const gList = (gMsgs ?? []) as { conversation_id: string; content: string; message_type?: string }[];
+        for (const m of gList) {
+          if (!gLastByConv[m.conversation_id]) gLastByConv[m.conversation_id] = { content: m.content, message_type: m.message_type ?? "text" };
+        }
+      }
+      const gPreviewLabel: Record<string, string> = { text: "", image: "📷 Imagem", video: "🎬 Vídeo", audio: "🎵 Áudio", ptt: "🎤 Áudio", document: "📎 Documento", sticker: "🖼 Figurinha" };
+      const gWithPreview = listWithNames.map((c) => {
+        const last = gLastByConv[c.id];
+        let last_message_preview: string | null = null;
+        if (last) {
+          const t = last.message_type ?? "text";
+          last_message_preview = t === "text" ? (last.content || "").trim().slice(0, 60) + ((last.content || "").length > 60 ? "…" : "") : (gPreviewLabel[t] ?? t);
+        }
+        return { ...c, last_message_preview };
+      });
+      return NextResponse.json({ data: gWithPreview, total: gWithPreview.length });
     }
   }
   if (status) q = q.eq("status", status);
@@ -143,7 +170,46 @@ export async function GET(request: Request) {
     assigned_to_name: c.assigned_to ? assignedNames[c.assigned_to] ?? null : null,
   }));
 
-  const payload = { data: dataWithNames, total: count ?? result.length };
+  const convIds = dataWithNames.map((c) => c.id);
+  let lastMessageByConv: Record<string, { content: string; message_type?: string }> = {};
+  if (convIds.length > 0) {
+    const { data: lastMsgs } = await supabase
+      .from("messages")
+      .select("conversation_id, content, message_type")
+      .in("conversation_id", convIds)
+      .order("sent_at", { ascending: false });
+    const list = (lastMsgs ?? []) as { conversation_id: string; content: string; message_type?: string }[];
+    for (const m of list) {
+      if (!lastMessageByConv[m.conversation_id]) {
+        lastMessageByConv[m.conversation_id] = { content: m.content, message_type: m.message_type ?? "text" };
+      }
+    }
+  }
+  const previewLabel: Record<string, string> = {
+    text: "",
+    image: "📷 Imagem",
+    video: "🎬 Vídeo",
+    audio: "🎵 Áudio",
+    ptt: "🎤 Áudio",
+    document: "📎 Documento",
+    sticker: "🖼 Figurinha",
+  };
+  const listWithPreview = dataWithNames.map((c) => {
+    const last = lastMessageByConv[c.id];
+    let last_message_preview: string | null = null;
+    if (last) {
+      const type = last.message_type ?? "text";
+      if (type === "text") {
+        last_message_preview = (last.content || "").trim().slice(0, 60);
+        if ((last.content || "").length > 60) last_message_preview += "…";
+      } else {
+        last_message_preview = previewLabel[type] ?? type;
+      }
+    }
+    return { ...c, last_message_preview };
+  });
+
+  const payload = { data: listWithPreview, total: count ?? result.length };
   if (useCache) {
     await setCachedConversationList(
       companyId,
