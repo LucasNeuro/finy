@@ -78,7 +78,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       is_closed: !!s.is_closed,
       sort_order: r.sort_order,
     };
-  }).filter(Boolean);
+  }).filter((x): x is NonNullable<typeof x> => x != null);
 
   const idsInList = new Set(list.map((x) => x.id));
   const { data: queueSpecificData, error: qsErr } = await supabase

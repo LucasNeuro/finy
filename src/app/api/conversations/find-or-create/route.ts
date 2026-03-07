@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   const customerName = searchParams.get("customer_name")?.trim() || null;
   const isGroup =
     (searchParams.get("is_group") === "1" || searchParams.get("kind") === "group") &&
-    jid.endsWith("@g.us");
+    (jid?.endsWith("@g.us") ?? false);
 
   if (!channelId || !jid) {
     return NextResponse.json(
