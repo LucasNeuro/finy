@@ -8,7 +8,7 @@ export interface SideOverProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
-  /** Largura em px ou rem. Padrão: 420px */
+  /** Largura em px ou rem. Padrão: 680px */
   width?: string | number;
 }
 
@@ -17,7 +17,7 @@ export function SideOver({
   onClose,
   title,
   children,
-  width = "420px",
+  width = "680px",
 }: SideOverProps) {
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);

@@ -12,6 +12,11 @@ function isColumnMissingError(message: string): boolean {
   );
 }
 
+/**
+ * GET /api/queues — Filas. Sem Redis: sempre lê do Supabase.
+ * - Sem for_inbox ou com for_management=1: retorna TODAS as filas da empresa (página Filas, Conexões, etc.).
+ * - Com for_inbox=1: para layout/tickets, filtra por filas do usuário quando não for admin.
+ */
 export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
@@ -19,10 +24,12 @@ export async function GET(request: Request) {
   }
   const { searchParams } = new URL(request.url);
   const forInbox = searchParams.get("for_inbox") === "1";
+  const forManagement = searchParams.get("for_management") === "1";
 
   const supabase = await createClient();
   let allowedQueueIds: string[] | null = null;
-  if (forInbox) {
+  // Só filtra por usuário quando for explicitamente "para inbox/tickets"
+  if (forInbox && !forManagement) {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       const profile = await getProfileForCompany(companyId);

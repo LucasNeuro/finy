@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { fetchWithTimeout } from "./fetch-with-timeout";
 
 /**
  * Cliente Supabase com service role para uso no backend (webhook, jobs).
@@ -10,5 +11,5 @@ export function createServiceRoleClient() {
   if (!url || !key) {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
-  return createClient(url, key);
+  return createClient(url, key, { fetch: fetchWithTimeout });
 }

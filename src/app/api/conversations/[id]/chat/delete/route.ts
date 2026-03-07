@@ -86,7 +86,18 @@ export async function POST(
   if (deleteChatDB) {
     await supabase.from("conversations").delete().eq("id", id).eq("company_id", companyId);
     await invalidateConversationList(companyId);
-  } else if (deleteMessagesDB) {
+  } else {
+    if (deleteMessagesDB || deleteChatWhatsApp) {
+      await supabase
+        .from("conversations")
+        .update({
+          status: "closed",
+          assigned_to: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .eq("company_id", companyId);
+    }
     await invalidateConversationList(companyId);
   }
 

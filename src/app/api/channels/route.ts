@@ -43,6 +43,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "name and uazapi_instance_id required" }, { status: 400 });
   }
   const supabase = await createClient();
+  const { count } = await supabase
+    .from("channels")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId);
+  if ((count ?? 0) >= 3) {
+    return NextResponse.json(
+      { error: "A empresa pode ter no máximo 3 instâncias (números vinculados)." },
+      { status: 400 }
+    );
+  }
   const { data, error } = await supabase
     .from("channels")
     .insert({

@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getProfileForCompany, requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { withMetricsHeaders } from "@/lib/api/metrics";
 import { getCachedConversationList, setCachedConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -12,6 +13,7 @@ function formatGroupJidForDisplay(jid: string): string {
 }
 
 export async function GET(request: Request) {
+  const startTime = performance.now();
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -24,6 +26,7 @@ export async function GET(request: Request) {
   const queueIdParam = searchParams.get("queue_id") ?? undefined;
   const status = searchParams.get("status") ?? undefined;
   const onlyAssignedToMe = searchParams.get("only_assigned_to_me") === "1";
+  const includeClosed = searchParams.get("include_closed") === "1";
   const skipCache = searchParams.get("skip_cache") === "1" || searchParams.get("nocache") === "1";
   const limit = Math.min(Number(searchParams.get("limit")) || 200, 500);
   const offset = Number(searchParams.get("offset")) || 0;
@@ -63,18 +66,26 @@ export async function GET(request: Request) {
   type ConvRow = { id: string; channel_id: string; external_id: string; wa_chat_jid: string | null; kind: string; is_group: boolean; customer_phone: string; customer_name: string | null; queue_id: string | null; assigned_to: string | null; status: string; last_message_at: string; created_at: string };
 
   if (allowedQueueIds !== null && allowedQueueIds.length === 0 && allowedGroupKeys.length === 0) {
-    return NextResponse.json({ data: [], total: 0 });
+    const res = NextResponse.json({ data: [], total: 0 });
+    return withMetricsHeaders(res, { cacheHit: false, startTime });
   }
 
-  const useCache = !skipCache && (canSeeAll || canManageTickets) && offset === 0 && limit <= 100;
+  // Cache Redis para todos (inbox e tickets). Atendimento fluido: não esperar carregar toda vez.
+  const useCache = !skipCache && offset === 0 && limit <= 500;
   if (useCache) {
     const cached = await getCachedConversationList(
       companyId,
       queueIdParam ?? "",
       status ?? "",
-      onlyAssignedToMe ? "1" : "0"
+      onlyAssignedToMe ? "1" : "0",
+      includeClosed,
+      offset,
+      limit
     );
-    if (cached) return NextResponse.json(cached);
+    if (cached) {
+      const res = NextResponse.json(cached);
+      return withMetricsHeaders(res, { cacheHit: true, startTime });
+    }
   }
 
   const selectFields = "id, channel_id, external_id, wa_chat_jid, kind, is_group, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at";
@@ -92,8 +103,14 @@ export async function GET(request: Request) {
       q = q.or(`queue_id.in.(${allowedQueueIds.join(",")}),external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`);
     }
   }
-  if (onlyAssignedToMe && user && !canSeeAll && !canManageTickets) {
+  if (onlyAssignedToMe && user) {
     q = q.eq("assigned_to", user.id);
+  }
+  if (status) {
+    q = q.eq("status", status);
+  } else {
+    const statuses = includeClosed ? ["open", "in_progress", "in_queue", "waiting", "closed"] : ["open", "in_progress", "in_queue", "waiting"];
+    q = q.in("status", statuses);
   }
   if (queueIdParam) {
     q = q.eq("queue_id", queueIdParam);
@@ -107,7 +124,9 @@ export async function GET(request: Request) {
         .in("external_id", groupJids)
         .order("last_message_at", { ascending: false });
       const filteredByChannel = (rows: ConvRow[]) => rows.filter((c) => allowedGroupKeys.some((k) => k.channel_id === c.channel_id && k.group_jid === c.external_id));
-      const { data: groupData, error: groupErr } = await (status ? q.eq("status", status) : q).range(offset, offset + limit - 1);
+      const groupStatuses = includeClosed ? ["open", "in_progress", "in_queue", "waiting", "closed"] : ["open", "in_progress", "in_queue", "waiting"];
+      const statusFilter = status ? q.eq("status", status) : q.in("status", groupStatuses);
+      const { data: groupData, error: groupErr } = await statusFilter.range(offset, offset + limit - 1);
       if (groupErr) return NextResponse.json({ error: groupErr.message }, { status: 500 });
       const list = filteredByChannel((groupData ?? []) as ConvRow[]);
       const gAssignedIds = [...new Set(list.map((c) => c.assigned_to).filter(Boolean))] as string[];
@@ -143,7 +162,6 @@ export async function GET(request: Request) {
       return NextResponse.json({ data: gWithPreview, total: gWithPreview.length });
     }
   }
-  if (status) q = q.eq("status", status);
   q = q.range(offset, offset + limit - 1);
 
   const { data, error, count } = await q;
@@ -217,6 +235,18 @@ export async function GET(request: Request) {
   });
 
   const channelIds = [...new Set(listWithPreview.map((c) => c.channel_id))];
+  let channelNameById: Record<string, string> = {};
+  if (channelIds.length > 0) {
+    const { data: chList } = await supabase
+      .from("channels")
+      .select("id, name")
+      .in("id", channelIds)
+      .eq("company_id", companyId);
+    channelNameById = ((chList ?? []) as { id: string; name: string | null }[]).reduce(
+      (acc, ch) => ({ ...acc, [ch.id]: (ch.name ?? "").trim() || "—" }),
+      {} as Record<string, string>
+    );
+  }
   let contactByKey: Record<string, { contact_name: string | null; first_name: string | null; avatar_url: string | null }> = {};
   let groupByKey: Record<string, string | null> = {};
   if (channelIds.length > 0) {
@@ -257,6 +287,11 @@ export async function GET(request: Request) {
     return { ...c, customer_name, avatar_url };
   });
 
+  listWithPreview = listWithPreview.map((c) => ({
+    ...c,
+    channel_name: channelNameById[c.channel_id] ?? null,
+  }));
+
   const payload = { data: listWithPreview, total: count ?? result.length };
   if (useCache && !skipCache) {
     await setCachedConversationList(
@@ -264,8 +299,12 @@ export async function GET(request: Request) {
       queueIdParam ?? "",
       status ?? "",
       onlyAssignedToMe ? "1" : "0",
-      payload
+      payload,
+      includeClosed,
+      offset,
+      limit
     );
   }
-  return NextResponse.json(payload);
+  const res = NextResponse.json(payload);
+  return withMetricsHeaders(res, { cacheHit: false, startTime });
 }

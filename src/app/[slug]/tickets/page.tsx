@@ -1,9 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Loader2, UserPlus, ArrowRightLeft, GripVertical } from "lucide-react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, GripVertical, LayoutGrid, Table2, Settings2, UserPlus, MessageSquare } from "lucide-react";
+import { queryKeys } from "@/lib/query-keys";
+
+const StatusConfigSideOver = dynamic(() => import("./StatusConfigSideOver").then((m) => ({ default: m.StatusConfigSideOver })), { ssr: false });
+const ReassignSideOver = dynamic(() => import("./ReassignSideOver").then((m) => ({ default: m.ReassignSideOver })), { ssr: false });
+
+const TICKETS_PAGE_SIZE = 40;
 
 type Ticket = {
   id: string;
@@ -15,25 +23,41 @@ type Ticket = {
   assigned_to_name?: string | null;
   last_message_at: string;
   created_at: string;
+  channel_name?: string | null;
+  avatar_url?: string | null;
+};
+
+type TicketStatusColumn = {
+  id: string;
+  key: string;
+  title: string;
+  color_hex: string;
+  is_closed: boolean;
+  sort_order: number;
 };
 
 type Queue = { id: string; name: string };
 
-type Agent = { user_id: string; full_name: string; email?: string };
-
-const STATUS_COLUMNS: { key: string; title: string }[] = [
-  { key: "open", title: "Abertos" },
-  { key: "in_progress", title: "Em atendimento" },
-  { key: "waiting", title: "Aguardando" },
-  { key: "closed", title: "Fechados" },
+const FALLBACK_STATUSES: TicketStatusColumn[] = [
+  { id: "", key: "open", title: "Abertos", color_hex: "#22C55E", is_closed: false, sort_order: 1 },
+  { id: "", key: "in_progress", title: "Em atendimento", color_hex: "#3B82F6", is_closed: false, sort_order: 2 },
+  { id: "", key: "in_queue", title: "Em fila", color_hex: "#3B82F6", is_closed: false, sort_order: 3 },
+  { id: "", key: "waiting", title: "Aguardando", color_hex: "#F59E0B", is_closed: false, sort_order: 4 },
+  { id: "", key: "closed", title: "Fechados", color_hex: "#64748B", is_closed: true, sort_order: 5 },
 ];
 
 function normalizeStatus(raw: string): string {
-  const s = (raw || "").toLowerCase();
+  const s = (raw || "").toLowerCase().trim();
   if (s === "closed" || s === "fechado" || s === "resolvido") return "closed";
   if (s === "waiting" || s === "pendente" || s === "pending") return "waiting";
   if (s === "in_progress" || s === "atendimento" || s === "ongoing") return "in_progress";
-  return "open";
+  if (s === "in_queue") return "in_queue";
+  if (s === "open") return "open";
+  return s || "open";
+}
+
+function statusToApi(slug: string): string {
+  return slug;
 }
 
 export default function TicketsPage() {
@@ -42,146 +66,249 @@ export default function TicketsPage() {
   const slug = segments[0];
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [queues, setQueues] = useState<Queue[]>([]);
   const [queueId, setQueueId] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [permissions, setPermissions] = useState<string[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
+  const [statusConfigOpen, setStatusConfigOpen] = useState(false);
+  const [reassignTicket, setReassignTicket] = useState<Ticket | null>(null);
 
+  const queryClient = useQueryClient();
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: async () => {
+      const r = await fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders });
+      return r.json();
+    },
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessTickets = permissions.includes("tickets.view");
   const canManageTickets = permissions.includes("inbox.manage_tickets") || permissions.includes("inbox.see_all");
+  const canManageStatuses = permissions.includes("queues.manage");
 
-  useEffect(() => {
-    if (!slug) return;
-    fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders })
-      .then((r) => r.json())
-      .then((d) => setPermissions(Array.isArray(d?.permissions) ? d.permissions : []))
-      .catch(() => setPermissions([]));
-  }, [slug]);
+  const { data: queuesData } = useQuery({
+    queryKey: queryKeys.queues(slug ?? ""),
+    queryFn: async () => {
+      const r = await fetch("/api/queues?for_inbox=1", { credentials: "include", headers: apiHeaders });
+      const data = await r.json();
+      return Array.isArray(data) ? data.map((q: { id: string; name: string }) => ({ id: q.id, name: q.name ?? "(sem nome)" })) : [];
+    },
+    enabled: !!slug,
+    staleTime: 60 * 1000,
+  });
+  const queues = queuesData ?? [];
 
-  useEffect(() => {
-    if (!slug) return;
-    fetch("/api/queues?for_inbox=1", { credentials: "include", headers: apiHeaders })
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setQueues(
-            data.map((q: { id: string; name: string }) => ({ id: q.id, name: q.name ?? "(sem nome)" }))
-          );
-        } else {
-          setQueues([]);
-        }
-      })
-      .catch(() => setQueues([]));
-  }, [slug]);
+  const statusUrl = queueId ? `/api/queues/${encodeURIComponent(queueId)}/ticket-statuses` : "/api/ticket-statuses";
+  const { data: statusesData } = useQuery({
+    queryKey: queryKeys.ticketStatuses(slug ?? "", queueId || undefined),
+    queryFn: async () => {
+      const r = await fetch(statusUrl, { credentials: "include", headers: apiHeaders });
+      return r.json();
+    },
+    enabled: !!slug,
+    staleTime: 60 * 1000,
+  });
 
-  const fetchTickets = useCallback(() => {
-    if (!slug) return;
-    setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    params.set("only_assigned_to_me", "1");
-    if (queueId) params.set("queue_id", queueId);
-    fetch(`/api/conversations?${params}`, { credentials: "include", headers: apiHeaders })
-      .then(async (r) => {
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}));
-          throw new Error(body?.error || "Falha ao carregar tickets");
-        }
-        return r.json();
-      })
-      .then((res) => {
-        setTickets(Array.isArray(res?.data) ? res.data : []);
-      })
-      .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : "Erro ao carregar tickets");
-        setTickets([]);
-      })
-      .finally(() => setLoading(false));
-  }, [slug, queueId]);
-
-  useEffect(() => {
-    fetchTickets();
-  }, [fetchTickets]);
-
-  useEffect(() => {
-    if (canManageTickets && slug) {
-      fetch("/api/company/agents", { credentials: "include", headers: apiHeaders })
-        .then((r) => r.json())
-        .then((data) => setAgents(Array.isArray(data) ? data : []))
-        .catch(() => setAgents([]));
+  const statusColumns = useMemo(() => {
+    if (Array.isArray(statusesData) && statusesData.length > 0) {
+      return statusesData.map((s: { id: string; name: string; slug: string; color_hex?: string; is_closed?: boolean; sort_order?: number }) => ({
+        id: s.id,
+        key: s.slug,
+        title: s.name,
+        color_hex: s.color_hex ?? "#64748B",
+        is_closed: !!s.is_closed,
+        sort_order: s.sort_order ?? 0,
+      }));
     }
-  }, [canManageTickets, slug]);
+    return FALLBACK_STATUSES;
+  }, [statusesData]);
 
-  const [statusModal, setStatusModal] = useState<{ ticket: Ticket } | null>(null);
-  const [assignModal, setAssignModal] = useState<{ ticket: Ticket } | null>(null);
+  const {
+    data: ticketsData,
+    isLoading: loading,
+    error: ticketsError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage: loadingMore,
+    refetch: refetchTickets,
+  } = useInfiniteQuery({
+    queryKey: queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets),
+    queryFn: async ({ pageParam = 0 }) => {
+      const p = new URLSearchParams();
+      p.set("include_closed", "1");
+      p.set("limit", String(TICKETS_PAGE_SIZE));
+      p.set("offset", String(pageParam));
+      p.set("only_assigned_to_me", canManageTickets ? "0" : "1");
+      if (queueId) p.set("queue_id", queueId);
+      const r = await fetch(`/api/conversations?${p}`, { credentials: "include", headers: apiHeaders });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body?.error || "Falha ao carregar tickets");
+      }
+      return r.json();
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((acc, pg) => acc + (Array.isArray(pg?.data) ? pg.data.length : 0), 0);
+      const total = typeof lastPage?.total === "number" ? lastPage.total : 0;
+      return loaded < total ? loaded : undefined;
+    },
+    enabled: !!slug && permissionsData !== undefined,
+    staleTime: 45 * 1000,
+  });
+
+  const tickets = ticketsData?.pages.flatMap((pg) => (Array.isArray(pg?.data) ? pg.data : [])) ?? [];
+  const totalCount = ticketsData?.pages[0]?.total ?? tickets.length;
+  const error = ticketsError instanceof Error ? ticketsError.message : null;
+
+  const refreshStatuses = useCallback(() => {
+    if (!slug) return;
+    queryClient.invalidateQueries({ queryKey: queryKeys.ticketStatuses(slug, queueId || undefined) });
+  }, [slug, queueId, queryClient]);
+
+  useEffect(() => {
+    const onReset = () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets) });
+    };
+    window.addEventListener("conversations-status-reset", onReset);
+    return () => window.removeEventListener("conversations-status-reset", onReset);
+  }, [slug, queueId, canManageTickets, queryClient]);
+
   const [saving, setSaving] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggingColumnKey, setDraggingColumnKey] = useState<string | null>(null);
+  const [reorderingColumns, setReorderingColumns] = useState(false);
 
-  const updateTicketStatus = useCallback(async (ticketId: string, newStatus: string) => {
+  const sentinelRefsByColumn = useRef<Record<string, HTMLDivElement>>({});
+  const loadMore = useCallback(() => {
+    if (loading || loadingMore || !hasNextPage) return;
+    fetchNextPage();
+  }, [loading, loadingMore, hasNextPage, fetchNextPage]);
+
+  useEffect(() => {
+    const sentinels = Object.values(sentinelRefsByColumn.current).filter(Boolean);
+    if (sentinels.length === 0 || !hasNextPage || loading || loadingMore) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMore();
+      },
+      { rootMargin: "200px", threshold: 0 }
+    );
+    sentinels.forEach((el) => obs.observe(el));
+    return () => obs.disconnect();
+  }, [hasNextPage, loading, loadingMore, loadMore, statusColumns.length]);
+
+  const handleReassigned = useCallback(
+    (ticketId: string, newAssigneeId: string, newAssigneeName: string) => {
+      queryClient.setQueryData(
+        queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets),
+        (old: { pages: { data: Ticket[]; total: number }[]; pageParams: unknown[] } | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            pages: old.pages.map((pg) => ({
+              ...pg,
+              data: pg.data.map((t) =>
+                t.id === ticketId
+                  ? { ...t, assigned_to: newAssigneeId || null, assigned_to_name: newAssigneeName || null }
+                  : t
+              ),
+            })),
+          };
+        }
+      );
+    },
+    [slug, queueId, canManageTickets, queryClient]
+  );
+
+  const updateTicketStatus = useCallback(async (ticketId: string, newStatusSlug: string) => {
+    const apiStatus = statusToApi(newStatusSlug);
+    const listKey = queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets);
+    const previousData = queryClient.getQueryData<{ pages: { data: Ticket[]; total: number }[]; pageParams: unknown[] }>(listKey);
+
+    // Atualização otimista: move o card na hora; se a API falhar, revertemos.
+    queryClient.setQueryData(listKey, (old: typeof previousData) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((pg) => ({
+          ...pg,
+          data: pg.data.map((t) => (t.id === ticketId ? { ...t, status: apiStatus } : t)),
+        })),
+      };
+    });
+
     setSaving(true);
     try {
       const r = await fetch(`/api/conversations/${ticketId}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: apiStatus }),
       });
-      if (r.ok) {
-        setTickets((prev) => prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t)));
-        setStatusModal(null);
-      } else {
+      if (!r.ok) {
         const d = await r.json().catch(() => ({}));
+        if (previousData) queryClient.setQueryData(listKey, previousData);
         alert(d?.error ?? "Falha ao atualizar status");
-      }
-    } catch {
-      alert("Erro de rede");
-    } finally {
-      setSaving(false);
-    }
-  }, [apiHeaders]);
-
-  const updateTicketAssign = async (ticketId: string, userId: string | null) => {
-    setSaving(true);
-    try {
-      const r = await fetch(`/api/conversations/${ticketId}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ assigned_to: userId || null }),
-      });
-      if (r.ok) {
-        const agent = agents.find((a) => a.user_id === userId);
-        setTickets((prev) =>
-          prev.map((t) =>
-            t.id === ticketId
-              ? { ...t, assigned_to: userId, assigned_to_name: agent?.full_name ?? null }
-              : t
-          )
-        );
-        setAssignModal(null);
       } else {
-        const d = await r.json().catch(() => ({}));
-        alert(d?.error ?? "Falha ao reatribuir");
+        queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
+        queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
+        queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
       }
     } catch {
+      if (previousData) queryClient.setQueryData(listKey, previousData);
       alert("Erro de rede");
     } finally {
       setSaving(false);
     }
-  };
+  }, [apiHeaders, slug, queueId, canManageTickets, queryClient]);
 
-  const queueById = useMemo(() => {
-    const map = new Map<string, string>();
-    queues.forEach((q) => map.set(q.id, q.name));
-    return map;
-  }, [queues]);
+  const reorderColumns = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex) return;
+      const newOrder = [...statusColumns];
+      const [removed] = newOrder.splice(fromIndex, 1);
+      if (!removed) return;
+      newOrder.splice(toIndex, 0, removed);
+      const orderIds = newOrder.map((c) => c.id).filter(Boolean);
+      if (orderIds.length === 0) return;
+      setReorderingColumns(true);
+      try {
+        const r = queueId
+          ? await fetch(`/api/queues/${encodeURIComponent(queueId)}/ticket-statuses`, {
+              method: "PUT",
+              credentials: "include",
+              headers: { "Content-Type": "application/json", ...apiHeaders },
+              body: JSON.stringify({ ticket_status_ids: orderIds }),
+            })
+          : await fetch("/api/ticket-statuses/reorder", {
+              method: "PUT",
+              credentials: "include",
+              headers: { "Content-Type": "application/json", ...apiHeaders },
+              body: JSON.stringify({ order: orderIds }),
+            });
+        if (r.ok) {
+          refreshStatuses();
+        } else {
+          const d = await r.json().catch(() => ({}));
+          alert(d?.error ?? "Falha ao reordenar");
+        }
+      } catch {
+        alert("Erro de rede");
+      } finally {
+        setReorderingColumns(false);
+        setDraggingColumnKey(null);
+      }
+    },
+    [statusColumns, queueId, apiHeaders, refreshStatuses]
+  );
 
   const columns = useMemo(() => {
     const grouped: Record<string, Ticket[]> = {};
-    STATUS_COLUMNS.forEach((c) => {
+    statusColumns.forEach((c) => {
       grouped[c.key] = [];
     });
     for (const t of tickets) {
@@ -189,11 +316,22 @@ export default function TicketsPage() {
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(t);
     }
-    return STATUS_COLUMNS.map((c) => ({
+    return statusColumns.map((c) => ({
       ...c,
       items: grouped[c.key] ?? [],
     }));
-  }, [tickets]);
+  }, [tickets, statusColumns]);
+
+  if (slug && permissionsData !== undefined && !canAccessTickets) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-[#F1F5F9] p-8">
+        <h1 className="text-lg font-semibold text-[#0F172A]">Sem permissão</h1>
+        <p className="max-w-md text-center text-sm text-[#64748B]">
+          Você não tem acesso ao módulo Tickets. Peça ao administrador para conceder a permissão &quot;Acesso: ver módulo Tickets&quot; no seu cargo.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col gap-4 bg-[#F1F5F9] p-4">
@@ -204,13 +342,47 @@ export default function TicketsPage() {
             Visão em quadro dos atendimentos por status. {canManageTickets ? "Você vê todos os tickets e pode reatribuir e mudar status." : "Você vê apenas seus tickets."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-[#64748B]">
-            Fila:&nbsp;
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-[#E2E8F0] bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("kanban")}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === "kanban" ? "bg-clicvend-orange text-white" : "text-[#64748B] hover:bg-[#F1F5F9]"
+              }`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              Kanban
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                viewMode === "table" ? "bg-clicvend-orange text-white" : "text-[#64748B] hover:bg-[#F1F5F9]"
+              }`}
+            >
+              <Table2 className="h-4 w-4" />
+              Tabela
+            </button>
+          </div>
+          {canManageStatuses && (
+            <button
+              type="button"
+              onClick={() => setStatusConfigOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#0F172A]"
+              title="Configurar status"
+            >
+              <Settings2 className="h-4 w-4" />
+              Configurar status
+            </button>
+          )}
+          <label className="flex items-center gap-2 text-sm text-[#64748B]">
+            <span>Fila:</span>
             <select
               value={queueId}
               onChange={(e) => setQueueId(e.target.value)}
-              className="rounded border border-[#E2E8F0] bg-white px-2 py-1.5 text-sm text-[#1E293B]"
+              className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#1E293B] hover:border-[#CBD5E1]"
+              title="Filtrar Kanban por fila. Todas = status padrão. Fila específica = status padrão + exclusivos da fila."
             >
               <option value="">Todas</option>
               {queues.map((q) => (
@@ -230,52 +402,185 @@ export default function TicketsPage() {
       )}
 
       {loading ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-[#64748B]">
-          Carregando tickets…
+        <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-2">
+          {statusColumns.map((col) => (
+            <div key={col.key} className="flex min-w-[280px] max-w-[320px] flex-1 flex-col gap-3 rounded-lg border-2 border-transparent bg-[#F8FAFC] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="h-6 w-24 animate-pulse rounded-full bg-[#E2E8F0]" />
+                <div className="h-5 w-8 animate-pulse rounded-full bg-[#E2E8F0]" />
+              </div>
+              <div className="flex flex-1 flex-col gap-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-20 animate-pulse rounded-md bg-[#E2E8F0]" />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       ) : tickets.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center rounded-xl border-2 border-dashed border-[#E2E8F0] bg-white/80 p-8 text-center">
-          <p className="text-base font-medium text-[#1E293B]">Nenhum ticket nesta fila</p>
+          <p className="text-base font-medium text-[#1E293B]">
+            {queueId ? "Nenhum ticket nesta fila" : "Nenhum ticket"}
+          </p>
           <p className="mt-2 max-w-md text-sm text-[#64748B]">
-            Ao conectar o número em <Link href={slug ? `/${slug}/conexoes` : "#"} className="text-clicvend-orange hover:underline">Conexões</Link>, o histórico é sincronizado automaticamente. Tente a fila <strong>Todas</strong> no filtro acima.
+            {queueId ? (
+              <>Tente selecionar <strong>Todas</strong> no filtro de fila ou conecte o número em <Link href={slug ? `/${slug}/conexoes` : "#"} className="text-clicvend-orange hover:underline">Conexões</Link>.</>
+            ) : (
+              <>Ao conectar o número em <Link href={slug ? `/${slug}/conexoes` : "#"} className="text-clicvend-orange hover:underline">Conexões</Link>, o histórico é sincronizado automaticamente.</>
+            )}
           </p>
           {!canManageTickets && <p className="mt-2 text-xs text-[#94A3B8]">Você vê apenas tickets atribuídos a você. Pegue chamados no Chat para que apareçam aqui.</p>}
         </div>
+      ) : viewMode === "table" ? (
+        <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-[#E2E8F0] bg-white">
+          <div className="overflow-x-auto overflow-y-auto flex-1">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="sticky top-0 z-10 border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Cliente</th>
+                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Status</th>
+                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Últ. msg</th>
+                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Atribuído a</th>
+                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Entrou</th>
+                  {canManageTickets && (
+                    <th className="w-12 px-2 py-3 text-center font-semibold text-[#334155]">Reatribuir</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {tickets.map((t) => {
+                  const statusKey = normalizeStatus(t.status);
+                  const colDef = statusColumns.find((s) => s.key === statusKey);
+                  const barColor = colDef?.color_hex ?? "#64748B";
+                  return (
+                    <tr key={t.id} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
+                      <td className="px-4 py-3">
+                        <Link href={slug ? `/${slug}/conversas/${t.id}` : "#"} className="font-medium text-[#0F172A] hover:text-clicvend-orange">
+                          {t.customer_name || t.customer_phone}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold uppercase text-white"
+                          style={{ backgroundColor: barColor }}
+                        >
+                          {colDef?.title ?? statusKey}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-[#64748B]">
+                        {t.last_message_at
+                          ? new Date(t.last_message_at).toLocaleString("pt-BR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-[#64748B]">
+                        {t.assigned_to_name ?? "—"}
+                      </td>
+                      <td className="px-4 py-3 text-[#64748B]">
+                        {new Date(t.created_at).toLocaleDateString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "2-digit",
+                        })}
+                      </td>
+                      {canManageTickets && (
+                        <td className="px-2 py-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setReassignTicket(t)}
+                            className="inline-flex items-center justify-center rounded p-2 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange"
+                            title="Reatribuir a outro agente"
+                          >
+                            <UserPlus className="h-4 w-4" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
-        <div className="flex flex-1 gap-4 overflow-x-auto pb-2">
-          {columns.map((col) => (
+        <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-2">
+          {columns.map((col, colIndex) => (
             <div
               key={col.key}
-              className={`flex min-w-[280px] max-w-[320px] flex-1 flex-col rounded-xl border-2 bg-[#F8FAFC] p-3 transition-colors ${
+              className={`flex min-w-[280px] max-w-[320px] flex-1 flex-col min-h-0 rounded-lg border-2 bg-[#F8FAFC] p-3 transition-colors ${
                 dragOverColumn === col.key ? "border-clicvend-orange bg-clicvend-orange/5" : "border-transparent"
-              }`}
+              } ${draggingColumnKey === col.key ? "opacity-70" : ""}`}
               onDragOver={(e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
-                setDragOverColumn(col.key);
+                if (e.dataTransfer.types.includes("columnKey")) setDragOverColumn(col.key);
+                else if (e.dataTransfer.types.includes("ticketId")) setDragOverColumn(col.key);
               }}
               onDragLeave={() => setDragOverColumn(null)}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOverColumn(null);
+                const columnKey = e.dataTransfer.getData("columnKey");
                 const ticketId = e.dataTransfer.getData("ticketId");
                 const fromStatus = e.dataTransfer.getData("fromStatus");
-                if (ticketId && fromStatus !== col.key) {
+                if (columnKey && columnKey !== col.key) {
+                  const fromIndex = columns.findIndex((c) => c.key === columnKey);
+                  if (fromIndex >= 0) reorderColumns(fromIndex, colIndex);
+                } else if (ticketId && fromStatus !== col.key) {
                   updateTicketStatus(ticketId, col.key);
                 }
               }}
             >
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-[#334155]">{col.title}</h2>
+              <div
+                className={`mb-3 flex shrink-0 items-center justify-between gap-2 ${
+                  canManageStatuses ? "cursor-grab active:cursor-grabbing" : ""
+                }`}
+                draggable={canManageStatuses && !reorderingColumns}
+                onDragStart={(e) => {
+                  if (!canManageStatuses || reorderingColumns) return;
+                  setDraggingColumnKey(col.key);
+                  e.dataTransfer.setData("columnKey", col.key);
+                  e.dataTransfer.setData("columnId", col.id);
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragEnd={() => setDraggingColumnKey(null)}
+                title={canManageStatuses ? "Arraste para reordenar as colunas" : undefined}
+              >
+                {canManageStatuses && (
+                  <GripVertical className="h-4 w-4 shrink-0 text-[#94A3B8]" aria-hidden />
+                )}
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold uppercase text-white"
+                  style={{ backgroundColor: col.color_hex }}
+                >
+                  {col.title}
+                </span>
                 <span className="rounded-full bg-[#E2E8F0] px-2.5 py-0.5 text-xs font-medium text-[#64748B]">
                   {col.items.length}
                 </span>
               </div>
-              <div className="flex min-h-[120px] flex-1 flex-col gap-2 overflow-y-auto rounded-lg">
-                {col.items.map((t) => (
+              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-md">
+                {col.items.map((t) => {
+                  const statusKey = normalizeStatus(t.status);
+                  const colDef = statusColumns.find((s) => s.key === statusKey);
+                  const barColor = colDef?.color_hex ?? "#3B82F6";
+                  const lastMsgAt = t.last_message_at
+                    ? new Date(t.last_message_at).toLocaleString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : null;
+                  const displayName = t.customer_name || t.customer_phone || "?";
+                  return (
                   <div
                     key={t.id}
-                    draggable={canManageTickets}
+                    draggable={canManageTickets && !saving}
                     onDragStart={(e) => {
                       setDraggingId(t.id);
                       e.dataTransfer.setData("ticketId", t.id);
@@ -283,39 +588,73 @@ export default function TicketsPage() {
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onDragEnd={() => setDraggingId(null)}
-                    className={`group relative rounded-xl border border-[#E2E8F0] bg-white p-3 text-sm shadow-sm transition-all ${
+                    className={`group relative flex flex-shrink-0 flex-col rounded-md border border-[#E2E8F0] bg-white text-sm shadow-sm transition-all overflow-hidden ${
                       canManageTickets ? "cursor-grab active:cursor-grabbing" : ""
                     } ${draggingId === t.id ? "opacity-60 shadow-lg" : "hover:shadow-md hover:border-[#CBD5E1]"}`}
                   >
-                    {canManageTickets && (
-                      <span className="absolute left-2 top-2.5 text-[#94A3B8] opacity-0 group-hover:opacity-100">
-                        <GripVertical className="h-4 w-4" />
-                      </span>
-                    )}
-                    <a
-                      href={slug ? `/${slug}/conversas/${t.id}` : "#"}
-                      className={`block ${canManageTickets ? "pl-6 pr-8" : "pr-2"}`}
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <p className="max-w-[160px] truncate font-medium text-[#0F172A]">
-                          {t.customer_name || t.customer_phone}
-                        </p>
-                        <span
-                          className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                            t.assigned_to
-                              ? "bg-clicvend-green/15 text-clicvend-green"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
+                    <div className="flex shrink-0 items-center justify-between gap-1 border-b border-[#F1F5F9] bg-[#FAFBFC] px-2 py-1.5">
+                      <Link
+                        href={slug ? `/${slug}/conversas/${t.id}` : "#"}
+                        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#0F172A]"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MessageSquare className="h-3.5 w-3.5" />
+                        Abrir
+                      </Link>
+                      {canManageTickets && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setReassignTicket(t);
+                          }}
+                          className="inline-flex items-center justify-center rounded p-1.5 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange"
+                          title="Reatribuir a outro agente"
                         >
-                          {t.assigned_to ? "Em atendimento" : "Na fila"}
-                        </span>
+                          <UserPlus className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                    <Link
+                      href={slug ? `/${slug}/conversas/${t.id}` : "#"}
+                      className="min-w-0 flex-1 block p-3 cursor-pointer"
+                    >
+                      <div className="mb-1.5 flex items-start gap-2">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-[#64748B]">
+                          {t.avatar_url ? (
+                            <img
+                              src={t.avatar_url}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <span className="text-xs font-semibold">
+                              {t.customer_name
+                                ? t.customer_name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?"
+                                : (t.customer_phone || "?").slice(-2)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-[#0F172A]" title={displayName}>
+                            {displayName}
+                          </p>
+                          <span
+                            className="inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white"
+                            style={{ backgroundColor: barColor }}
+                          >
+                            {colDef?.title ?? (statusKey === "closed" ? "Fechado" : t.assigned_to ? "Em atendimento" : "Na fila")}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex flex-col gap-0.5 text-[11px] text-[#64748B]">
-                        <span className="truncate">
-                          {t.queue_id ? queueById.get(t.queue_id) ?? "Fila" : "Sem fila"}
-                        </span>
-                        {canManageTickets && t.assigned_to_name && (
-                          <span>Atendente: {t.assigned_to_name}</span>
+                        {lastMsgAt && (
+                          <span title="Última mensagem">Últ. msg: {lastMsgAt}</span>
+                        )}
+                        <span title="Atribuído a">Atribuído a: {t.assigned_to_name ?? "—"}</span>
+                        {t.channel_name && (
+                          <span className="truncate" title={t.channel_name}>Instância: {t.channel_name}</span>
                         )}
                         <span>
                           Entrou:{" "}
@@ -326,93 +665,46 @@ export default function TicketsPage() {
                           })}
                         </span>
                       </div>
-                    </a>
-                    {canManageTickets && (
-                      <div className="absolute right-2 top-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                        <button
-                          type="button"
-                          onClick={(e) => { e.preventDefault(); setStatusModal({ ticket: t }); }}
-                          className="rounded p-1.5 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#0F172A]"
-                          title="Mudar status"
-                        >
-                          <ArrowRightLeft className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.preventDefault(); setAssignModal({ ticket: t }); }}
-                          className="rounded p-1.5 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#0F172A]"
-                          title="Reatribuir"
-                        >
-                          <UserPlus className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
+                    </Link>
                   </div>
-                ))}
+                  );
+                })}
+                <div
+                  ref={(el) => {
+                    if (el) sentinelRefsByColumn.current[col.key] = el;
+                  }}
+                  className="h-4 flex-shrink-0"
+                  aria-hidden
+                >
+                  {hasNextPage && (loadingMore || loading) && col.key === columns[0]?.key && (
+                    <div className="flex items-center justify-center py-2 text-[#64748B]">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Modal Mudar status */}
-      {statusModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !saving && setStatusModal(null)}>
-          <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-[#0F172A]">Mudar status</h3>
-            <p className="mt-1 text-sm text-[#64748B]">{statusModal.ticket.customer_name || statusModal.ticket.customer_phone}</p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {STATUS_COLUMNS.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  disabled={saving}
-                  onClick={() => updateTicketStatus(statusModal.ticket.id, c.key)}
-                  className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
-                >
-                  {c.title}
-                </button>
-              ))}
-            </div>
-            <div className="mt-4 flex justify-end">
-              <button type="button" onClick={() => setStatusModal(null)} className="rounded-lg px-3 py-1.5 text-sm text-[#64748B] hover:bg-[#F1F5F9]">
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <StatusConfigSideOver
+        open={statusConfigOpen}
+        onClose={() => setStatusConfigOpen(false)}
+        companySlug={slug ?? ""}
+        queues={queues}
+        onSaved={refreshStatuses}
+      />
 
-      {/* Modal Reatribuir */}
-      {assignModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => !saving && setAssignModal(null)}>
-          <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-[#0F172A]">Reatribuir atendimento</h3>
-            <p className="mt-1 text-sm text-[#64748B]">{assignModal.ticket.customer_name || assignModal.ticket.customer_phone}</p>
-            <select
-              className="mt-4 w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B]"
-              defaultValue={assignModal.ticket.assigned_to ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                updateTicketAssign(assignModal.ticket.id, v || null);
-              }}
-              disabled={saving}
-            >
-              <option value="">— Sem atribuição —</option>
-              {agents.map((a) => (
-                <option key={a.user_id} value={a.user_id}>
-                  {a.full_name} {a.email ? `(${a.email})` : ""}
-                </option>
-              ))}
-            </select>
-            <div className="mt-4 flex justify-end">
-              <button type="button" onClick={() => setAssignModal(null)} className="rounded-lg px-3 py-1.5 text-sm text-[#64748B] hover:bg-[#F1F5F9]">
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReassignSideOver
+        open={!!reassignTicket}
+        onClose={() => setReassignTicket(null)}
+        ticketId={reassignTicket?.id ?? ""}
+        ticketCustomerName={reassignTicket?.customer_name ?? reassignTicket?.customer_phone ?? null}
+        currentAssignedToName={reassignTicket?.assigned_to_name ?? null}
+        companySlug={slug ?? ""}
+        onReassigned={handleReassigned}
+      />
     </div>
   );
 }

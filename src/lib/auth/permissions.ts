@@ -14,9 +14,11 @@ export const PERMISSIONS = {
     reopen: "inbox.reopen",
     see_all: "inbox.see_all",
     export: "inbox.export",
-    /** Owner/Admin: ver todos os tickets, quem atende, data, mudar status e reatribuir (visão Kanban gerencial) */
+    /** Ações no módulo Tickets: ver todos, reatribuir, mudar status (visão Kanban gerencial) */
     manage_tickets: "inbox.manage_tickets",
   },
+  // Módulo Tickets (quadro Kanban por status)
+  tickets: { view: "tickets.view" },
   // Conexões
   channels: { view: "channels.view", manage: "channels.manage" },
   // Filas
@@ -37,6 +39,7 @@ export const PERMISSIONS = {
 
 export type PermissionKey =
   | (typeof PERMISSIONS)["inbox"][keyof (typeof PERMISSIONS)["inbox"]]
+  | (typeof PERMISSIONS)["tickets"][keyof (typeof PERMISSIONS)["tickets"]]
   | (typeof PERMISSIONS)["channels"][keyof (typeof PERMISSIONS)["channels"]]
   | (typeof PERMISSIONS)["queues"][keyof (typeof PERMISSIONS)["queues"]]
   | (typeof PERMISSIONS)["users"][keyof (typeof PERMISSIONS)["users"]]
@@ -57,6 +60,7 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.inbox.see_all,
   PERMISSIONS.inbox.export,
   PERMISSIONS.inbox.manage_tickets,
+  PERMISSIONS.tickets.view,
   PERMISSIONS.channels.view,
   PERMISSIONS.channels.manage,
   PERMISSIONS.queues.view,
@@ -78,10 +82,10 @@ export function getAllPermissionKeys(): PermissionKey[] {
   return [...ALL_PERMISSION_KEYS];
 }
 
-/** Grupos para exibir na UI (Cargo SideOver) */
+/** Grupos para exibir na UI (Cargo SideOver) — módulos e ações detalhados */
 export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   {
-    label: "Atendimento / Conversas",
+    label: "Módulo Conversas (acesso e ações no chat)",
     keys: [
       PERMISSIONS.inbox.read,
       PERMISSIONS.inbox.reply,
@@ -92,45 +96,73 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       PERMISSIONS.inbox.reopen,
       PERMISSIONS.inbox.see_all,
       PERMISSIONS.inbox.export,
-      PERMISSIONS.inbox.manage_tickets,
     ],
   },
-  { label: "Conexões", keys: [PERMISSIONS.channels.view, PERMISSIONS.channels.manage] },
-  { label: "Filas", keys: [PERMISSIONS.queues.view, PERMISSIONS.queues.manage] },
-  { label: "Cargos e usuários", keys: [PERMISSIONS.users.view, PERMISSIONS.users.manage] },
-  { label: "Relatórios", keys: [PERMISSIONS.reports.view, PERMISSIONS.reports.export] },
-  { label: "Contatos", keys: [PERMISSIONS.contacts.view, PERMISSIONS.contacts.manage] },
-  { label: "Respostas rápidas", keys: [PERMISSIONS.quickreplies.view, PERMISSIONS.quickreplies.manage] },
-  { label: "Tags", keys: [PERMISSIONS.tags.view, PERMISSIONS.tags.manage] },
-  { label: "Perfil", keys: [PERMISSIONS.profile.view] },
+  {
+    label: "Módulo Tickets (quadro Kanban por status)",
+    keys: [PERMISSIONS.tickets.view, PERMISSIONS.inbox.manage_tickets],
+  },
+  {
+    label: "Módulo Conexões",
+    keys: [PERMISSIONS.channels.view, PERMISSIONS.channels.manage],
+  },
+  {
+    label: "Módulo Filas (caixas de entrada)",
+    keys: [PERMISSIONS.queues.view, PERMISSIONS.queues.manage],
+  },
+  {
+    label: "Módulo Cargos e usuários",
+    keys: [PERMISSIONS.users.view, PERMISSIONS.users.manage],
+  },
+  {
+    label: "Módulo Relatórios",
+    keys: [PERMISSIONS.reports.view, PERMISSIONS.reports.export],
+  },
+  {
+    label: "Módulo Contatos",
+    keys: [PERMISSIONS.contacts.view, PERMISSIONS.contacts.manage],
+  },
+  {
+    label: "Módulo Respostas rápidas",
+    keys: [PERMISSIONS.quickreplies.view, PERMISSIONS.quickreplies.manage],
+  },
+  {
+    label: "Módulo Tags",
+    keys: [PERMISSIONS.tags.view, PERMISSIONS.tags.manage],
+  },
+  {
+    label: "Perfil (próprio perfil da empresa)",
+    keys: [PERMISSIONS.profile.view],
+  },
 ];
 
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
-  [PERMISSIONS.inbox.read]: "Ver conversas",
-  [PERMISSIONS.inbox.reply]: "Responder conversas",
-  [PERMISSIONS.inbox.transfer]: "Transferir atendimento",
-  [PERMISSIONS.inbox.assign]: "Atribuir atendimento",
-  [PERMISSIONS.inbox.claim]: "Pegar chamado da fila (atender)",
-  [PERMISSIONS.inbox.close]: "Encerrar atendimento",
-  [PERMISSIONS.inbox.reopen]: "Reabrir conversa",
-  [PERMISSIONS.inbox.see_all]: "Ver todas as conversas (todas as caixas)",
-  [PERMISSIONS.inbox.export]: "Exportar conversas",
-  [PERMISSIONS.inbox.manage_tickets]: "Visão gerencial: ver todos os tickets, quem atende, data, mudar status e reatribuir",
-  [PERMISSIONS.channels.view]: "Ver Conexões",
-  [PERMISSIONS.channels.manage]: "Gerenciar Conexões",
-  [PERMISSIONS.queues.view]: "Ver Filas",
-  [PERMISSIONS.queues.manage]: "Gerenciar Filas",
-  [PERMISSIONS.users.view]: "Ver Cargos e usuários",
-  [PERMISSIONS.users.manage]: "Gerenciar Cargos e usuários",
-  [PERMISSIONS.reports.view]: "Ver relatórios",
-  [PERMISSIONS.reports.export]: "Exportar relatórios",
-  [PERMISSIONS.contacts.view]: "Ver Contatos",
-  [PERMISSIONS.contacts.manage]: "Gerenciar Contatos",
-  [PERMISSIONS.quickreplies.view]: "Ver Respostas rápidas",
-  [PERMISSIONS.quickreplies.manage]: "Gerenciar Respostas rápidas",
-  [PERMISSIONS.tags.view]: "Ver Tags",
-  [PERMISSIONS.tags.manage]: "Gerenciar Tags",
-  [PERMISSIONS.profile.view]: "Ver Perfil (próprio perfil, link de acesso, foto)",
+  [PERMISSIONS.inbox.read]: "Acesso: ver conversas e chat",
+  [PERMISSIONS.inbox.reply]: "Ação: responder conversas",
+  [PERMISSIONS.inbox.transfer]: "Ação: transferir atendimento",
+  [PERMISSIONS.inbox.assign]: "Ação: atribuir atendimento a outro agente",
+  [PERMISSIONS.inbox.claim]: "Ação: pegar chamado da fila (botão + no card)",
+  [PERMISSIONS.inbox.close]: "Ação: encerrar atendimento",
+  [PERMISSIONS.inbox.reopen]: "Ação: reabrir conversa",
+  [PERMISSIONS.inbox.see_all]: "Ação: ver todas as conversas (todas as caixas)",
+  [PERMISSIONS.inbox.export]: "Ação: exportar conversas",
+  [PERMISSIONS.inbox.manage_tickets]: "Ações no Tickets: ver todos os tickets, reatribuir, mudar status (arrastar, modal)",
+  [PERMISSIONS.tickets.view]: "Acesso: ver módulo Tickets (quadro Kanban por status)",
+  [PERMISSIONS.channels.view]: "Acesso: ver Conexões",
+  [PERMISSIONS.channels.manage]: "Ação: gerenciar Conexões",
+  [PERMISSIONS.queues.view]: "Acesso: ver Filas",
+  [PERMISSIONS.queues.manage]: "Ação: gerenciar Filas",
+  [PERMISSIONS.users.view]: "Acesso: ver Cargos e usuários",
+  [PERMISSIONS.users.manage]: "Ação: gerenciar Cargos e usuários",
+  [PERMISSIONS.reports.view]: "Acesso: ver Relatórios",
+  [PERMISSIONS.reports.export]: "Ação: exportar Relatórios",
+  [PERMISSIONS.contacts.view]: "Acesso: ver Contatos",
+  [PERMISSIONS.contacts.manage]: "Ação: gerenciar Contatos",
+  [PERMISSIONS.quickreplies.view]: "Acesso: ver Respostas rápidas",
+  [PERMISSIONS.quickreplies.manage]: "Ação: gerenciar Respostas rápidas",
+  [PERMISSIONS.tags.view]: "Acesso: ver Tags",
+  [PERMISSIONS.tags.manage]: "Ação: gerenciar Tags",
+  [PERMISSIONS.profile.view]: "Acesso: ver Perfil (próprio perfil, link de acesso, foto)",
 };
 
 export function hasPermission(permissions: string[] | null | undefined, key: PermissionKey): boolean {

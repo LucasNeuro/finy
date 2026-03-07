@@ -45,21 +45,25 @@ export async function POST(request: Request) {
   }
 
   const group = result.data;
-  if (group?.JID) {
+  const communityJid = (group as UazapiGroupInfo & { jid?: string })?.JID?.trim()
+    ?? (group as { jid?: string })?.jid?.trim()
+    ?? "";
+  if (communityJid) {
     const supabase = await createClient();
     await supabase.from("channel_groups").upsert(
       {
         channel_id: channelId,
         company_id: companyId,
-        jid: (group as UazapiGroupInfo).JID?.trim() ?? "",
+        jid: communityJid,
         name: ((group as UazapiGroupInfo).Name ?? name).trim() || null,
         topic: null,
         invite_link: ((group as UazapiGroupInfo).InviteLink ?? (group as { invite_link?: string }).invite_link ?? "").trim() || null,
         synced_at: new Date().toISOString(),
+        is_community: true,
       },
       { onConflict: "channel_id,jid" }
     );
   }
 
-  return NextResponse.json(group ?? { ok: true });
+  return NextResponse.json({ ...(group ?? {}), JID: communityJid || (group as UazapiGroupInfo)?.JID });
 }

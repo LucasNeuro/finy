@@ -1,6 +1,10 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import {
+  invalidateConversationDetail,
+  invalidateConversationList,
+} from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { archiveChat } from "@/lib/uazapi/client";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
@@ -8,7 +12,7 @@ import { NextResponse } from "next/server";
 
 /**
  * POST /api/conversations/[id]/chat/archive
- * Arquivar ou desarquivar chat no WhatsApp (UAZAPI).
+ * Arquivar ou desarquivar chat no WhatsApp (UAZAPI) e atualizar status do ticket no banco.
  * Body: { archive: boolean }
  */
 export async function POST(
@@ -62,5 +66,20 @@ export async function POST(
       { status: 502 }
     );
   }
+
+  const newStatus = archive ? "archived" : "open";
+  await supabase
+    .from("conversations")
+    .update({
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("company_id", companyId);
+  await Promise.all([
+    invalidateConversationList(companyId),
+    invalidateConversationDetail(id),
+  ]);
+
   return NextResponse.json({ response: "Chat updated successfully" });
 }

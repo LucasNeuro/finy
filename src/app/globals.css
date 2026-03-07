@@ -66,3 +66,12 @@ body {
 .scroll-area-conversas::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
+
+/* Barra de progresso indeterminada (sync) dentro do botão */
+@keyframes sync-progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.animate-sync-progress {
+  animation: sync-progress-slide 1.5s ease-in-out infinite;
+}

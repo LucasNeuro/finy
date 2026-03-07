@@ -259,7 +259,7 @@ export function QueueConfigSideOver({
       open={open}
       onClose={onClose}
       title={queue ? `Caixa: ${queue.name}` : "Configurar caixa"}
-      width={560}
+      width={720}
     >
       <div className="flex flex-col gap-4">
         <div className="flex gap-1 overflow-x-auto pb-2 -mx-1">

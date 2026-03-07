@@ -2,10 +2,11 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useCallback, useRef } from "react";
-import useSWR from "swr";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check } from "lucide-react";
+import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
-import { ChatThreadSkeleton } from "@/components/Skeleton";
+import { Skeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
 
 type Message = {
@@ -30,6 +31,7 @@ type ConversationDetail = {
   customer_name: string | null;
   queue_id: string | null;
   assigned_to: string | null;
+  status?: string;
   channel_name?: string | null;
   queue_name?: string | null;
   assigned_to_name?: string | null;
@@ -138,8 +140,6 @@ export default function ConversaThreadPage({
 }) {
   const pathname = usePathname();
   const [resolvedParams, setResolvedParams] = useState<{ slug: string; id: string } | null>(null);
-  const [conv, setConv] = useState<ConversationDetail | null>(null);
-  const [loading, setLoading] = useState(true);
   const [sendValue, setSendValue] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,50 +175,60 @@ export default function ConversaThreadPage({
   const slug = resolved?.slug ?? pathname?.split("/")[1] ?? "";
   const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+  const queryClient = useQueryClient();
 
-  const { data: permissionsData } = useSWR<{ permissions?: string[] }>(
-    slug ? ["/api/auth/permissions", slug] : null,
-    ([url]) => fetch(url as string, { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
-    { revalidateOnFocus: false, dedupingInterval: 120_000 }
-  );
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
   useEffect(() => {
     const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
-    setCanTransfer(perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets") || perms.includes("inbox.transfer"));
+    setCanTransfer(perms.includes("inbox.transfer"));
   }, [permissionsData?.permissions]);
 
-  const fetchConversation = useCallback(async (id: string, options?: { silent?: boolean; skipCache?: boolean }) => {
-    if (!options?.silent) {
-      setLoading(true);
-      setError(null);
-    }
-    try {
-      const url = options?.skipCache ? `/api/conversations/${id}?skip_cache=1` : `/api/conversations/${id}`;
-      const res = await fetch(url, {
+  const invalidateConversation = useCallback(
+    (id: string) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
+    },
+    [queryClient]
+  );
+
+  const {
+    data: conv,
+    isLoading: loading,
+    error: convQueryError,
+    refetch: refetchConversation,
+  } = useQuery({
+    queryKey: queryKeys.conversation(resolved?.id ?? ""),
+    queryFn: async () => {
+      const id = resolved?.id;
+      if (!id) return null;
+      const res = await fetch(`/api/conversations/${id}`, {
         credentials: "include",
         headers: apiHeaders,
       });
-      if (!res.ok) {
-        if (!options?.silent) setConv(null);
-        return;
-      }
-      const data = await res.json();
-      setConv(data);
-    } catch {
-      if (!options?.silent) setConv(null);
-    } finally {
-      if (!options?.silent) setLoading(false);
-    }
-  }, [slug]);
-
-  const claimAttemptedRef = useRef(false);
-  const avatarFetchAttemptedRef = useRef<string | null>(null);
-  const contactDetailsFetchedForRef = useRef<string | null>(null);
+      if (!res.ok) return null;
+      return res.json() as Promise<ConversationDetail>;
+    },
+    enabled: !!resolved?.id && !!slug,
+    staleTime: 60 * 1000,
+    refetchInterval: 45_000,
+  });
 
   useEffect(() => {
-    if (!resolved?.id) return;
-    setHasMoreOlderMessages(true);
-    fetchConversation(resolved.id, { skipCache: true });
-  }, [resolved?.id, fetchConversation]);
+    if (resolved?.id) setHasMoreOlderMessages(true);
+  }, [resolved?.id]);
+
+  useEffect(() => {
+    if (convQueryError) setError(convQueryError instanceof Error ? convQueryError.message : "Erro ao carregar");
+    else setError(null);
+  }, [convQueryError]);
+
+  const claimAttemptedRef = useRef(false);
+  const contactDetailsFetchedForRef = useRef<string | null>(null);
 
   const loadOlderMessages = useCallback(async () => {
     if (!resolved?.id || !conv?.messages?.length || loadingOlderMessages || !hasMoreOlderMessages) return;
@@ -237,11 +247,11 @@ export default function ConversaThreadPage({
         const scrollEl = messagesScrollRef.current;
         const prevHeight = scrollEl?.scrollHeight ?? 0;
         const prevScroll = scrollEl?.scrollTop ?? 0;
-        setConv((c) => {
+        const id = resolved.id;
+        queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(id), (c) => {
           if (!c) return c;
           const existing = Array.isArray(c.messages) ? c.messages : [];
-          const merged = [...older, ...existing];
-          return { ...c, messages: merged };
+          return { ...c, messages: [...older, ...existing] };
         });
         requestAnimationFrame(() => {
           if (scrollEl) {
@@ -254,59 +264,17 @@ export default function ConversaThreadPage({
     } finally {
       setLoadingOlderMessages(false);
     }
-  }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders]);
+  }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders, queryClient]);
 
   useEffect(() => {
     if (!conv?.messages?.length) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [conv?.id, conv?.messages?.length]);
 
-  useEffect(() => {
-    if (!resolved?.id || !conv || claimAttemptedRef.current || conv.assigned_to != null) return;
-    const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
-    if (!perms.includes("inbox.claim")) return;
-    claimAttemptedRef.current = true;
-    fetch(`/api/conversations/${resolved.id}/claim`, {
-      method: "POST",
-      credentials: "include",
-      headers: apiHeaders,
-    })
-      .then((r) => (r?.ok ? fetchConversation(resolved.id) : undefined))
-      .catch(() => {});
-  }, [resolved?.id, conv, permissionsData?.permissions, apiHeaders, fetchConversation]);
+  // Não atribuir ao abrir: atribuição só pelo botão "+" no minicard da lista.
 
-  useEffect(() => {
-    if (!resolved?.id || !conv) return;
-    const interval = setInterval(() => {
-      fetchConversation(resolved.id, { silent: true });
-    }, 45_000);
-    return () => clearInterval(interval);
-  }, [resolved?.id, conv, fetchConversation]);
-
-  // Na aba Contatos a foto vem do chat-details (UAZAPI). No Chat usamos channel_contacts.avatar_url;
-  // se estiver vazio, chamamos chat-details UMA VEZ por conversa para buscar e gravar no banco.
-  useEffect(() => {
-    if (!resolved?.id || !conv?.channel_id || conv.is_group) return;
-    const hasAvatar = !!(conv.contact_avatar_url && conv.contact_avatar_url.trim());
-    if (hasAvatar) return;
-    if (avatarFetchAttemptedRef.current === conv.id) return;
-    avatarFetchAttemptedRef.current = conv.id;
-    const number = (conv.customer_phone || conv.external_id || "").replace(/\D/g, "").trim() || conv.external_id || conv.customer_phone;
-    if (!number) return;
-    fetch("/api/contacts/chat-details", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json", ...apiHeaders },
-      body: JSON.stringify({
-        channel_id: conv.channel_id,
-        number,
-        preview: true,
-        conversation_id: resolved.id,
-      }),
-    })
-      .then((r) => (r.ok ? fetchConversation(resolved.id) : undefined))
-      .catch(() => {});
-  }, [resolved?.id, conv?.id, conv?.channel_id, conv?.is_group, conv?.contact_avatar_url, conv?.customer_phone, conv?.external_id, apiHeaders, fetchConversation]);
+  // Foto do contato vem do banco (contact_avatar_url). Só chamamos chat-details quando o usuário
+  // abre o painel de informações (useEffect abaixo com infoOpen).
 
   // Só busca detalhes do contato quando o painel ABRE ou quando troca de conversa — evita ficar batendo na API a cada refetch.
   useEffect(() => {
@@ -354,6 +322,58 @@ export default function ConversaThreadPage({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [chatMenuOpen]);
 
+  const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canClaim = perms.includes("inbox.claim");
+  const canChangeStatus = perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets");
+  const canClose = perms.includes("inbox.close");
+
+  async function handleClaim() {
+    if (!resolved?.id) return;
+    setChatActionLoading("claim");
+    setChatMenuOpen(false);
+    try {
+      const res = await fetch(`/api/conversations/${resolved.id}/claim`, {
+        method: "POST",
+        credentials: "include",
+        headers: apiHeaders ?? {},
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err?.error ?? "Falha ao atribuir");
+        return;
+      }
+      await refetchConversation();
+      queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug) });
+    } finally {
+      setChatActionLoading(null);
+    }
+  }
+
+  async function handleStatusChange(newStatus: string) {
+    if (!resolved?.id) return;
+    setChatActionLoading("status");
+    setChatMenuOpen(false);
+    try {
+      const res = await fetch(`/api/conversations/${resolved.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err?.error ?? "Falha ao alterar status");
+        return;
+      }
+      await refetchConversation();
+      queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug) });
+    } finally {
+      setChatActionLoading(null);
+    }
+  }
+
   async function chatAction(
     action: "read" | "archive" | "mute" | "pin" | "delete",
     payload?: Record<string, unknown>
@@ -397,7 +417,7 @@ export default function ConversaThreadPage({
         setError(err?.error ?? `Falha em ${action}`);
         return;
       }
-      await fetchConversation(resolved.id);
+      await refetchConversation();
     } finally {
       setChatActionLoading(null);
     }
@@ -455,7 +475,8 @@ export default function ConversaThreadPage({
         return;
       }
       if (!isMedia) setSendValue("");
-      await fetchConversation(resolved.id);
+      await refetchConversation();
+      queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
     } catch {
       setError("Falha ao enviar");
     } finally {
@@ -521,7 +542,7 @@ export default function ConversaThreadPage({
               headers: { "Content-Type": "application/json", ...apiHeaders },
               body: JSON.stringify({ type: "ptt", file: base64 }),
             });
-            if (res.ok) await fetchConversation(resolved.id);
+            if (res.ok) await refetchConversation();
             else setError("Falha ao enviar áudio");
           } finally {
             setSending(false);
@@ -554,10 +575,7 @@ export default function ConversaThreadPage({
 
   const base = slug ? `/${slug}` : "";
 
-  if (loading && !conv) {
-    return <ChatThreadSkeleton />;
-  }
-  if (!conv) {
+  if (!conv && !loading) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center bg-[#F1F5F9] text-[#64748B]">
         <p>Conversa não encontrada.</p>
@@ -568,11 +586,12 @@ export default function ConversaThreadPage({
     );
   }
 
-  const name = conv.customer_name || conv.customer_phone;
-  const showTransfer = !!conv.assigned_to && canTransfer;
+  const isLoading = loading && !conv;
+
+  const name = conv?.customer_name || conv?.customer_phone || "";
   const displayName = contactDetails?.name ?? contactDetails?.wa_name ?? contactDetails?.wa_contactName ?? name;
-  const displayPhone = contactDetails?.phone ?? conv.customer_phone;
-  const imageUrl = (conv.contact_avatar_url && conv.contact_avatar_url.trim()) ? conv.contact_avatar_url : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
+  const displayPhone = contactDetails?.phone ?? conv?.customer_phone;
+  const imageUrl = (conv?.contact_avatar_url && conv.contact_avatar_url.trim()) ? conv.contact_avatar_url : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F1F5F9]">
@@ -585,26 +604,28 @@ export default function ConversaThreadPage({
           <ArrowLeft className="h-5 w-5" />
         </a>
         <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
-          {imageUrl ? (
+          {isLoading ? (
+            <Skeleton className="h-10 w-10 rounded-full" />
+          ) : imageUrl ? (
             <img src={imageUrl} alt="" className="h-full w-full object-cover" />
           ) : (
-            name.slice(0, 1).toUpperCase()
+            name.slice(0, 1).toUpperCase() || "?"
           )}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-[#1E293B]">{displayName || name}</p>
+          <p className="font-medium text-[#1E293B]">{isLoading ? "Carregando…" : (displayName || name)}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {conv.channel_name && (
+            {!isLoading && conv?.channel_name && (
               <span className="rounded bg-clicvend-green/15 px-1.5 py-0.5 text-xs font-medium text-clicvend-green">
                 {conv.channel_name}
               </span>
             )}
-            {conv.queue_name && (
+            {!isLoading && conv?.queue_name && (
               <span className="rounded bg-[#E2E8F0] px-1.5 py-0.5 text-xs text-[#64748B]">
                 {conv.queue_name}
               </span>
             )}
-            {conv.assigned_to_name && (
+            {!isLoading && conv?.assigned_to_name && (
               <span className="rounded bg-[#E2E8F0] px-1.5 py-0.5 text-xs text-[#64748B]">
                 {conv.assigned_to_name}
               </span>
@@ -615,9 +636,11 @@ export default function ConversaThreadPage({
           <button type="button" className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]" aria-label="Buscar">
             <Search className="h-4 w-4" />
           </button>
-          <button type="button" className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]" aria-label="Transferir">
-            <ArrowRightLeft className="h-4 w-4" />
-          </button>
+          {canTransfer && (
+            <button type="button" className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]" aria-label="Transferir">
+              <ArrowRightLeft className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setInfoOpen(true)}
@@ -638,6 +661,47 @@ export default function ConversaThreadPage({
             </button>
             {chatMenuOpen && (
               <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-[#E2E8F0] bg-white py-1 shadow-lg">
+                {(canChangeStatus || canClose) && (
+                  <>
+                    {canChangeStatus && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusChange("open")}
+                          disabled={!!chatActionLoading}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                        >
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#22C55E]" aria-hidden />
+                          {conv?.status === "open" ? <Check className="h-4 w-4 shrink-0 text-[#22C55E]" /> : null}
+                          Abrir
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStatusChange("in_progress")}
+                          disabled={!!chatActionLoading}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                        >
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#3B82F6]" aria-hidden />
+                          {conv?.status === "in_progress" ? <Check className="h-4 w-4 shrink-0 text-[#3B82F6]" /> : null}
+                          Em atendimento
+                        </button>
+                      </>
+                    )}
+                    {canClose && (
+                      <button
+                        type="button"
+                        onClick={() => handleStatusChange("closed")}
+                        disabled={!!chatActionLoading}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                      >
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#64748B]" aria-hidden />
+                        {conv?.status === "closed" ? <Check className="h-4 w-4 shrink-0 text-[#64748B]" /> : null}
+                        Fechar
+                      </button>
+                    )}
+                    <hr className="my-1 border-[#E2E8F0]" />
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => chatAction("read", { read: true })}
@@ -693,39 +757,43 @@ export default function ConversaThreadPage({
       <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
         <div ref={messagesScrollRef} className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
           <div className="space-y-3">
-            {conv.messages?.length > 0 && hasMoreOlderMessages && (
-              <div className="flex justify-center py-2">
-                <button
-                  type="button"
-                  onClick={loadOlderMessages}
-                  disabled={loadingOlderMessages}
-                  className="text-sm text-clicvend-orange hover:underline disabled:opacity-50"
-                >
-                  {loadingOlderMessages ? "Carregando…" : "Carregar mensagens antigas"}
-                </button>
-              </div>
+            {isLoading ? (
+              <>
+                <div className="flex justify-start"><Skeleton className="h-14 w-[75%] max-w-sm rounded-lg" /></div>
+                <div className="flex justify-end"><Skeleton className="h-10 w-[50%] max-w-xs rounded-lg" /></div>
+                <div className="flex justify-start"><Skeleton className="h-12 w-[60%] max-w-sm rounded-lg" /></div>
+                <div className="flex justify-end"><Skeleton className="h-16 w-[70%] max-w-sm rounded-lg" /></div>
+              </>
+            ) : (
+              <>
+                {(conv?.messages?.length ?? 0) > 0 && hasMoreOlderMessages && (
+                  <div className="flex justify-center py-2">
+                    <button
+                      type="button"
+                      onClick={loadOlderMessages}
+                      disabled={loadingOlderMessages}
+                      className="text-sm text-clicvend-orange hover:underline disabled:opacity-50"
+                    >
+                      {loadingOlderMessages ? "Carregando…" : "Carregar mensagens antigas"}
+                    </button>
+                  </div>
+                )}
+                {(Array.isArray(conv?.messages) ? conv.messages : []).map((m) => (
+                  <div
+                    key={m.id}
+                    className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
+                  >
+                    <MessageBubble m={m} name={name} />
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </>
             )}
-            {(Array.isArray(conv.messages) ? conv.messages : []).map((m) => (
-              <div
-                key={m.id}
-                className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
-              >
-                <MessageBubble m={m} name={name} />
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
           </div>
         </div>
 
         <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-2">
-          {showTransfer && (
-            <p className="mb-2 text-xs text-[#64748B]">
-              Chamado pertence a outro atendente.{" "}
-              <button type="button" className="text-clicvend-orange hover:underline font-medium">
-                Transferir chamado
-              </button>
-            </p>
-          )}
+
           {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
           <form onSubmit={(e) => handleSend(e)} className="flex gap-2">
             <input
@@ -772,7 +840,7 @@ export default function ConversaThreadPage({
               onChange={(e) => setSendValue(e.target.value)}
               placeholder="Digite sua mensagem…"
               className="flex-1 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-              disabled={sending}
+              disabled={sending || isLoading}
             />
             {recording ? (
               <button
@@ -795,7 +863,7 @@ export default function ConversaThreadPage({
             )}
             <button
               type="submit"
-              disabled={!sendValue.trim() || sending}
+              disabled={!sendValue.trim() || sending || isLoading}
               className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:bg-[#94A3B8] disabled:cursor-not-allowed transition-colors"
             >
               <Send className="h-4 w-4" />
@@ -810,7 +878,7 @@ export default function ConversaThreadPage({
         open={infoOpen}
         onClose={() => setInfoOpen(false)}
         title="Informações do contato"
-        width={420}
+        width={580}
       >
         <div className="flex flex-col h-full overflow-hidden">
           <div className="flex-1 overflow-y-auto min-h-0">
@@ -824,7 +892,7 @@ export default function ConversaThreadPage({
                 {contactDetailsError}
               </div>
             )}
-            {!contactDetailsLoading && (contactDetails || !conv.channel_id) && (
+            {!contactDetailsLoading && (contactDetails || !conv?.channel_id) && (
               <div className="space-y-4">
                 <div className="flex flex-col items-center gap-3 border-b border-[#E2E8F0] pb-4">
                   <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0]">
@@ -845,7 +913,7 @@ export default function ConversaThreadPage({
                       <Phone className="h-3.5 w-3.5" />
                       {displayPhone}
                     </a>
-                    {conv.channel_name && (
+                    {conv?.channel_name && (
                       <p className="mt-1 text-xs text-[#94A3B8]">{conv.channel_name}</p>
                     )}
                   </div>
@@ -904,7 +972,7 @@ export default function ConversaThreadPage({
                 </button>
               </div>
             )}
-            {!conv.channel_id && !contactDetailsLoading && (
+            {!conv?.channel_id && !contactDetailsLoading && (
               <p className="text-sm text-[#64748B]">Canal não disponível para detalhes.</p>
             )}
           </div>
@@ -916,7 +984,7 @@ export default function ConversaThreadPage({
         open={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
         title="Excluir conversa"
-        width={400}
+        width={560}
       >
         <div className="space-y-4">
           <p className="text-sm text-[#64748B]">

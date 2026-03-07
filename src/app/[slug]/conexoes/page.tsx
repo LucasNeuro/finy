@@ -452,7 +452,7 @@ export default function ConexoesPage() {
       )}
 
       {/* SideOver Nova conexão - apenas cria a instância; conectar via Config */}
-      <SideOver open={sideOverOpen} onClose={closeSideOver} title="Nova conexão WhatsApp" width={440}>
+      <SideOver open={sideOverOpen} onClose={closeSideOver} title="Nova conexão WhatsApp" width={600}>
         <p className="mb-4 text-sm text-[#64748B]">
           Crie a instância primeiro. Depois, clique em <strong>Configurar</strong> na tabela para gerar o QR Code e conectar o WhatsApp.
         </p>

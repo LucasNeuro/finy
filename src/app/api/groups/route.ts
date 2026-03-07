@@ -16,19 +16,32 @@ export async function GET(request: Request) {
   const channelId = searchParams.get("channel_id")?.trim();
 
   const supabase = await createClient();
-  let q = supabase
-    .from("channel_groups")
-    .select("id, channel_id, jid, name, topic, invite_link, synced_at, left_at")
-    .eq("company_id", companyId)
-    .order("name");
+  const pageSize = 1000;
+  const allRows: Record<string, unknown>[] = [];
+  let offset = 0;
+  let hasMore = true;
 
-  if (channelId) {
-    q = q.eq("channel_id", channelId);
+  while (hasMore) {
+    let q = supabase
+      .from("channel_groups")
+      .select("id, channel_id, jid, name, topic, invite_link, synced_at, left_at")
+      .eq("company_id", companyId)
+      .order("name")
+      .range(offset, offset + pageSize - 1);
+
+    if (channelId) {
+      q = q.eq("channel_id", channelId);
+    }
+
+    const { data, error } = await q;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    const chunk = data ?? [];
+    allRows.push(...chunk);
+    hasMore = chunk.length === pageSize;
+    offset += pageSize;
   }
 
-  const { data, error } = await q;
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-  return NextResponse.json(data ?? []);
+  return NextResponse.json(allRows);
 }

@@ -1,11 +1,12 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo, useRef } from "react";
-import useSWR from "swr";
-import { Search, Users, Inbox, UserCheck, User } from "lucide-react";
+import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { Search, Users, Inbox, UserCheck, User, Loader2, Plus } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
+import { queryKeys } from "@/lib/query-keys";
 
 type Conversation = {
   id: string;
@@ -19,11 +20,9 @@ type Conversation = {
   status: string;
   avatar_url?: string | null;
   is_group?: boolean;
+  assigned_to?: string | null;
+  assigned_to_name?: string | null;
 };
-
-function fetcher(url: string, headers?: Record<string, string>) {
-  return fetch(url, { credentials: "include", headers }).then((r) => r.json());
-}
 
 function formatLastMessageTime(iso: string): string {
   const d = new Date(iso);
@@ -34,69 +33,264 @@ function formatLastMessageTime(iso: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-/** Cache de 90s, sem revalidar ao focar (evita travamento ao alternar abas); retry em falha */
-const swrOpts = { revalidateOnFocus: false, dedupingInterval: 90_000, errorRetryCount: 2 };
-
 type ViewMode = "mine" | "queues";
 type ConversationTypeFilter = "all" | "individual" | "group";
 /** Tab ativa: só ícones — Filas, Meus atendimentos, Contatos (individuais), Grupos */
 type TabId = "queues" | "mine" | "contacts" | "groups";
 
+/** Contato da API /api/contacts (mesma lista do módulo Contatos) */
+type SidebarContact = {
+  id: string;
+  channel_id: string;
+  jid: string;
+  phone: string | null;
+  contact_name: string | null;
+  first_name: string | null;
+  synced_at: string;
+};
+
+/** Grupo da API /api/groups (mesma lista do módulo Contatos e grupos) */
+type SidebarGroup = {
+  id: string;
+  channel_id: string;
+  jid: string;
+  name: string | null;
+  topic: string | null;
+  invite_link: string | null;
+  synced_at: string | null;
+  left_at: string | null;
+};
+
 const ConversationListItem = memo(function ConversationListItem({
   conversation: c,
   base,
   currentId,
+  onHover,
+  canClaim,
+  onClaim,
 }: {
   conversation: Conversation;
   base: string;
   currentId: string | null;
+  onHover?: (id: string) => void;
+  canClaim?: boolean;
+  onClaim?: (conversationId: string) => void;
 }) {
   const href = `${base}/conversas/${c.id}`;
   const displayName = (c.customer_name ?? c.customer_phone) ?? "?";
   const initial = displayName.slice(0, 1).toUpperCase();
   const isGroup = c.is_group === true;
+  const showClaim = canClaim && (c.assigned_to == null || c.assigned_to === "");
+  const [claiming, setClaiming] = useState(false);
+
+  const handleClaimClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!onClaim || claiming) return;
+    setClaiming(true);
+    try {
+      await onClaim(c.id);
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  return (
+    <li onMouseEnter={() => onHover?.(c.id)}>
+      <div className={`flex items-center gap-1 ${currentId === c.id ? "bg-clicvend-green/10" : ""}`}>
+        <Link
+          href={href}
+          className="flex min-w-0 flex-1 items-center gap-3 p-3 hover:bg-[#F8FAFC]"
+        >
+          <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+            {c.avatar_url ? (
+              <img src={c.avatar_url} alt="" className="h-full w-full object-cover" />
+            ) : isGroup ? (
+              <Users className="h-5 w-5" />
+            ) : (
+              initial
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-1">
+              <p className="truncate text-sm font-medium text-[#1E293B]">
+                {c.customer_name || c.customer_phone}
+              </p>
+              <span className="shrink-0 text-xs text-[#64748B]">
+                {formatLastMessageTime(c.last_message_at)}
+              </span>
+            </div>
+            <p className="truncate text-xs text-[#64748B] flex items-center gap-1.5">
+              {isGroup && (
+                <span className="shrink-0 rounded bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] font-medium text-[#64748B]">
+                  Grupo
+                </span>
+              )}
+              {c.last_message_preview != null && c.last_message_preview !== ""
+                ? c.last_message_preview
+                : c.status === "open"
+                  ? "Aberto"
+                  : c.status === "closed"
+                    ? "Encerrado"
+                    : c.status}
+            </p>
+          </div>
+        </Link>
+        {showClaim && (
+          <button
+            type="button"
+            onClick={handleClaimClick}
+            disabled={claiming}
+            className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[#009B84] hover:bg-[#009B84] hover:text-white hover:border-[#009B84] disabled:opacity-60"
+            title="Atribuir a mim e colocar em atendimento"
+            aria-label="Atribuir a mim"
+          >
+            {claiming ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+          </button>
+        )}
+      </div>
+    </li>
+  );
+});
+
+const ContactListItem = memo(function ContactListItem({
+  contact,
+  base,
+  apiHeaders,
+}: {
+  contact: SidebarContact;
+  base: string;
+  apiHeaders: Record<string, string> | undefined;
+}) {
+  const router = useRouter();
+  const [starting, setStarting] = useState(false);
+  const displayName = (contact.contact_name ?? contact.first_name ?? contact.phone ?? contact.jid) ?? "—";
+  const initial = displayName.slice(0, 1).toUpperCase();
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (starting) return;
+    setStarting(true);
+    try {
+      const params = new URLSearchParams({
+        channel_id: contact.channel_id,
+        jid: contact.jid,
+        customer_phone: contact.phone ?? "",
+        customer_name: (contact.contact_name ?? contact.first_name ?? "") || "",
+      });
+      const res = await fetch(`/api/conversations/find-or-create?${params}`, {
+        credentials: "include",
+        headers: apiHeaders ?? {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.id) {
+        router.push(`${base}/conversas/${data.id}`);
+      } else {
+        router.push(`${base}/contatos`);
+      }
+    } catch {
+      router.push(`${base}/contatos`);
+    } finally {
+      setStarting(false);
+    }
+  };
 
   return (
     <li>
-      <Link
-        href={href}
-        className={`flex items-center gap-3 p-3 hover:bg-[#F8FAFC] ${currentId === c.id ? "bg-clicvend-green/10" : ""}`}
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={starting}
+        className="flex w-full items-center gap-3 p-3 text-left hover:bg-[#F8FAFC] disabled:opacity-70"
       >
-        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
-          {c.avatar_url ? (
-            <img src={c.avatar_url} alt="" className="h-full w-full object-cover" />
-          ) : isGroup ? (
-            <Users className="h-5 w-5" />
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+          {starting ? (
+            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
           ) : (
             initial
           )}
         </span>
-        <span className="inline-block h-4 w-4 shrink-0 rounded-full bg-clicvend-orange" title="WhatsApp" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-1">
-            <p className="truncate text-sm font-medium text-[#1E293B]">
-              {c.customer_name || c.customer_phone}
-            </p>
-            <span className="shrink-0 text-xs text-[#64748B]">
-              {formatLastMessageTime(c.last_message_at)}
-            </span>
-          </div>
-          <p className="truncate text-xs text-[#64748B] flex items-center gap-1.5">
-            {isGroup && (
-              <span className="shrink-0 rounded bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] font-medium text-[#64748B]">
-                Grupo
-              </span>
-            )}
-            {c.last_message_preview != null && c.last_message_preview !== ""
-              ? c.last_message_preview
-              : c.status === "open"
-                ? "Aberto"
-                : c.status === "closed"
-                  ? "Encerrado"
-                  : c.status}
+          <p className="truncate text-sm font-medium text-[#1E293B]">
+            {contact.contact_name || contact.first_name || "—"}
+          </p>
+          <p className="truncate text-xs text-[#64748B]">
+            {contact.phone || contact.jid || ""}
           </p>
         </div>
-      </Link>
+      </button>
+    </li>
+  );
+});
+
+const GroupListItem = memo(function GroupListItem({
+  group,
+  base,
+  apiHeaders,
+}: {
+  group: SidebarGroup;
+  base: string;
+  apiHeaders: Record<string, string> | undefined;
+}) {
+  const router = useRouter();
+  const [opening, setOpening] = useState(false);
+  const displayName = (group.name ?? group.topic ?? group.jid) ?? "—";
+  const initial = displayName.slice(0, 1).toUpperCase();
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (opening) return;
+    setOpening(true);
+    try {
+      const params = new URLSearchParams({
+        channel_id: group.channel_id,
+        jid: group.jid,
+        is_group: "1",
+        customer_name: (group.name ?? group.topic ?? "").trim() || "",
+      });
+      const res = await fetch(`/api/conversations/find-or-create?${params}`, {
+        credentials: "include",
+        headers: apiHeaders ?? {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.id) {
+        router.push(`${base}/conversas/${data.id}`);
+      } else {
+        router.push(`${base}/contatos`);
+      }
+    } catch {
+      router.push(`${base}/contatos`);
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={opening}
+        className="flex w-full items-center gap-3 p-3 text-left hover:bg-[#F8FAFC] disabled:opacity-70"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+          {opening ? (
+            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
+          ) : (
+            <Users className="h-5 w-5" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-[#1E293B]">
+            {group.name || group.topic || "Grupo"}
+          </p>
+          <p className="truncate text-xs text-[#64748B]">{group.jid}</p>
+        </div>
+      </button>
     </li>
   );
 });
@@ -110,40 +304,54 @@ export function ConversasSidebar() {
 
   const [activeTab, setActiveTab] = useState<TabId>("mine");
   const [search, setSearch] = useState("");
+  const [unassigning, setUnassigning] = useState(false);
+  const [resettingToOpen, setResettingToOpen] = useState(false);
+
+  const handleTabChange = (tab: TabId) => {
+    setActiveTab(tab);
+    if ((tab === "queues" || tab === "mine") && slug) {
+      setResettingToOpen(true);
+      fetch("/api/conversations/reset-to-open", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ filter: tab }),
+      })
+        .then((res) => {
+          if (res.ok) {
+            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
+            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
+            queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("conversations-status-reset"));
+            }
+          }
+        })
+        .finally(() => setResettingToOpen(false));
+    }
+  };
   const viewMode: ViewMode = activeTab === "queues" ? "queues" : "mine";
   const typeFilter: ConversationTypeFilter =
     activeTab === "groups" ? "group" : activeTab === "contacts" ? "individual" : "all";
-  const [moreConversations, setMoreConversations] = useState<Conversation[]>([]);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const avatarRequestedRef = useRef<Set<string>>(new Set());
+  const queryClient = useQueryClient();
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
-  const MAX_AVATAR_PREFETCH = 8;
-  const AVATAR_PREFETCH_DELAY_MS = 600;
 
-  const { data: permissionsData } = useSWR<{ permissions?: string[]; inbox_see_all?: boolean }>(
-    slug ? ["/api/auth/permissions", slug] : null,
-    ([url]) => fetcher(url, apiHeaders),
-    { ...swrOpts, dedupingInterval: 120_000 }
-  );
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
   const inboxSeeAll = permissionsData?.inbox_see_all === true;
 
-  const conversationsParams = new URLSearchParams();
-  conversationsParams.set("limit", "500");
-  if (viewMode === "mine") {
-    conversationsParams.set("only_assigned_to_me", "1");
-  }
-  // Não enviamos queue_id: quem está em várias filas vê tudo na lista; não precisa escolher fila.
-
-  const conversationsUrl = slug ? `/api/conversations?${conversationsParams}` : null;
-  useEffect(() => {
-    setMoreConversations([]);
-  }, [conversationsUrl]);
-
-  const { data: countsData, mutate: mutateCounts } = useSWR<{ mine?: number; queues?: number; individual?: number; groups?: number }>(
-    slug ? ["/api/conversations/counts", slug] : null,
-    ([url]) => fetcher(url, apiHeaders),
-    { ...swrOpts, dedupingInterval: 30_000 }
-  );
+  const { data: countsData } = useQuery({
+    queryKey: queryKeys.counts(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/conversations/counts", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 60 * 1000,
+  });
   const counts = {
     mine: typeof countsData?.mine === "number" ? countsData.mine : 0,
     queues: typeof countsData?.queues === "number" ? countsData.queues : 0,
@@ -151,44 +359,63 @@ export function ConversasSidebar() {
     groups: typeof countsData?.groups === "number" ? countsData.groups : 0,
   };
 
-  const { data: conversationsRes, error: conversationsError, isLoading: loading, mutate: mutateConversations } = useSWR<{ data?: Conversation[]; total?: number; error?: string }>(
-    conversationsUrl ? [conversationsUrl, slug, viewMode, activeTab] : null,
-    async ([url]) => {
-      const res = await fetch(url as string, { credentials: "include", headers: apiHeaders });
+  const { data: contactsData, isLoading: contactsLoading } = useQuery({
+    queryKey: queryKeys.contacts(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/contacts", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug && activeTab === "contacts",
+    staleTime: 2 * 60 * 1000,
+  });
+  const contactsList: SidebarContact[] = Array.isArray(contactsData) ? contactsData : [];
+
+  const { data: groupsData, isLoading: groupsLoading } = useQuery({
+    queryKey: queryKeys.groups(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/groups", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug && activeTab === "groups",
+    staleTime: 2 * 60 * 1000,
+  });
+  const groupsList: SidebarGroup[] = Array.isArray(groupsData) ? groupsData : [];
+
+  const conversationsParams = new URLSearchParams();
+  conversationsParams.set("limit", "500");
+  if (viewMode === "mine") conversationsParams.set("only_assigned_to_me", "1");
+
+  const {
+    data: conversationsData,
+    error: conversationsError,
+    isLoading: loading,
+    isFetchingNextPage: loadingMore,
+    hasNextPage: hasMore,
+    fetchNextPage: loadMore,
+    refetch: refetchConversations,
+  } = useInfiniteQuery({
+    queryKey: queryKeys.conversationListInfinite(slug ?? "", viewMode),
+    queryFn: async ({ pageParam = 0 }) => {
+      const params = new URLSearchParams(conversationsParams);
+      params.set("offset", String(pageParam));
+      const res = await fetch(`/api/conversations?${params}`, {
+        credentials: "include",
+        headers: apiHeaders,
+      });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error ?? "Falha ao carregar conversas");
-      return json;
+      return json as { data: Conversation[]; total: number };
     },
-    {
-      ...swrOpts,
-      onErrorRetry(err, _key, _config, revalidate, { retryCount }) {
-        if (err?.name === "AbortError" || (err?.message && String(err.message).includes("Lock broken"))) return;
-        if (retryCount >= 2) return;
-        setTimeout(() => revalidate({ retryCount }), 3000);
-      },
-    }
-  );
-  const baseList = Array.isArray(conversationsRes?.data) ? conversationsRes.data : [];
-  const totalFromApi = conversationsRes?.total ?? 0;
-  const allConversations = [...baseList, ...moreConversations];
-  const hasMore = totalFromApi > allConversations.length;
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const fetched = allPages.reduce((s, p) => s + (p.data?.length ?? 0), 0);
+      const total = lastPage?.total ?? 0;
+      if ((lastPage?.data?.length ?? 0) < 500 || fetched >= total) return undefined;
+      return fetched;
+    },
+    enabled: !!slug,
+    staleTime: 60 * 1000,
+  });
 
-  const loadMore = async () => {
-    if (loadingMore || !hasMore || !slug) return;
-    setLoadingMore(true);
-    try {
-      const params = new URLSearchParams(conversationsParams);
-      params.set("offset", String(allConversations.length));
-      params.set("limit", "500");
-      const res = await fetch(`/api/conversations?${params}`, { credentials: "include", headers: apiHeaders });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(json?.data)) {
-        setMoreConversations((prev) => [...prev, ...json.data]);
-      }
-    } finally {
-      setLoadingMore(false);
-    }
-  };
+  const baseList = conversationsData?.pages?.[0]?.data ?? [];
+  const allConversations = conversationsData?.pages?.flatMap((p) => p.data ?? []) ?? [];
+  const totalFromApi = conversationsData?.pages?.[0]?.total ?? 0;
 
   const errorMessage =
     conversationsError?.message === "Failed to fetch"
@@ -208,6 +435,26 @@ export function ConversasSidebar() {
     return list;
   })();
 
+  const searchLower = search.trim().toLowerCase();
+  const filteredContacts = searchLower
+    ? contactsList.filter(
+        (c) =>
+          (c.contact_name ?? "").toLowerCase().includes(searchLower) ||
+          (c.first_name ?? "").toLowerCase().includes(searchLower) ||
+          (c.phone ?? "").toLowerCase().includes(searchLower) ||
+          (c.jid ?? "").toLowerCase().includes(searchLower)
+      )
+    : contactsList;
+
+  const filteredGroups = searchLower
+    ? groupsList.filter(
+        (g) =>
+          (g.name ?? "").toLowerCase().includes(searchLower) ||
+          (g.topic ?? "").toLowerCase().includes(searchLower) ||
+          (g.jid ?? "").toLowerCase().includes(searchLower)
+      )
+    : groupsList;
+
   const currentId = pathname?.split("/")[3] ?? null;
 
   // Infinite scroll: ao chegar perto do fim da lista, carrega mais conversas automaticamente.
@@ -225,65 +472,13 @@ export function ConversasSidebar() {
     return () => obs.disconnect();
   }, [hasMore, loadingMore, loading, filtered.length]);
 
-  // Preenche fotos progressivamente: no máximo MAX_AVATAR_PREFETCH por sessão; evita dezenas de chamadas.
-  useEffect(() => {
-    if (loading || !slug || !apiHeaders || baseList.length === 0) return;
-    if (avatarRequestedRef.current.size >= MAX_AVATAR_PREFETCH) return;
-    const needAvatar = baseList.filter(
-      (c) => !c.is_group && !(c.avatar_url && c.avatar_url.trim()) && c.channel_id && !avatarRequestedRef.current.has(c.id)
-    );
-    const remaining = MAX_AVATAR_PREFETCH - avatarRequestedRef.current.size;
-    const toFetch = needAvatar.slice(0, Math.min(remaining, MAX_AVATAR_PREFETCH));
-    if (toFetch.length === 0) return;
-    let cancelled = false;
-    const run = async () => {
-      for (let i = 0; i < toFetch.length && !cancelled; i++) {
-        const c = toFetch[i];
-        const number = (c.customer_phone || c.wa_chat_jid || c.external_id || "").replace(/\D/g, "").trim()
-          || (c.wa_chat_jid || c.external_id || "");
-        if (!number) continue;
-        avatarRequestedRef.current.add(c.id);
-        try {
-          const res = await fetch("/api/contacts/chat-details", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json", ...apiHeaders },
-            body: JSON.stringify({
-              channel_id: c.channel_id,
-              number,
-              preview: true,
-              conversation_id: c.id,
-            }),
-          });
-          if (cancelled) return;
-          const data = await res.json().catch(() => ({}));
-          const url =
-            (res.ok && data && typeof (data.imagePreview ?? data.image) === "string")
-              ? (data.imagePreview ?? data.image)
-              : null;
-          if (url) {
-            mutateConversations((prev) => {
-              if (!prev?.data) return prev ?? { data: [], total: 0 };
-              return {
-                ...prev,
-                data: prev.data.map((item) => (item.id === c.id ? { ...item, avatar_url: url } : item)),
-              };
-            }, { revalidate: false });
-          }
-        } catch {
-          avatarRequestedRef.current.delete(c.id);
-        }
-        if (i < toFetch.length - 1) await new Promise((r) => setTimeout(r, AVATAR_PREFETCH_DELAY_MS));
-      }
-    };
-    run();
-    return () => { cancelled = true; };
-  }, [loading, slug, baseList, apiHeaders, mutateConversations]);
+  // Fotos vêm do banco (channel_contacts.avatar_url). Atualizadas por sync-contacts ou quando
+  // o usuário abre o painel de informações e chama chat-details. Sem chamadas em loop à UAZAPI.
 
   return (
-    <aside className="flex min-h-0 w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden self-stretch">
-      <div className="flex shrink-0 items-center border-b border-[#E2E8F0] p-3">
-        <h2 className="text-lg font-semibold text-[#1E293B]">Conversas</h2>
+    <aside className="flex min-h-0 w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden self-stretch bg">
+      <div className="flex shrink-0 items-center p-3">
+        
       </div>
       <div className="shrink-0 p-2">
         <div className="relative">
@@ -297,13 +492,13 @@ export function ConversasSidebar() {
           />
         </div>
       </div>
-      {/* Tabs só com ícones + badges: Filas, Meus atendimentos, Contatos, Grupos — clicar filtra a lista */}
-      <div className="flex shrink-0 border-b border-[#E2E8F0] px-2 py-2">
-        <div className="flex items-center gap-1 rounded-lg bg-[#F1F5F9] p-1">
+      {/* Tabs com ícone + nome + badge: Filas, Meus, Contatos, Grupos — scroll horizontal se não couber */}
+      <div className="flex shrink-0 border-b border-[#E2E8F0] overflow-x-auto px-2 py-2 scrollbar-thin">
+        <div className="flex min-w-min flex-nowrap items-stretch gap-1 rounded-lg bg-[#F1F5F9] p-1">
           <button
             type="button"
-            onClick={() => setActiveTab("queues")}
-            className={`relative rounded-md p-2 transition-colors ${
+            onClick={() => handleTabChange("queues")}
+            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
               activeTab === "queues"
                 ? "bg-white text-clicvend-orange shadow-sm"
                 : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
@@ -311,17 +506,18 @@ export function ConversasSidebar() {
             title="Filas"
             aria-label="Filas"
           >
-            <Inbox className="h-5 w-5" />
+            <Inbox className="h-5 w-5 shrink-0" />
+            <span className="truncate text-xs font-medium">Filas</span>
             {counts.queues > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[#008F7A] px-1 text-[10px] font-semibold text-white shadow-sm">
                 {counts.queues > 99 ? "99+" : counts.queues}
               </span>
             )}
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("mine")}
-            className={`relative rounded-md p-2 transition-colors ${
+            onClick={() => handleTabChange("mine")}
+            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
               activeTab === "mine"
                 ? "bg-white text-clicvend-orange shadow-sm"
                 : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
@@ -329,9 +525,10 @@ export function ConversasSidebar() {
             title="Meus atendimentos"
             aria-label="Meus atendimentos"
           >
-            <UserCheck className="h-5 w-5" />
+            <UserCheck className="h-5 w-5 shrink-0" />
+            <span className="truncate text-xs font-medium">Meus</span>
             {counts.mine > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[#009B84] px-1 text-[10px] font-semibold text-white shadow-sm">
                 {counts.mine > 99 ? "99+" : counts.mine}
               </span>
             )}
@@ -339,7 +536,7 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => setActiveTab("contacts")}
-            className={`relative rounded-md p-2 transition-colors ${
+            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
               activeTab === "contacts"
                 ? "bg-white text-clicvend-orange shadow-sm"
                 : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
@@ -347,17 +544,13 @@ export function ConversasSidebar() {
             title="Contatos (conversas individuais)"
             aria-label="Contatos"
           >
-            <User className="h-5 w-5" />
-            {counts.individual > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
-                {counts.individual > 99 ? "99+" : counts.individual}
-              </span>
-            )}
+            <User className="h-5 w-5 shrink-0" />
+            <span className="truncate text-xs font-medium">Contatos</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("groups")}
-            className={`relative rounded-md p-2 transition-colors ${
+            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
               activeTab === "groups"
                 ? "bg-white text-clicvend-orange shadow-sm"
                 : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
@@ -365,18 +558,83 @@ export function ConversasSidebar() {
             title="Grupos"
             aria-label="Grupos"
           >
-            <Users className="h-5 w-5" />
+            <Users className="h-5 w-5 shrink-0" />
+            <span className="truncate text-xs font-medium">Grupos</span>
             {counts.groups > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-semibold text-white">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[#00C4A7] px-1 text-[10px] font-semibold text-white shadow-sm">
                 {counts.groups > 99 ? "99+" : counts.groups}
               </span>
             )}
           </button>
         </div>
       </div>
+      {activeTab === "mine" && counts.mine > 0 && (
+        <div className="shrink-0 border-b border-[#E2E8F0] px-2 py-1.5">
+          <button
+            type="button"
+            onClick={async () => {
+              if (unassigning) return;
+              setUnassigning(true);
+              try {
+                const res = await fetch("/api/conversations/unassign-my-tickets", {
+                  method: "POST",
+                  credentials: "include",
+                  headers: apiHeaders ?? {},
+                });
+                if (res.ok) {
+                  queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
+                  queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
+                  queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
+                }
+              } finally {
+                setUnassigning(false);
+              }
+            }}
+            disabled={unassigning}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-[#E2E8F0] bg-[#F8FAFC] py-2 text-xs font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] disabled:opacity-60"
+          >
+            {unassigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Esvaziar Meus
+          </button>
+        </div>
+      )}
       {/* Lista com rolagem própria — scrollbar sempre visível na janela da lista */}
       <div className="scroll-area-conversas scroll-area flex-1 min-h-0 overflow-x-hidden overscroll-contain">
-        {loading ? (
+        {activeTab === "contacts" ? (
+          contactsLoading ? (
+            <ConversationListSkeleton count={8} />
+          ) : filteredContacts.length === 0 ? (
+            <div className="p-4 text-center text-sm text-[#64748B]">
+              <p className="font-medium text-[#1E293B]">Nenhum contato</p>
+              <p className="mt-1 text-xs">
+                Sincronize contatos em <Link href={`${base}/contatos`} className="text-clicvend-orange hover:underline">Contatos e grupos</Link> ou conecte um número em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link>.
+              </p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-[#E2E8F0]">
+              {filteredContacts.map((c) => (
+                <ContactListItem key={c.id} contact={c} base={base} apiHeaders={apiHeaders} />
+              ))}
+            </ul>
+          )
+        ) : activeTab === "groups" ? (
+          groupsLoading ? (
+            <ConversationListSkeleton count={8} />
+          ) : filteredGroups.length === 0 ? (
+            <div className="p-4 text-center text-sm text-[#64748B]">
+              <p className="font-medium text-[#1E293B]">Nenhum grupo</p>
+              <p className="mt-1 text-xs">
+                Sincronize em <Link href={`${base}/contatos`} className="text-clicvend-orange hover:underline">Contatos e grupos</Link> (botão do canal) ou conecte o número em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link>.
+              </p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-[#E2E8F0]">
+              {filteredGroups.map((g) => (
+                <GroupListItem key={g.id} group={g} base={base} apiHeaders={apiHeaders} />
+              ))}
+            </ul>
+          )
+        ) : loading ? (
           <ConversationListSkeleton count={8} />
         ) : conversationsError ? (
           <div className="p-4 text-center text-sm">
@@ -387,7 +645,7 @@ export function ConversasSidebar() {
             </p>
             <button
               type="button"
-              onClick={() => mutateConversations()}
+              onClick={() => refetchConversations()}
               className="mt-3 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark"
             >
               Tentar novamente
@@ -399,8 +657,6 @@ export function ConversasSidebar() {
             <p className="mt-1 text-xs">
               {activeTab === "mine" && "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."}
               {activeTab === "queues" && "Nenhuma conversa nas suas filas no momento."}
-              {activeTab === "contacts" && "Nenhuma conversa individual."}
-              {activeTab === "groups" && "Nenhum grupo."}
             </p>
             <p className="mt-2 text-xs">
               Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link> recebem mensagens e histórico em segundo plano.
@@ -415,6 +671,27 @@ export function ConversasSidebar() {
                 conversation={c}
                 base={base}
                 currentId={currentId}
+                canClaim={Array.isArray(permissionsData?.permissions) && permissionsData.permissions.includes("inbox.claim")}
+                onClaim={async (conversationId) => {
+                  const res = await fetch(`/api/conversations/${conversationId}/claim`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: apiHeaders ?? {},
+                  });
+                  if (res.ok) {
+                    queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", viewMode) });
+                  }
+                }}
+                onHover={slug ? (id) => {
+                  queryClient.prefetchQuery({
+                    queryKey: queryKeys.conversation(id),
+                    queryFn: () =>
+                      fetch(`/api/conversations/${id}`, {
+                        credentials: "include",
+                        headers: apiHeaders,
+                      }).then((r) => r.json()),
+                  });
+                } : undefined}
               />
             ))}
           </ul>
@@ -423,7 +700,7 @@ export function ConversasSidebar() {
             <div className="border-t border-[#E2E8F0] p-2">
               <button
                 type="button"
-                onClick={loadMore}
+                onClick={() => loadMore()}
                 disabled={loadingMore}
                 className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-60"
               >

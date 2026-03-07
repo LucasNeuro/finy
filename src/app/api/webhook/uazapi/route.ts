@@ -197,6 +197,7 @@ async function processOneMessage(
     type CachedChannel = { id: string; company_id: string; queue_id: string | null };
     let channel: CachedChannel | null = null;
 
+    // Cache Redis aqui só para o fluxo de atendimento (evitar hit no banco a cada mensagem). Telas de Conexões/canais não usam Redis.
     const redis = await getRedisClient();
     const cacheKey = `uaz:instance:${instanceId}`;
 

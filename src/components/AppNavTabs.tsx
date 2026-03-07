@@ -26,7 +26,7 @@ const swrOpts = { revalidateOnFocus: false, dedupingInterval: 60_000 };
 const ALL_TABS = [
   // Atendimento / Conversas
   { href: "/conversas", label: "Conversas", icon: MessageSquare, requires: "inbox.read" as const },
-  { href: "/tickets", label: "Tickets", icon: Ticket, requires: "inbox.see_all" as const },
+  { href: "/tickets", label: "Tickets", icon: Ticket, requires: "tickets.view" as const },
   // Conexões
   { href: "/conexoes", label: "Conexões", icon: Plug, requires: "channels.view" as const },
   // Filas
@@ -72,10 +72,10 @@ export function AppNavTabs() {
           <Link
             key={href}
             href={fullHref}
-            className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex shrink-0 items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
               isActive
-                ? "border-clicvend-green text-clicvend-green"
-                : "border-transparent text-white/60 hover:border-white/20 hover:text-white"
+                ? "text-clicvend-green"
+                : "text-white/60 hover:text-white"
             }`}
           >
             <Icon className="h-4 w-4 shrink-0" />

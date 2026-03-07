@@ -19,6 +19,12 @@ import {
   Crown,
   UserCog,
   Copy,
+  FolderOpen,
+  Bell,
+  Star,
+  LockKeyhole,
+  Sparkles,
+  Trash2,
 } from "lucide-react";
 import type { Group } from "./GroupDetailSideOver";
 import { FileDropzone } from "@/components/FileDropzone";
@@ -28,6 +34,64 @@ type GroupParticipant = {
   IsAdmin?: boolean;
   [key: string]: unknown;
 };
+
+function GenerateDescriptionButton({
+  type,
+  field = "description",
+  name,
+  context,
+  apiHeaders,
+  onGenerated,
+  onError,
+  disabled,
+  className = "",
+}: {
+  type: "community" | "group";
+  field?: "description" | "name";
+  name: string;
+  context?: string;
+  apiHeaders: Record<string, string> | undefined;
+  onGenerated: (text: string) => void;
+  onError: (msg: string | null) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [loading, setLoading] = useState(false);
+  const label = field === "name" ? "Gerar nome com IA" : "Gerar com IA";
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        setLoading(true);
+        onError(null);
+        try {
+          const res = await fetch("/api/ai/generate-description", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({ type, field, name: name || undefined, context: context || undefined }),
+          });
+          const data = await res.json();
+          if (res.ok && typeof data?.text === "string") {
+            onGenerated(data.text);
+          } else {
+            onError(data?.error ?? (field === "name" ? "Falha ao gerar nome com IA." : "Falha ao gerar descrição com IA."));
+          }
+        } catch {
+          onError("Erro de rede ao gerar com IA.");
+        } finally {
+          setLoading(false);
+        }
+      }}
+      disabled={disabled || loading}
+      className={`shrink-0 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-50 inline-flex items-center gap-1.5 ${className}`}
+      title={field === "name" ? "Gerar nome com Mistral AI" : "Gerar descrição com Mistral AI"}
+    >
+      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+      {label}
+    </button>
+  );
+}
 
 type GroupInfo = {
   JID?: string;
@@ -91,6 +155,7 @@ export function GroupManageSideOver({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("info");
   const [leaving, setLeaving] = useState(false);
+  const [deletingFromList, setDeletingFromList] = useState(false);
 
   const apiHeaders = useMemo(
     () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
@@ -148,16 +213,41 @@ export function GroupManageSideOver({
       .finally(() => setLeaving(false));
   };
 
+  const handleDeleteFromList = async () => {
+    if (!group?.jid || !group?.channel_id || !window.confirm("Excluir este grupo/comunidade da lista e sair no WhatsApp? Esta ação não pode ser desfeita.")) return;
+    setDeletingFromList(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/groups/delete", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ channel_id: group.channel_id, groupjid: group.jid, leave_first: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        onLeaveSuccess?.();
+        onClose();
+      } else {
+        setError(data?.error ?? "Falha ao excluir");
+      }
+    } catch {
+      setError("Erro de rede ao excluir");
+    } finally {
+      setDeletingFromList(false);
+    }
+  };
+
   if (!group) {
     return (
-      <SideOver open={open} onClose={onClose} title="Gerenciar grupos e comunidades" width={800}>
+      <SideOver open={open} onClose={onClose} title="Gerenciar grupos e comunidades" width={880}>
         <p className="text-sm text-[#64748B]">Nenhum grupo selecionado.</p>
       </SideOver>
     );
   }
 
   return (
-    <SideOver open={open} onClose={onClose} title="Gerenciar grupos e comunidades" width={800}>
+    <SideOver open={open} onClose={onClose} title="Gerenciar grupos e comunidades" width={880}>
       <div className="flex flex-col gap-4">
         {loading && (
           <div className="flex items-center justify-center py-12">
@@ -203,7 +293,8 @@ export function GroupManageSideOver({
                 topic={topic}
                 inviteLink={inviteLink}
                 info={info}
-                participantsCount={participants.length}
+                participants={participants}
+                onGoToParticipants={() => setActiveTab("participants")}
               />
             )}
             {activeTab === "config" && (
@@ -240,7 +331,10 @@ export function GroupManageSideOver({
               />
             )}
             {activeTab === "leave" && (
-              <div className="border-t border-[#E2E8F0] pt-4">
+              <div className="border-t border-[#E2E8F0] pt-4 space-y-3">
+                <p className="text-sm text-[#64748B]">
+                  Sair do grupo remove o número do grupo no WhatsApp. Excluir da lista também remove da nossa lista e sai no WhatsApp.
+                </p>
                 <button
                   type="button"
                   onClick={handleLeave}
@@ -249,6 +343,15 @@ export function GroupManageSideOver({
                 >
                   {leaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
                   Sair do grupo
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteFromList}
+                  disabled={leaving || deletingFromList}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-100 px-4 py-3 text-sm font-medium text-red-800 hover:bg-red-200 disabled:opacity-60"
+                >
+                  {deletingFromList ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                  Excluir da lista e sair
                 </button>
               </div>
             )}
@@ -264,33 +367,121 @@ function GroupInfoTab({
   topic,
   inviteLink,
   info,
-  participantsCount,
+  participants,
+  onGoToParticipants,
 }: {
   displayName: string;
   topic: string | null;
   inviteLink: string | null;
   info: GroupInfo;
-  participantsCount: number;
+  participants: GroupParticipant[];
+  onGoToParticipants: () => void;
 }) {
+  const formatJid = (jid: string) => jid.replace(/@s\.whatsapp\.net$/, "").replace(/@.*$/, "");
   return (
-    <div className="space-y-3 text-sm">
+    <div className="space-y-0 text-sm">
       {topic ? (
-        <div>
-          <dt className="text-[#64748B] font-medium">Descrição</dt>
-          <dd className="text-[#1E293B] break-words mt-0.5">{topic}</dd>
+        <div className="py-3 border-b border-[#E2E8F0]">
+          <p className="text-[#64748B] text-xs font-medium uppercase tracking-wider mb-0.5">Descrição</p>
+          <p className="text-[#1E293B] break-words">{topic}</p>
         </div>
       ) : null}
+
+      <button
+        type="button"
+        className="w-full flex items-center justify-between py-3 border-b border-[#E2E8F0] text-left hover:bg-[#F8FAFC] rounded-lg -mx-1 px-1"
+      >
+        <span className="flex items-center gap-3 text-[#1E293B]">
+          <FolderOpen className="h-5 w-5 text-[#94A3B8]" />
+          Mídia, links e docs
+        </span>
+        <span className="text-[#94A3B8] text-xs">0</span>
+      </button>
+
+      <div className="py-3 border-b border-[#E2E8F0]">
+        <button
+          type="button"
+          onClick={onGoToParticipants}
+          className="w-full flex items-center justify-between text-left hover:bg-[#F8FAFC] rounded-lg -mx-1 px-1 py-1"
+        >
+          <span className="flex items-center gap-3 text-[#1E293B]">
+            <Users className="h-5 w-5 text-[#94A3B8]" />
+            Participantes
+          </span>
+          <span className="text-[#94A3B8] text-xs">{participants.length}</span>
+        </button>
+        <ul className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+          {participants.slice(0, 8).map((p) => {
+            const jid = p.JID ?? "";
+            const isAdmin = p.IsAdmin === true;
+            return (
+              <li key={jid} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-[#F8FAFC]">
+                <div className="h-8 w-8 rounded-full bg-[#E2E8F0] flex items-center justify-center shrink-0">
+                  {isAdmin ? <Crown className="h-4 w-4 text-amber-500" /> : <UserCog className="h-4 w-4 text-[#94A3B8]" />}
+                </div>
+                <span className="text-[#1E293B] truncate">{formatJid(jid)}</span>
+              </li>
+            );
+          })}
+        </ul>
+        {participants.length > 8 && (
+          <button
+            type="button"
+            onClick={onGoToParticipants}
+            className="text-clicvend-orange text-xs font-medium mt-1 hover:underline"
+          >
+            Ver todos os {participants.length} participantes
+          </button>
+        )}
+      </div>
+
+      <button
+        type="button"
+        className="w-full flex items-center gap-3 py-3 border-b border-[#E2E8F0] text-[#1E293B] hover:bg-[#F8FAFC] rounded-lg -mx-1 px-1"
+      >
+        <Star className="h-5 w-5 text-[#94A3B8]" />
+        Mensagens favoritas
+      </button>
+      <button
+        type="button"
+        className="w-full flex items-center gap-3 py-3 border-b border-[#E2E8F0] text-[#1E293B] hover:bg-[#F8FAFC] rounded-lg -mx-1 px-1"
+      >
+        <Bell className="h-5 w-5 text-[#94A3B8]" />
+        Configurações de notificação
+      </button>
+      <div className="py-3 border-b border-[#E2E8F0]">
+        <div className="flex items-center gap-3">
+          <LockKeyhole className="h-5 w-5 text-[#94A3B8] shrink-0" />
+          <div>
+            <p className="font-medium text-[#1E293B]">Criptografia</p>
+            <p className="text-xs text-[#64748B] mt-0.5">
+              As mensagens são protegidas com a criptografia de ponta a ponta. Clique para saber mais.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 pt-3">
+        <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
+          <Shield className="h-3.5 w-3.5" />
+          {info.IsAnnounce ? "Só admins enviam" : "Todos podem enviar"}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
+          <Lock className="h-3.5 w-3.5" />
+          {info.IsLocked ? "Só admins editam" : "Todos podem editar"}
+        </span>
+      </div>
       {inviteLink ? (
-        <div>
-          <dt className="text-[#64748B] font-medium flex items-center gap-1">
+        <div className="pt-3 border-t border-[#E2E8F0]">
+          <p className="text-[#64748B] font-medium mb-1 flex items-center gap-1">
             <Link2 className="h-3.5 w-3.5" /> Link de convite
-          </dt>
-          <dd className="mt-1 flex items-center gap-2 flex-wrap">
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
             <a
               href={inviteLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-clicvend-orange hover:underline break-all"
+              className="text-clicvend-orange hover:underline break-all text-xs"
             >
               {inviteLink}
             </a>
@@ -302,20 +493,9 @@ function GroupInfoTab({
               <Copy className="h-3.5 w-3.5" />
               Copiar
             </button>
-          </dd>
+          </div>
         </div>
       ) : null}
-      <div className="flex flex-wrap gap-2">
-        <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
-          <Shield className="h-3.5 w-3.5" />
-          {info.IsAnnounce ? "Só admins enviam" : "Todos podem enviar"}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
-          <Lock className="h-3.5 w-3.5" />
-          {info.IsLocked ? "Só admins editam" : "Todos podem editar"}
-        </span>
-      </div>
-      <p className="text-xs text-[#94A3B8]">{participantsCount} participante(s).</p>
     </div>
   );
 }
@@ -338,7 +518,7 @@ function GroupConfigTab({
   const [imageUploading, setImageUploading] = useState(false);
   const [announce, setAnnounce] = useState(info?.IsAnnounce ?? false);
   const [locked, setLocked] = useState(info?.IsLocked ?? false);
-  const [saving, setSaving] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
   const [resettingLink, setResettingLink] = useState(false);
 
   useEffect(() => {
@@ -351,14 +531,41 @@ function GroupConfigTab({
   }, [info, group.name, group.topic]);
 
   const base = { channel_id: group.channel_id, groupjid: group.jid };
+  const currentName = (info?.Name ?? group.name ?? "").trim();
+  const currentDesc = info?.Topic ?? group.topic ?? "";
+  const currentAnnounce = info?.IsAnnounce ?? false;
+  const currentLocked = info?.IsLocked ?? false;
+  const hasChanges =
+    name.trim() !== currentName ||
+    description.trim() !== currentDesc ||
+    announce !== currentAnnounce ||
+    locked !== currentLocked;
 
-  const save = (key: string, body: Record<string, unknown>, endpoint: string) => {
-    setSaving(key);
+  const handleSaveAll = () => {
+    if (!hasChanges) return;
+    setSavingAll(true);
     onError(null);
-    apiCall(endpoint, body, apiHeaders).then(({ ok, error: err }) => {
-      setSaving(null);
-      if (ok) onSuccess();
-      else onError(err ?? "Falha ao salvar");
+    const promises: Promise<{ ok: boolean; error?: string }>[] = [];
+    if (name.trim() !== currentName && name.trim()) {
+      promises.push(apiCall("/api/groups/update-name", { ...base, name: name.trim() }, apiHeaders));
+    }
+    if (description.trim() !== currentDesc) {
+      promises.push(apiCall("/api/groups/update-description", { ...base, description: description.trim() }, apiHeaders));
+    }
+    if (announce !== currentAnnounce) {
+      promises.push(apiCall("/api/groups/update-announce", { ...base, announce }, apiHeaders));
+    }
+    if (locked !== currentLocked) {
+      promises.push(apiCall("/api/groups/update-locked", { ...base, locked }, apiHeaders));
+    }
+    Promise.all(promises).then((results) => {
+      setSavingAll(false);
+      const failed = results.find((r) => !r.ok);
+      if (failed?.error) {
+        onError(failed.error);
+        return;
+      }
+      onSuccess();
     });
   };
 
@@ -376,7 +583,7 @@ function GroupConfigTab({
   return (
     <div className="space-y-4 text-sm">
       <p className="text-xs text-[#64748B] mb-1">
-        As alterações são salvas automaticamente na instância e refletem na lista de grupos.
+        Edite os campos abaixo e clique em <strong>Salvar</strong> para que as alterações reflitam no grupo no WhatsApp.
       </p>
       <div>
         <label className="block text-[#64748B] font-medium mb-1">Nome do grupo</label>
@@ -384,14 +591,20 @@ function GroupConfigTab({
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onBlur={() => {
-            const v = name.trim();
-            if (v && v !== (info?.Name ?? group.name ?? "")) {
-              save("name", { ...base, name: v }, "/api/groups/update-name");
-            }
-          }}
-          disabled={saving === "name"}
+          disabled={savingAll}
+          placeholder="Nome do grupo"
+          maxLength={25}
           className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] disabled:opacity-60"
+        />
+        <GenerateDescriptionButton
+          type="group"
+          field="name"
+          name={name.trim()}
+          apiHeaders={apiHeaders}
+          onGenerated={setName}
+          onError={onError}
+          disabled={!!savingAll}
+          className="mt-2"
         />
       </div>
       <div>
@@ -399,16 +612,19 @@ function GroupConfigTab({
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => {
-            const v = description.trim();
-            if (v !== (info?.Topic ?? group.topic ?? "")) {
-              save("description", { ...base, description: v }, "/api/groups/update-description");
-            }
-          }}
-          disabled={saving === "description"}
+          disabled={savingAll}
           rows={4}
           placeholder="Descrição do grupo"
           className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] disabled:opacity-60 resize-y min-h-[80px]"
+        />
+        <GenerateDescriptionButton
+          type="group"
+          name={(info?.Name ?? group.name ?? "").trim()}
+          apiHeaders={apiHeaders}
+          onGenerated={setDescription}
+          onError={onError}
+          disabled={!!savingAll}
+          className="mt-2"
         />
       </div>
       <div>
@@ -417,7 +633,7 @@ function GroupConfigTab({
           accept="image/*"
           maxSize={5 * 1024 * 1024}
           loading={imageUploading}
-          disabled={!!saving}
+          disabled={!!savingAll}
           label="Arraste uma imagem ou clique para selecionar"
           onFileSelect={async (file) => {
             setImageUploading(true);
@@ -471,7 +687,7 @@ function GroupConfigTab({
         <button
           type="button"
           onClick={handleResetInvite}
-          disabled={resettingLink}
+          disabled={resettingLink || savingAll}
           className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-60"
         >
           {resettingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -484,8 +700,8 @@ function GroupConfigTab({
           type="button"
           role="switch"
           aria-checked={!announce}
-          onClick={() => save("announce", { ...base, announce: !announce }, "/api/groups/update-announce")}
-          disabled={saving === "announce"}
+          onClick={() => setAnnounce((prev) => !prev)}
+          disabled={savingAll}
           className={`relative h-6 w-11 rounded-full transition-colors ${announce ? "bg-[#E2E8F0]" : "bg-clicvend-orange"}`}
         >
           <span
@@ -499,13 +715,24 @@ function GroupConfigTab({
           type="button"
           role="switch"
           aria-checked={!locked}
-          onClick={() => save("locked", { ...base, locked: !locked }, "/api/groups/update-locked")}
-          disabled={saving === "locked"}
+          onClick={() => setLocked((prev) => !prev)}
+          disabled={savingAll}
           className={`relative h-6 w-11 rounded-full transition-colors ${locked ? "bg-clicvend-orange" : "bg-[#E2E8F0]"}`}
         >
           <span
             className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${locked ? "left-6" : "left-1"}`}
           />
+        </button>
+      </div>
+      <div className="pt-2 border-t border-[#E2E8F0]">
+        <button
+          type="button"
+          onClick={handleSaveAll}
+          disabled={!hasChanges || savingAll}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-clicvend-orange px-4 py-3 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50 disabled:pointer-events-none"
+        >
+          {savingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Salvar alterações
         </button>
       </div>
     </div>

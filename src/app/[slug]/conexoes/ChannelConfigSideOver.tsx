@@ -566,7 +566,7 @@ export function ChannelConfigSideOver({
       open={open}
       onClose={onClose}
       title={`Configurar: ${channelName}`}
-      width={720}
+      width={880}
     >
       <div className="flex flex-col gap-4">
         <div className="flex gap-1 overflow-x-auto pb-2 -mx-1">

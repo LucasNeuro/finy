@@ -2,17 +2,48 @@
 
 import { getRedisClient } from "@/lib/redis/client";
 
+/**
+ * Cache Redis APENAS para operação de atendimento (tickets e chats).
+ *
+ * Regra: tudo que NÃO é chat e tickets fica FORA do Redis — chamada direta ao banco e à UAZAPI.
+ * Redis só para gerenciar e deixar veloz: atendimento e gerenciamento de tickets.
+ *
+ * Onde o Redis é usado:
+ * - GET /api/conversations (lista de conversas / tickets)
+ * - GET /api/conversations/[id] (detalhe do chat)
+ * - GET /api/conversations/counts (badges da sidebar)
+ *
+ * Onde NÃO usamos Redis (sempre Supabase / UAZAPI quando aplicável):
+ * - GET /api/contacts, GET /api/groups (Contatos e grupos — dados completos)
+ * - GET /api/roles (Cargos)
+ * - GET /api/queues (Filas, inclusive números vinculados)
+ *
+ * Fluxo: Supabase = fonte da verdade. Redis = cache quente só para lista/detalhe/counts
+ * de conversas. UAZAPI = chamada sob demanda (ex.: chat-details ao abrir painel, sync ao clicar Sincronizar).
+ *
+ * TTLs (segundos): lista 50, tickets 55, detalhe 90, contagens 45.
+ */
 const KEY_PREFIX = "inbox:list:";
-/** Lista de conversas: TTL curto para dados mais atualizados (fotos, status, atribuição). */
-const TTL_SECONDS = 30;
+/** Lista: TTL para atendimento fluido (troca de abas, volta à lista). Estilo Zendesk. */
+const TTL_SECONDS = 50;
+/** Tickets (includeClosed). */
+const TTL_TICKETS_SECONDS = 55;
 
 /**
  * Chave de cache para lista de conversas (estado quente).
  * Usado para que a aplicação leia estado de tickets/conversas do Redis
  * em vez de bater no banco a cada requisição.
  */
-function listKey(companyId: string, queueId: string, status: string, onlyAssigned: string): string {
-  return `${KEY_PREFIX}${companyId}:${queueId}:${status}:${onlyAssigned}`;
+function listKey(
+  companyId: string,
+  queueId: string,
+  status: string,
+  onlyAssigned: string,
+  includeClosed: string,
+  offset: number,
+  limit: number
+): string {
+  return `${KEY_PREFIX}${companyId}:${queueId}:${status}:${onlyAssigned}:${includeClosed}:${offset}:${limit}`;
 }
 
 /**
@@ -22,12 +53,15 @@ export async function getCachedConversationList(
   companyId: string,
   queueId: string,
   status: string,
-  onlyAssigned: string
+  onlyAssigned: string,
+  includeClosed = false,
+  offset = 0,
+  limit = 100
 ): Promise<{ data: unknown[]; total: number } | null> {
   const redis = await getRedisClient();
   if (!redis) return null;
   try {
-    const key = listKey(companyId, queueId, status, onlyAssigned);
+    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", offset, limit);
     const raw = await redis.get(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { data: unknown[]; total: number };
@@ -45,13 +79,17 @@ export async function setCachedConversationList(
   queueId: string,
   status: string,
   onlyAssigned: string,
-  payload: { data: unknown[]; total: number }
+  payload: { data: unknown[]; total: number },
+  includeClosed = false,
+  offset = 0,
+  limit = 100
 ): Promise<void> {
   const redis = await getRedisClient();
   if (!redis) return;
   try {
-    const key = listKey(companyId, queueId, status, onlyAssigned);
-    await redis.set(key, JSON.stringify(payload), { EX: TTL_SECONDS });
+    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", offset, limit);
+    const ttl = includeClosed ? TTL_TICKETS_SECONDS : TTL_SECONDS;
+    await redis.set(key, JSON.stringify(payload), { EX: ttl });
   } catch {
     // ignore
   }
@@ -71,14 +109,67 @@ export async function invalidateConversationList(companyId: string): Promise<voi
     if (keys.length > 0) {
       await redis.del(keys);
     }
+    await invalidateCounts(companyId);
+  } catch {
+    // ignore
+  }
+}
+
+const COUNTS_KEY_PREFIX = "inbox:counts:";
+const COUNTS_TTL_SECONDS = 45;
+
+/** Retorna as contagens (mine, queues, individual, groups) do cache, se existirem. */
+export async function getCachedCounts(
+  companyId: string,
+  userId: string
+): Promise<{ mine: number; queues: number; individual: number; groups: number } | null> {
+  const redis = await getRedisClient();
+  if (!redis) return null;
+  try {
+    const key = `${COUNTS_KEY_PREFIX}${companyId}:${userId}`;
+    const raw = await redis.get(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { mine: number; queues: number; individual: number; groups: number };
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Grava as contagens no cache (badges da sidebar). */
+export async function setCachedCounts(
+  companyId: string,
+  userId: string,
+  payload: { mine: number; queues: number; individual: number; groups: number }
+): Promise<void> {
+  const redis = await getRedisClient();
+  if (!redis) return;
+  try {
+    const key = `${COUNTS_KEY_PREFIX}${companyId}:${userId}`;
+    await redis.set(key, JSON.stringify(payload), { EX: COUNTS_TTL_SECONDS });
+  } catch {
+    // ignore
+  }
+}
+
+/** Invalida o cache de contagens da empresa (todas as combinações companyId:userId). */
+export async function invalidateCounts(companyId: string): Promise<void> {
+  const redis = await getRedisClient();
+  if (!redis) return;
+  try {
+    const pattern = `${COUNTS_KEY_PREFIX}${companyId}:*`;
+    const keys = await redis.keys(pattern);
+    if (keys.length > 0) {
+      await redis.del(keys);
+    }
   } catch {
     // ignore
   }
 }
 
 const DETAIL_KEY_PREFIX = "inbox:detail:";
-/** Detalhe da conversa (chat): TTL curto para mensagens e avatar atualizados. */
-const DETAIL_TTL_SECONDS = 60;
+/** Detalhe do chat: TTL para abrir conversa instantâneo ao trocar. Estilo Zendesk. */
+const DETAIL_TTL_SECONDS = 90;
 
 /**
  * Cache do detalhe da conversa (mensagens + metadados) para abrir o chat rápido.

@@ -31,6 +31,8 @@ type GroupInfo = {
   IsAnnounce?: boolean;
   IsCommunity?: boolean;
   Participants?: GroupParticipant[];
+  /** true quando os dados vieram do banco (número não está mais no grupo na API) */
+  fromDb?: boolean;
   [key: string]: unknown;
 };
 
@@ -77,8 +79,13 @@ export function GroupDetailSideOver({
     })
       .then(async (r) => {
         const data = await r.json();
-        if (r.ok) setInfo(data);
-        else setError(data?.error ?? "Falha ao carregar informações do grupo");
+        if (r.ok) {
+          setInfo(data);
+          setError(null);
+        } else {
+          setError(data?.error ?? "Falha ao carregar informações do grupo");
+          setInfo(null);
+        }
       })
       .catch(() => setError("Erro de rede"))
       .finally(() => setLoading(false));
@@ -96,6 +103,8 @@ export function GroupDetailSideOver({
   const topic = info?.Topic ?? group?.topic ?? null;
   const inviteLink = info?.InviteLink ?? group?.invite_link ?? null;
   const participants = info?.Participants ?? [];
+  const fromDb = Boolean(info?.fromDb);
+  const hasAnyInfo = !loading && (info || group);
 
   const handleLeave = () => {
     if (!group || !window.confirm("Tem certeza que deseja sair deste grupo?")) return;
@@ -119,7 +128,7 @@ export function GroupDetailSideOver({
   };
 
   return (
-    <SideOver open={open} onClose={onClose} title="Detalhes do grupo" width={440}>
+    <SideOver open={open} onClose={onClose} title="Detalhes do grupo" width={600}>
       {!group ? (
         <p className="text-sm text-[#64748B]">Nenhum grupo selecionado.</p>
       ) : (
@@ -131,10 +140,17 @@ export function GroupDetailSideOver({
           )}
           {error && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              {error}
+              {error.toLowerCase().includes("not participating") || error.toLowerCase().includes("you're not")
+                ? "O número não participa mais deste grupo no WhatsApp. Os dados abaixo são os que temos salvos. Use Sincronizar no canal para atualizar a lista."
+                : error}
             </div>
           )}
-          {!loading && info && (
+          {fromDb && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Informações do banco de dados. O número pode não estar mais neste grupo — use <strong>Sincronizar</strong> no canal para atualizar.
+            </p>
+          )}
+          {hasAnyInfo && (
             <>
               <div className="flex flex-col items-center gap-2 border-b border-[#E2E8F0] pb-4">
                 <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0] flex items-center justify-center">
@@ -150,6 +166,8 @@ export function GroupDetailSideOver({
                     <dt className="text-[#64748B] font-medium">Descrição</dt>
                     <dd className="text-[#1E293B] break-words mt-0.5">{topic}</dd>
                   </div>
+                ) : displayName === "—" ? (
+                  <p className="text-[#64748B]">Nome e descrição ainda não carregados. Use <strong>Sincronizar</strong> no canal ou abra o grupo no WhatsApp para atualizar.</p>
                 ) : null}
                 {inviteLink ? (
                   <div>
@@ -177,32 +195,38 @@ export function GroupDetailSideOver({
                     </dd>
                   </div>
                 ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
-                    <Shield className="h-3.5 w-3.5" />
-                    {info.IsAnnounce ? "Só admins enviam" : "Todos podem enviar"}
-                  </span>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
-                    <Lock className="h-3.5 w-3.5" />
-                    {info.IsLocked ? "Só admins editam" : "Todos podem editar"}
-                  </span>
-                </div>
-                <p className="text-xs text-[#94A3B8]">
-                  {participants.length} participante(s).
-                </p>
+                {info && !fromDb && (
+                  <div className="flex flex-wrap gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
+                      <Shield className="h-3.5 w-3.5" />
+                      {info.IsAnnounce ? "Só admins enviam" : "Todos podem enviar"}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2.5 py-1 text-xs text-[#64748B]">
+                      <Lock className="h-3.5 w-3.5" />
+                      {info.IsLocked ? "Só admins editam" : "Todos podem editar"}
+                    </span>
+                  </div>
+                )}
+                {info && (participants.length > 0 || !fromDb) && (
+                  <p className="text-xs text-[#94A3B8]">
+                    {participants.length} participante(s).
+                  </p>
+                )}
               </div>
 
-              <div className="border-t border-[#E2E8F0] pt-4">
-                <button
-                  type="button"
-                  onClick={handleLeave}
-                  disabled={leaving}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
-                >
-                  {leaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-                  Sair do grupo
-                </button>
-              </div>
+              {info && (
+                <div className="border-t border-[#E2E8F0] pt-4">
+                  <button
+                    type="button"
+                    onClick={handleLeave}
+                    disabled={leaving}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
+                  >
+                    {leaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                    Sair do grupo
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

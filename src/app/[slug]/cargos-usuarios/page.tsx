@@ -616,7 +616,7 @@ export default function CargosUsuariosPage() {
         open={roleSideOverOpen}
         onClose={() => setRoleSideOverOpen(false)}
         title={editingRole ? `Cargo: ${editingRole.name}` : "Novo cargo"}
-        width={600}
+        width={680}
       >
         <div className="flex flex-col gap-4">
           <div className="flex gap-1 overflow-x-auto pb-2 -mx-1">
@@ -656,8 +656,8 @@ export default function CargosUsuariosPage() {
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-[#334155]">Permissões</label>
-                <p className="mb-2 text-xs text-[#64748B]">Marque as liberações que este cargo terá na plataforma.</p>
-                <div className="space-y-4 max-h-[320px] overflow-auto rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                <p className="mb-2 text-xs text-[#64748B]">Marque os acessos e ações que este cargo terá em cada módulo.</p>
+                <div className="space-y-4 max-h-[420px] overflow-auto rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
                   {PERMISSION_GROUPS.map((group) => (
                     <div key={group.label}>
                       <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[#64748B]">{group.label}</p>
@@ -758,7 +758,7 @@ export default function CargosUsuariosPage() {
           }
         }}
         title={userSideOverTab === "form" ? (editingUser ? `Editar: ${editingUser.email ?? "Usuário"}` : "Novo usuário") : "Gestão de usuários"}
-        width={760}
+        width={840}
       >
         <div className="flex flex-col gap-4">
           <div className="flex gap-1 overflow-x-auto pb-2 -mx-1">

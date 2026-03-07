@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { SideOver } from "@/components/SideOver";
-import { Loader2, User, Ban } from "lucide-react";
+import { Loader2, User, Ban, UserPlus, UserMinus } from "lucide-react";
 
 export type Contact = {
   id: string;
@@ -11,6 +11,7 @@ export type Contact = {
   phone: string | null;
   contact_name: string | null;
   first_name: string | null;
+  avatar_url?: string | null;
   synced_at: string;
 };
 
@@ -24,12 +25,80 @@ export type ChatDetails = {
   imagePreview?: string;
   wa_isBlocked?: boolean;
   wa_isGroup?: boolean;
+  wa_archived?: boolean;
   common_groups?: string;
   lead_name?: string;
+  lead_fullName?: string;
   lead_email?: string;
   lead_status?: string;
   lead_notes?: string;
+  lead_tags?: string[];
   [key: string]: unknown;
+};
+
+const DETAIL_LABELS: Record<string, string> = {
+  id: "ID",
+  wa_fastid: "Fast ID",
+  wa_chatid: "Chat ID",
+  wa_chatlid: "Chat LID",
+  wa_archived: "Arquivado",
+  wa_contactName: "Nome (contato WA)",
+  wa_name: "Nome (WA)",
+  name: "Nome",
+  image: "Imagem",
+  imagePreview: "Imagem (preview)",
+  wa_ephemeralExpiration: "Mensagens temporárias (expiração)",
+  wa_isBlocked: "Bloqueado",
+  wa_isGroup: "É grupo",
+  wa_isGroup_admin: "Admin do grupo",
+  wa_isGroup_announce: "Grupo só admins",
+  wa_isGroup_community: "É comunidade",
+  wa_isGroup_member: "Membro do grupo",
+  wa_isPinned: "Fixado",
+  wa_label: "Etiquetas",
+  wa_lastMessageTextVote: "Última mensagem (voto)",
+  wa_lastMessageType: "Tipo última mensagem",
+  wa_lastMsgTimestamp: "Última mensagem (data)",
+  wa_lastMessageSender: "Remetente última mensagem",
+  wa_muteEndTime: "Silenciado até",
+  owner: "Proprietário",
+  wa_unreadCount: "Não lidas",
+  phone: "Telefone",
+  common_groups: "Grupos em comum",
+  lead_name: "Nome (lead)",
+  lead_fullName: "Nome completo (lead)",
+  lead_email: "E-mail (lead)",
+  lead_personalid: "ID pessoal (lead)",
+  lead_status: "Status (lead)",
+  lead_tags: "Tags (lead)",
+  lead_notes: "Observações (lead)",
+  lead_isTicketOpen: "Ticket aberto",
+  lead_assignedAttendant_id: "Atendente (lead)",
+  lead_kanbanOrder: "Ordem kanban",
+  lead_field01: "Campo 01",
+  lead_field02: "Campo 02",
+  lead_field03: "Campo 03",
+  lead_field04: "Campo 04",
+  lead_field05: "Campo 05",
+  lead_field06: "Campo 06",
+  lead_field07: "Campo 07",
+  lead_field08: "Campo 08",
+  lead_field09: "Campo 09",
+  lead_field10: "Campo 10",
+  lead_field11: "Campo 11",
+  lead_field12: "Campo 12",
+  lead_field13: "Campo 13",
+  lead_field14: "Campo 14",
+  lead_field15: "Campo 15",
+  lead_field16: "Campo 16",
+  lead_field17: "Campo 17",
+  lead_field18: "Campo 18",
+  lead_field19: "Campo 19",
+  lead_field20: "Campo 20",
+  chatbot_agentResetMemoryAt: "Chatbot: reset memória em",
+  chatbot_lastTrigger_id: "Chatbot: último gatilho",
+  chatbot_lastTriggerAt: "Chatbot: último gatilho em",
+  chatbot_disableUntil: "Chatbot: desativado até",
 };
 
 type ContactDetailSideOverProps = {
@@ -60,6 +129,9 @@ export function ContactDetailSideOver({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [blockLoading, setBlockLoading] = useState(false);
+  const [showAddToAgendaName, setShowAddToAgendaName] = useState(false);
+  const [addToAgendaName, setAddToAgendaName] = useState("");
+  const [addToAgendaLoading, setAddToAgendaLoading] = useState(false);
 
   const apiHeaders = useMemo(
     () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
@@ -88,10 +160,13 @@ export function ContactDetailSideOver({
   }, [contact, apiHeaders]);
 
   useEffect(() => {
-    if (open && contact) fetchDetails();
-    else if (!open) {
+    if (open && contact) {
+      setImageError(false);
+      fetchDetails();
+    } else if (!open) {
       setDetails(null);
       setError(null);
+      setImageError(false);
     }
   }, [open, contact, fetchDetails]);
 
@@ -121,10 +196,70 @@ export function ContactDetailSideOver({
   const displayName =
     details?.name ?? details?.wa_name ?? details?.wa_contactName ?? contact?.contact_name ?? contact?.first_name ?? "—";
   const displayPhone = details?.phone ?? contact?.phone ?? contact?.jid ?? "—";
-  const imageUrl = details?.imagePreview ?? details?.image ?? null;
+  const imageUrl = details?.imagePreview ?? details?.image ?? contact?.avatar_url?.trim() ?? null;
+  const [imageError, setImageError] = useState(false);
+  const showImage = imageUrl && !imageError;
+  const imageSrc =
+    showImage && imageUrl
+      ? imageUrl.startsWith("http://") || imageUrl.startsWith("https://")
+        ? `/api/contacts/avatar?url=${encodeURIComponent(imageUrl)}`
+        : imageUrl
+      : null;
+
+  const handleAddToAgenda = async () => {
+    if (!contact) return;
+    const nameToUse = addToAgendaName.trim() || numberForApi(contact);
+    setAddToAgendaLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/contacts/add-to-agenda", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_id: contact.channel_id,
+          number: numberForApi(contact),
+          name: nameToUse,
+        }),
+      });
+      if (r.ok) {
+        setShowAddToAgendaName(false);
+        setAddToAgendaName("");
+        onBlockChange?.();
+      } else {
+        const data = await r.json();
+        setError(data?.error ?? "Falha ao adicionar à agenda");
+      }
+    } finally {
+      setAddToAgendaLoading(false);
+    }
+  };
+
+  const handleRemoveFromAgenda = async () => {
+    if (!contact) return;
+    setBlockLoading(true);
+    try {
+      const r = await fetch("/api/contacts/remove-from-agenda", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_id: contact.channel_id,
+          number: numberForApi(contact),
+        }),
+      });
+      if (r.ok) onBlockChange?.();
+      else {
+        const data = await r.json();
+        setError(data?.error ?? "Falha ao remover da agenda");
+      }
+    } finally {
+      setBlockLoading(false);
+    }
+  };
 
   return (
-    <SideOver open={open} onClose={onClose} title="Detalhes do contato" width={480}>
+    <SideOver open={open} onClose={onClose} title="Detalhes do contato" width={640}>
       {!contact ? (
         <p className="text-sm text-[#64748B]">Nenhum contato selecionado.</p>
       ) : (
@@ -143,11 +278,13 @@ export function ContactDetailSideOver({
             <>
               <div className="flex flex-col items-center gap-3 border-b border-[#E2E8F0] pb-4">
                 <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0]">
-                  {imageUrl ? (
+                  {imageSrc ? (
                     <img
-                      src={imageUrl}
+                      src={imageSrc}
                       alt=""
                       className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={() => setImageError(true)}
                     />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-3xl text-[#94A3B8]">
@@ -160,56 +297,113 @@ export function ContactDetailSideOver({
                   <p className="text-sm text-[#64748B]">{displayPhone}</p>
                   <p className="mt-1 text-xs text-[#94A3B8]">{channelName}</p>
                   {details && (
-                    <button
-                      type="button"
-                      onClick={handleBlockToggle}
-                      disabled={blockLoading}
-                      className={`mt-3 inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
-                        details.wa_isBlocked
-                          ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                          : "bg-red-50 text-red-700 hover:bg-red-100"
-                      } disabled:opacity-60`}
-                    >
-                      {blockLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-                      {details.wa_isBlocked ? "Desbloquear" : "Bloquear"}
-                    </button>
+                    <div className="mt-4 w-full flex justify-center">
+                      <div className="inline-flex rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={handleBlockToggle}
+                          disabled={blockLoading}
+                          className={`inline-flex flex-1 items-center justify-center gap-2 min-w-0 px-4 py-3 text-sm font-medium transition-all border-r border-[#E2E8F0] last:border-r-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clicvend-orange ${
+                            details.wa_isBlocked
+                              ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:bg-emerald-200"
+                              : "bg-red-50 text-red-700 hover:bg-red-100 active:bg-red-200"
+                          } disabled:opacity-60 disabled:pointer-events-none`}
+                        >
+                          {blockLoading ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Ban className="h-4 w-4 shrink-0" />}
+                          <span className="truncate">{details.wa_isBlocked ? "Desbloquear" : "Bloquear"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddToAgendaName(
+                              (contact?.contact_name || contact?.first_name || contact?.phone || numberForApi(contact!)).trim() || numberForApi(contact!)
+                            );
+                            setShowAddToAgendaName(true);
+                          }}
+                          disabled={blockLoading}
+                          className="inline-flex flex-1 items-center justify-center gap-2 min-w-0 px-4 py-3 text-sm font-medium text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 border-r border-[#E2E8F0] last:border-r-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clicvend-orange transition-all active:bg-emerald-200 disabled:opacity-60 disabled:pointer-events-none"
+                        >
+                          <UserPlus className="h-4 w-4 shrink-0 text-emerald-600" />
+                          <span className="truncate">Adicionar à agenda</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleRemoveFromAgenda}
+                          disabled={blockLoading}
+                          className="inline-flex flex-1 items-center justify-center gap-2 min-w-0 px-4 py-3 text-sm font-medium text-[#64748B] bg-[#F8FAFC] hover:bg-[#F1F5F9] border-r border-[#E2E8F0] last:border-r-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clicvend-orange transition-all active:bg-[#E2E8F0] disabled:opacity-60 disabled:pointer-events-none"
+                        >
+                          <UserMinus className="h-4 w-4 shrink-0 text-[#64748B]" />
+                          <span className="truncate">Remover da agenda</span>
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
+              {showAddToAgendaName && contact && (
+                <div className="border-t border-[#E2E8F0] pt-4">
+                  <p className="text-sm font-medium text-[#334155] mb-2">Nome para salvar no celular</p>
+                  <p className="text-xs text-[#64748B] mb-2">Esse nome aparecerá na agenda do WhatsApp para você localizar o contato.</p>
+                  <input
+                    type="text"
+                    value={addToAgendaName}
+                    onChange={(e) => setAddToAgendaName(e.target.value)}
+                    placeholder="Ex: João Silva - Vendas"
+                    className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-[#3B82F6] focus:outline-none focus:ring-1 focus:ring-[#3B82F6]"
+                    autoFocus
+                  />
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowAddToAgendaName(false); setAddToAgendaName(""); }}
+                      className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9]"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddToAgenda}
+                      disabled={addToAgendaLoading}
+                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {addToAgendaLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Adicionar à agenda
+                    </button>
+                  </div>
+                </div>
+              )}
               {details && (
                 <div className="space-y-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Outras informações</h3>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                    Outras informações <span className="font-normal normal-case">(dados do WhatsApp /chat/details)</span>
+                  </h3>
                   <dl className="space-y-2 text-sm">
-                    {details.wa_isBlocked != null && (
-                      <div>
-                        <dt className="text-[#64748B]">Bloqueado</dt>
-                        <dd className="font-medium text-[#1E293B]">{details.wa_isBlocked ? "Sim" : "Não"}</dd>
-                      </div>
-                    )}
-                    {details.lead_email && (
-                      <div>
-                        <dt className="text-[#64748B]">E-mail (lead)</dt>
-                        <dd className="font-medium text-[#1E293B]">{details.lead_email}</dd>
-                      </div>
-                    )}
-                    {details.lead_status && (
-                      <div>
-                        <dt className="text-[#64748B]">Status (lead)</dt>
-                        <dd className="font-medium text-[#1E293B]">{details.lead_status}</dd>
-                      </div>
-                    )}
-                    {details.common_groups && (
-                      <div>
-                        <dt className="text-[#64748B]">Grupos em comum</dt>
-                        <dd className="font-medium text-[#1E293B] break-words">{details.common_groups}</dd>
-                      </div>
-                    )}
-                    {details.lead_notes && (
-                      <div>
-                        <dt className="text-[#64748B]">Observações</dt>
-                        <dd className="font-medium text-[#1E293B] whitespace-pre-wrap">{details.lead_notes}</dd>
-                      </div>
-                    )}
+                    {(() => {
+                      const skip = new Set(["name", "wa_name", "wa_contactName", "phone", "image", "imagePreview"]);
+                      const entries = Object.entries(details).filter(
+                        ([k, v]) => !skip.has(k) && v !== undefined && v !== null && v !== ""
+                      );
+                      return entries.map(([key, value]) => {
+                        const label = DETAIL_LABELS[key] ?? key;
+                        let display: string;
+                        if (typeof value === "boolean") display = value ? "Sim" : "Não";
+                        else if (Array.isArray(value)) display = value.join(", ");
+                        else if (typeof value === "number" && (key.includes("Timestamp") || key.includes("At") || key.includes("Time") || key.includes("Expiration"))) {
+                          try {
+                            display = value > 0 ? new Date(value).toLocaleString("pt-BR") : "—";
+                          } catch {
+                            display = String(value);
+                          }
+                        } else if (typeof value === "object") display = JSON.stringify(value);
+                        else display = String(value);
+                        return (
+                          <div key={key}>
+                            <dt className="text-[#64748B]">{label}</dt>
+                            <dd className="font-medium text-[#1E293B] break-words whitespace-pre-wrap">{display}</dd>
+                          </div>
+                        );
+                      });
+                    })()}
                   </dl>
                 </div>
               )}

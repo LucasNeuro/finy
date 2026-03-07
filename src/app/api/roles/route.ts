@@ -4,6 +4,9 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
+/**
+ * GET /api/roles — Cargos. Sem Redis: sempre lê do Supabase.
+ */
 export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {

@@ -653,6 +653,41 @@ export async function blockChat(
   return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
 }
 
+/**
+ * Adiciona contato à agenda do WhatsApp (POST /contact/add).
+ * phone: formato internacional (ex: 5511999999999) ou JID.
+ * name: nome completo (usado como primeiro nome e nome completo).
+ */
+export async function addContactToAgenda(
+  token: string,
+  phone: string,
+  name: string
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  const number = phone.trim().replace(/@s\.whatsapp\.net$/, "");
+  const { data, ok, error, status } = await uazapiFetch("/contact/add", {
+    method: "POST",
+    token,
+    body: { phone: number, name: (name || number).trim() },
+  });
+  return { ok, data: ok ? data : undefined, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
+/**
+ * Remove contato da agenda do WhatsApp (POST /contact/remove).
+ */
+export async function removeContactFromAgenda(
+  token: string,
+  phone: string
+): Promise<{ ok: boolean; error?: string }> {
+  const number = phone.trim().replace(/@s\.whatsapp\.net$/, "");
+  const { ok, error, status } = await uazapiFetch("/contact/remove", {
+    method: "POST",
+    token,
+    body: { phone: number },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
 /** Arquivar ou desarquivar chat (POST /chat/archive). */
 export async function archiveChat(
   token: string,

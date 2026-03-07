@@ -36,7 +36,7 @@ export default function FilasPage() {
   const [deleteConfirmQueue, setDeleteConfirmQueue] = useState<Queue | null>(null);
 
   const fetchQueues = useCallback(() => {
-    return fetch("/api/queues", { credentials: "include", headers: apiHeaders })
+    return fetch("/api/queues?for_management=1", { credentials: "include", headers: apiHeaders })
       .then((r) => r.json())
       .then((data) => setQueues(Array.isArray(data) ? data : []))
       .catch(() => setQueues([]));

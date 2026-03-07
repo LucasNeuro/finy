@@ -1,6 +1,8 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getProfileForCompany, requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { withMetricsHeaders } from "@/lib/api/metrics";
+import { getCachedCounts, setCachedCounts } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -10,6 +12,7 @@ import { NextResponse } from "next/server";
  * Usado para badges nos ícones da sidebar (Filas, Meus atendimentos, Contatos, Grupos).
  */
 export async function GET(request: Request) {
+  const startTime = performance.now();
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -52,13 +55,24 @@ export async function GET(request: Request) {
   }
 
   if (allowedQueueIds !== null && allowedQueueIds.length === 0 && allowedGroupKeys.length === 0) {
-    return NextResponse.json({ mine: 0, queues: 0, individual: 0, groups: 0 });
+    const res = NextResponse.json({ mine: 0, queues: 0, individual: 0, groups: 0 });
+    return withMetricsHeaders(res, { cacheHit: false, startTime });
   }
 
-  let queuesQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId);
-  let mineQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "");
-  let individualQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", false);
-  let groupsQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", true);
+  const userId = user?.id ?? "";
+  if (userId) {
+    const cached = await getCachedCounts(companyId, userId);
+    if (cached) {
+      const res = NextResponse.json(cached);
+      return withMetricsHeaders(res, { cacheHit: true, startTime });
+    }
+  }
+
+  const activeStatuses = ["open", "in_progress", "waiting"];
+  let queuesQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).in("status", activeStatuses);
+  let mineQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").in("status", activeStatuses);
+  let individualQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", false).in("status", activeStatuses);
+  let groupsQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", true).in("status", activeStatuses);
 
   if (allowedQueueIds !== null) {
     if (allowedGroupKeys.length === 0) {
@@ -87,5 +101,9 @@ export async function GET(request: Request) {
   const individual = typeof individualRes.count === "number" ? individualRes.count : 0;
   const groups = typeof groupsRes.count === "number" ? groupsRes.count : 0;
 
-  return NextResponse.json({ mine, queues, individual, groups });
+  const payload = { mine, queues, individual, groups };
+  if (userId) await setCachedCounts(companyId, userId, payload);
+
+  const res = NextResponse.json(payload);
+  return withMetricsHeaders(res, { cacheHit: false, startTime });
 }

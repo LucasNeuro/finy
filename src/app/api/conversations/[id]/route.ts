@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { withMetricsHeaders } from "@/lib/api/metrics";
 import {
   getCachedConversationDetail,
   invalidateConversationList,
@@ -15,6 +16,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startTime = performance.now();
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,13 +30,16 @@ export async function GET(
 
   if (!skipCache) {
     const cached = await getCachedConversationDetail(id);
-    if (cached) return NextResponse.json(cached);
+    if (cached) {
+      const res = NextResponse.json(cached);
+      return withMetricsHeaders(res, { cacheHit: true, startTime });
+    }
   }
 
   const supabase = await createClient();
   const { data: conversation, error: convError } = await supabase
     .from("conversations")
-    .select("id, channel_id, external_id, wa_chat_jid, kind, is_group, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at")
+    .select("id, channel_id, external_id, wa_chat_jid, kind, is_group, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at, messages_snapshot")
     .eq("id", id)
     .eq("company_id", companyId)
     .single();
@@ -82,35 +87,45 @@ export async function GET(
   const messagesSelect = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
   let messages: unknown[] = [];
 
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    try {
-      const adminSupabase = createServiceRoleClient();
-      const res = await adminSupabase
+  const snapshot = (conversation as { messages_snapshot?: unknown }).messages_snapshot;
+  if (Array.isArray(snapshot) && snapshot.length > 0) {
+    messages = snapshot;
+  } else if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) {
+    messages = [];
+  }
+
+  if (messages.length === 0) {
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      try {
+        const adminSupabase = createServiceRoleClient();
+        const res = await adminSupabase
+          .from("messages")
+          .select(messagesSelect)
+          .eq("conversation_id", id)
+          .order("sent_at", { ascending: true })
+          .limit(MESSAGES_LIMIT);
+        if (!res.error && res.data) messages = Array.isArray(res.data) ? res.data : [];
+      } catch {
+        // fallback to user client below
+      }
+    }
+    if (messages.length === 0) {
+      const res = await supabase
         .from("messages")
         .select(messagesSelect)
         .eq("conversation_id", id)
         .order("sent_at", { ascending: true })
         .limit(MESSAGES_LIMIT);
-      if (!res.error && res.data) messages = Array.isArray(res.data) ? res.data : [];
-    } catch {
-      // fallback to user client below
+      if (res.error) {
+        return NextResponse.json({ error: res.error.message }, { status: 500 });
+      }
+      messages = Array.isArray(res.data) ? res.data : [];
     }
-  }
-  if (messages.length === 0) {
-    const res = await supabase
-      .from("messages")
-      .select(messagesSelect)
-      .eq("conversation_id", id)
-      .order("sent_at", { ascending: true })
-      .limit(MESSAGES_LIMIT);
-    if (res.error) {
-      return NextResponse.json({ error: res.error.message }, { status: 500 });
-    }
-    messages = Array.isArray(res.data) ? res.data : [];
   }
 
+  const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
   const payload = {
-    ...conversation,
+    ...convRest,
     customer_name: (conversation.customer_name && conversation.customer_name.trim()) ? conversation.customer_name : (contact_name_from_cc ?? conversation.customer_name),
     channel_name,
     queue_name,
@@ -119,7 +134,8 @@ export async function GET(
     messages,
   };
   await setCachedConversationDetail(id, payload as Record<string, unknown>);
-  return NextResponse.json(payload);
+  const res = NextResponse.json(payload);
+  return withMetricsHeaders(res, { cacheHit: false, startTime });
 }
 
 export async function PATCH(
@@ -165,10 +181,14 @@ export async function PATCH(
       } else if (existing.status === "closed") {
         const err = await requirePermission(companyId, PERMISSIONS.inbox.reopen);
         if (err) return NextResponse.json({ error: err.error }, { status: err.status });
-      } else if (["in_progress", "waiting", "open"].includes(newStatus)) {
+      } else if (["in_progress", "in_queue", "waiting", "open"].includes(newStatus)) {
         const errAssign = await requirePermission(companyId, PERMISSIONS.inbox.assign);
         const errManage = await requirePermission(companyId, PERMISSIONS.inbox.manage_tickets);
         if (errAssign && errManage) return NextResponse.json({ error: errAssign.error }, { status: errAssign.status });
+      } else {
+        const errManage = await requirePermission(companyId, PERMISSIONS.inbox.manage_tickets);
+        const errAssign = await requirePermission(companyId, PERMISSIONS.inbox.assign);
+        if (errManage && errAssign) return NextResponse.json({ error: errManage.error }, { status: errManage.status });
       }
       updates.status = newStatus;
     }
@@ -184,11 +204,11 @@ export async function PATCH(
           return NextResponse.json({ error: err.error }, { status: err.status });
         }
       } else {
-        // Atribuir para outro atendente (assign ou visão gerencial)
-        const errAssign = await requirePermission(companyId, PERMISSIONS.inbox.assign);
+        // Transferir para outro atendente: exige permissão "Transferir atendimento" no cargo
+        const errTransfer = await requirePermission(companyId, PERMISSIONS.inbox.transfer);
         const errManage = await requirePermission(companyId, PERMISSIONS.inbox.manage_tickets);
-        if (errAssign && errManage) {
-          return NextResponse.json({ error: errAssign.error }, { status: errAssign.status });
+        if (errTransfer && errManage) {
+          return NextResponse.json({ error: errTransfer.error }, { status: errTransfer.status });
         }
       }
       updates.assigned_to = newAssigned;
@@ -215,6 +235,16 @@ export async function PATCH(
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
+
+  if (updates.status && typeof updates.status === "string" && existing.status !== updates.status) {
+    await supabase.from("conversation_status_history").insert({
+      conversation_id: id,
+      from_status: existing.status,
+      to_status: updates.status,
+      changed_by: user?.id ?? null,
+    });
+  }
+
   await Promise.all([invalidateConversationList(companyId), invalidateConversationDetail(id)]);
   return NextResponse.json(updated);
 }
