@@ -10,7 +10,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContactDetailSideOver, type Contact } from "./ContactDetailSideOver";
@@ -22,6 +22,29 @@ import { CreateGroupSideOver } from "./CreateGroupSideOver";
 type Channel = { id: string; name: string };
 
 const PAGE_SIZE = 150;
+
+/** Formata número para exibição: (DDD) 9 00000-0000. Aceita dígitos puros ou jid. */
+function formatPhoneBrazil(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim().replace(/\D/g, "");
+  if (!s) return "—";
+  // Brasil: 55 + DDD(2) + 9 + 8 dígitos = 13 dígitos
+  const withCountry = s.length >= 12 && s.startsWith("55");
+  const digits = withCountry ? s.slice(2) : s;
+  if (digits.length >= 10) {
+    const ddd = digits.slice(0, 2);
+    const rest = digits.slice(2);
+    // Celular: 9 + 8 dígitos (9xxxx-xxxx)
+    if (rest.length >= 9 && rest[0] === "9") {
+      return `(${ddd}) ${rest.slice(0, 1)} ${rest.slice(1, 6)}-${rest.slice(6, 10)}`;
+    }
+    // Fixo: 8 dígitos (xxxx-xxxx)
+    if (rest.length >= 8) {
+      return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4, 8)}`;
+    }
+  }
+  if (s.length <= 14) return s;
+  return s.slice(0, 14) + "…";
+}
 
 /** URL de avatar: se for externa (http/https), usa proxy para evitar CORS/referrer e permitir cache. */
 function avatarSrc(avatarUrl: string | null): string | null {
@@ -957,9 +980,30 @@ export default function ContatosPage() {
       {
         header: "Número",
         accessorFn: (c) => c.phone || c.jid || "—",
-        cell: ({ getValue }) => (
-          <span className="text-sm text-[#64748B]">{String(getValue())}</span>
-        ),
+        cell: ({ row }) => {
+          const c = row.original;
+          const raw = c.phone || (c.jid ?? "").replace(/@.*$/, "") || "";
+          const formatted = formatPhoneBrazil(raw);
+          const toCopy = raw.replace(/\D/g, "") || (c.jid ?? "").replace(/@.*$/, "");
+          return (
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center rounded-md bg-[#F1F5F9] px-2 py-0.5 text-sm font-medium text-[#334155]">
+                {formatted}
+              </span>
+              {toCopy ? (
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(toCopy)}
+                  className="rounded p-1 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange"
+                  title="Copiar número"
+                  aria-label="Copiar número"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         header: "Conexão",
@@ -1101,6 +1145,31 @@ export default function ContatosPage() {
             {channelName(row.original.channel_id)}
           </span>
         ),
+      },
+      {
+        header: "ID (JID)",
+        accessorKey: "jid",
+        cell: ({ row }) => {
+          const jid = row.original.jid ?? "";
+          return (
+            <div className="flex items-center gap-1.5 max-w-[200px]">
+              <span className="truncate text-sm text-[#64748B]" title={jid}>
+                {jid || "—"}
+              </span>
+              {jid ? (
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(jid)}
+                  className="shrink-0 rounded p-1 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange"
+                  title="Copiar JID do grupo"
+                  aria-label="Copiar JID"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         header: "Status",
@@ -1298,6 +1367,31 @@ export default function ContatosPage() {
             {channelName(row.original.channel_id)}
           </span>
         ),
+      },
+      {
+        header: "ID (JID)",
+        accessorKey: "jid",
+        cell: ({ row }) => {
+          const jid = row.original.jid ?? "";
+          return (
+            <div className="flex items-center gap-1.5 max-w-[200px]">
+              <span className="truncate text-sm text-[#64748B]" title={jid}>
+                {jid || "—"}
+              </span>
+              {jid ? (
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard.writeText(jid)}
+                  className="shrink-0 rounded p-1 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange"
+                  title="Copiar JID da comunidade"
+                  aria-label="Copiar JID"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          );
+        },
       },
     ],
     [channels, selectedCommunityIds]
