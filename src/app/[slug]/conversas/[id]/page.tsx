@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
@@ -76,6 +76,127 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   }
   if (s.length <= 14) return s;
   return s.slice(0, 14) + "…";
+}
+
+/** Formata segundos em mm:ss */
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Mini player de áudio estilo WhatsApp Web: botão play/pause, barra de progresso, tempo e download.
+ */
+function ChatAudioPlayer({
+  src,
+  onDownload,
+  isLoading,
+}: {
+  src: string | null;
+  onDownload?: () => void;
+  isLoading?: boolean;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+
+  const togglePlay = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) {
+      el.pause();
+    } else {
+      el.play().catch(() => {});
+    }
+    setPlaying(!playing);
+  }, [playing]);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el || !src) return;
+    setLoaded(false);
+    setDuration(0);
+    setCurrentTime(0);
+    setPlaying(false);
+    const onTimeUpdate = () => setCurrentTime(el.currentTime);
+    const onDurationChange = () => {
+      setDuration(el.duration);
+      setLoaded(true);
+    };
+    const onEnded = () => setPlaying(false);
+    const onLoadedData = () => setLoaded(true);
+    el.addEventListener("timeupdate", onTimeUpdate);
+    el.addEventListener("durationchange", onDurationChange);
+    el.addEventListener("ended", onEnded);
+    el.addEventListener("loadeddata", onLoadedData);
+    return () => {
+      el.removeEventListener("timeupdate", onTimeUpdate);
+      el.removeEventListener("durationchange", onDurationChange);
+      el.removeEventListener("ended", onEnded);
+      el.removeEventListener("loadeddata", onLoadedData);
+    };
+  }, [src]);
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  if (isLoading || !src) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl bg-black/5 px-3 py-2 min-w-[200px] max-w-[280px]">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
+          <Loader2 className="h-4 w-4 animate-spin text-[#64748B]" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="h-1.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
+          <p className="mt-1 text-xs text-[#64748B]">Carregando…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-black/5 px-3 py-2 min-w-[200px] max-w-[280px]">
+      {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
+      <button
+        type="button"
+        onClick={togglePlay}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark transition-colors focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-1"
+        aria-label={playing ? "Pausar" : "Reproduzir"}
+      >
+        {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className="h-1.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer" onClick={(e) => {
+          const el = audioRef.current;
+          if (!el) return;
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const pct = x / rect.width;
+          el.currentTime = pct * el.duration;
+          setCurrentTime(el.currentTime);
+        }}>
+          <div className="h-full rounded-full bg-clicvend-orange transition-all duration-150" style={{ width: `${progress}%` }} />
+        </div>
+        <div className="flex justify-between mt-0.5">
+          <span className="text-xs text-[#64748B]">{formatDuration(currentTime)}</span>
+          <span className="text-xs text-[#64748B]">{loaded ? formatDuration(duration) : "–:––"}</span>
+        </div>
+      </div>
+      {onDownload && (
+        <button
+          type="button"
+          onClick={onDownload}
+          className="shrink-0 p-1.5 rounded-full text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
+          title="Baixar áudio"
+        >
+          <Download className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
 }
 
 /** Retorna se a URL é utilizável diretamente no front (reproduzir/abrir). */
@@ -166,8 +287,17 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <a href={downloadUrl || mediaUrl || "#"} target="_blank" rel="noopener noreferrer" className="block rounded overflow-hidden">
-                <img src={mediaUrl || downloadUrl || ""} alt="" className="max-h-64 w-full object-contain rounded" />
+              <a
+                href={downloadUrl || mediaUrl || "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm hover:shadow-md transition-shadow focus:outline-none focus:ring-2 focus:ring-clicvend-orange/50"
+              >
+                <img
+                  src={mediaUrl || downloadUrl || ""}
+                  alt=""
+                  className="max-h-[280px] min-h-[120px] w-full object-cover cursor-pointer"
+                />
               </a>
               {canFetchDownload && (
                 <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
@@ -188,7 +318,14 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <video src={downloadUrl || mediaUrl || ""} controls className="max-h-64 w-full rounded" />
+              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[320px]">
+                <video
+                  src={downloadUrl || mediaUrl || ""}
+                  controls
+                  className="w-full max-h-[240px] object-cover rounded-xl"
+                  playsInline
+                />
+              </div>
               {canFetchDownload && (
                 <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
                   {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
@@ -206,23 +343,12 @@ function MessageBubble({
       )}
       {(type === "audio" || type === "ptt") && (audioSrc || downloadLoading || mediaUrl) && (
         <div className="space-y-1">
-          <div className="flex items-center gap-2 min-w-[240px] max-w-sm">
-            {audioSrc ? (
-              <audio src={audioSrc} controls className="flex-1 h-9" />
-            ) : downloadLoading ? (
-              <span className="inline-flex items-center gap-1.5 text-sm text-[#64748B]">
-                <Loader2 className="h-4 w-4 animate-spin" /> Carregando áudio…
-              </span>
-            ) : (
-              <span className="text-sm text-[#64748B]">Áudio não disponível</span>
-            )}
-            {canFetchDownload && audioSrc && (
-              <a href={audioSrc} download className="shrink-0 p-1.5 rounded text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange" title="Baixar áudio">
-                <Download className="h-4 w-4" />
-              </a>
-            )}
-          </div>
-          {caption && caption !== "[audio]" && caption !== "[ptt]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+          <ChatAudioPlayer
+            src={audioSrc}
+            isLoading={downloadLoading}
+            onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
+          />
+          {caption && caption !== "[audio]" && caption !== "[ptt]" && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
         </div>
       )}
       {type === "document" && (
@@ -245,7 +371,9 @@ function MessageBubble({
       )}
       {type === "sticker" && (mediaUrl || downloadUrl) && (
         <div>
-          <img src={mediaUrl || downloadUrl || ""} alt="" className="max-h-32 w-auto" />
+          <div className="rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm inline-block">
+            <img src={mediaUrl || downloadUrl || ""} alt="" className="max-h-32 w-auto block" />
+          </div>
           {canFetchDownload && (
             <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="mt-1 inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
               {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
