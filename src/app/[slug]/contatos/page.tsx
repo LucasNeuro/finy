@@ -1119,9 +1119,7 @@ export default function ContatosPage() {
           const name = g.name ?? "—";
           return (
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0] flex items-center justify-center">
-                <MessageCircle className="h-5 w-5 text-[#94A3B8]" />
-              </div>
+              <ContactListAvatar avatarUrl={g.avatar_url?.trim() || null} name={name} />
               <span className="font-medium text-[#1E293B]">{name}</span>
             </div>
           );
@@ -1346,7 +1344,12 @@ export default function ContatosPage() {
         cell: ({ row }) => {
           const g = row.original;
           const name = g.name ?? "—";
-          return <span className="font-medium text-[#1E293B]">{name}</span>;
+          return (
+            <div className="flex items-center gap-3">
+              <ContactListAvatar avatarUrl={g.avatar_url?.trim() || null} name={name} />
+              <span className="font-medium text-[#1E293B]">{name}</span>
+            </div>
+          );
         },
       },
       {

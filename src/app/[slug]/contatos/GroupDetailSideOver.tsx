@@ -14,6 +14,8 @@ export type Group = {
   synced_at: string;
   /** Quando o número saiu do grupo; null = ainda no grupo */
   left_at?: string | null;
+  /** URL da foto do grupo (ex.: da UAZAPI) para exibir na lista e nos detalhes */
+  avatar_url?: string | null;
 };
 
 type GroupParticipant = {
@@ -27,6 +29,7 @@ type GroupInfo = {
   Name?: string;
   Topic?: string;
   InviteLink?: string;
+  PictureURL?: string;
   IsLocked?: boolean;
   IsAnnounce?: boolean;
   IsCommunity?: boolean;
@@ -102,6 +105,7 @@ export function GroupDetailSideOver({
   const displayName = info?.Name ?? group?.name ?? "—";
   const topic = info?.Topic ?? group?.topic ?? null;
   const inviteLink = info?.InviteLink ?? group?.invite_link ?? null;
+  const avatarUrl = (info?.PictureURL ?? (info as { image?: string }).image ?? group?.avatar_url)?.trim() || null;
   const participants = info?.Participants ?? [];
   const fromDb = Boolean(info?.fromDb);
   const hasAnyInfo = !loading && (info || group);
@@ -153,9 +157,18 @@ export function GroupDetailSideOver({
           {hasAnyInfo && (
             <>
               <div className="flex flex-col items-center gap-2 border-b border-[#E2E8F0] pb-4">
-                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0] flex items-center justify-center">
-                  <MessageCircle className="h-10 w-10 text-[#94A3B8]" />
-                </div>
+                {avatarUrl ? (
+                  <img
+                    src={avatarUrl.startsWith("http") ? `/api/contacts/avatar?url=${encodeURIComponent(avatarUrl)}` : avatarUrl}
+                    alt=""
+                    className="h-20 w-20 shrink-0 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0] flex items-center justify-center">
+                    <MessageCircle className="h-10 w-10 text-[#94A3B8]" />
+                  </div>
+                )}
                 <p className="font-semibold text-[#1E293B] text-center">{displayName}</p>
                 <p className="text-xs text-[#94A3B8]">{channelName}</p>
               </div>

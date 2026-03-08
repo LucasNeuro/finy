@@ -11,6 +11,8 @@ const MAX_AVATAR_SYNC = 200;
 const AVATAR_SYNC_DELAY_MS = 120;
 const MAX_GROUP_INFO_ENRICH = 25;
 const GROUP_INFO_DELAY_MS = 400;
+const MAX_GROUP_AVATAR_SYNC = 50;
+const GROUP_AVATAR_DELAY_MS = 150;
 
 /** Normaliza JID de grupo para formato único: trim, lowercase, sufixo @g.us se faltar */
 function normalizeGroupJid(jid: string): string {
@@ -243,6 +245,31 @@ async function runSync(
         .from("channel_groups")
         .upsert(rows, { onConflict: "channel_id,jid", ignoreDuplicates: false });
       if (!err) groupsCount = rows.length;
+    }
+    onProgress(75);
+
+    // Avatares de grupos: getChatDetails com JID do grupo retorna imagePreview/image (como para contatos)
+    const groupJidsForAvatar = rows.slice(0, MAX_GROUP_AVATAR_SYNC).map((r) => r.jid);
+    for (let i = 0; i < groupJidsForAvatar.length; i++) {
+      const jid = groupJidsForAvatar[i];
+      try {
+        const detail = await getChatDetails(token, jid, { preview: true });
+        const imageUrl = detail.data?.imagePreview ?? detail.data?.image;
+        if (imageUrl && typeof imageUrl === "string" && imageUrl.trim()) {
+          await supabase
+            .from("channel_groups")
+            .update({ avatar_url: imageUrl.trim(), synced_at: new Date().toISOString() })
+            .eq("channel_id", channelId)
+            .eq("company_id", companyId)
+            .eq("jid", jid);
+        }
+      } catch {
+        // ignore
+      }
+      if (i < groupJidsForAvatar.length - 1) {
+        await new Promise((r) => setTimeout(r, GROUP_AVATAR_DELAY_MS));
+      }
+      onProgress(75 + Math.round((5 * (i + 1)) / groupJidsForAvatar.length));
     }
     onProgress(80);
 

@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   while (hasMore) {
     let q = supabase
       .from("channel_groups")
-      .select("id, channel_id, jid, name, topic, invite_link, synced_at, left_at")
+      .select("id, channel_id, jid, name, topic, invite_link, synced_at, left_at, avatar_url")
       .eq("company_id", companyId)
       .order("name")
       .range(offset, offset + pageSize - 1);

@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: row } = await supabase
     .from("channel_groups")
-    .select("name, topic, invite_link")
+    .select("name, topic, invite_link, avatar_url")
     .eq("channel_id", channelId)
     .eq("jid", groupjid)
     .eq("company_id", companyId)
@@ -37,6 +37,7 @@ export async function POST(request: Request) {
       Name: row.name ?? undefined,
       Topic: row.topic ?? undefined,
       InviteLink: row.invite_link ?? undefined,
+      PictureURL: row.avatar_url ?? undefined,
       Participants: [],
       fromDb: true,
     });
