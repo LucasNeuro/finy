@@ -7,11 +7,29 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
-/** Normaliza número Brasil para envio UAZAPI: 55 + DDD + 9 dígitos. Corrige números malformados (ex.: 211840940413040 → 5521184094041). */
+/** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). */
+function fixBrazilMobileZero(d: string): string {
+  if (d.length === 11 && !d.startsWith("55")) {
+    const ddd = d.slice(0, 2);
+    const rest = d.slice(2);
+    if (/^\d{2}$/.test(ddd) && rest.length >= 9 && rest[0] === "0") return ddd + "9" + rest.slice(1, 9);
+  }
+  if (d.length === 13 && d.startsWith("55")) {
+    const after55 = d.slice(2);
+    if (after55.length >= 9 && after55[2] === "0") {
+      const ddd = after55.slice(0, 2);
+      const rest = after55.slice(2, 11);
+      if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
+    }
+  }
+  return d;
+}
+/** Normaliza número Brasil para envio UAZAPI: 55 + DDD + 9 dígitos. Corrige 0 após DDD → 9. */
 function normalizePhoneForSend(raw: string | null | undefined, isGroup: boolean): string {
   if (isGroup || !raw) return (raw ?? "").trim();
-  const d = (raw ?? "").replace(/\D/g, "");
+  let d = (raw ?? "").replace(/\D/g, "");
   if (!d) return raw.trim();
+  d = fixBrazilMobileZero(d);
   if (d.length === 10 || d.length === 11) return "55" + d;
   if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
   if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {

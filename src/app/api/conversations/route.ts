@@ -12,10 +12,28 @@ function formatGroupJidForDisplay(jid: string): string {
   return raw ? `Grupo ${raw}` : "Grupo";
 }
 
-/** Normaliza customer_phone para exibição (Brasil): corrige números malformados (ex.: 211840940413040 → 5521184094041). */
+/** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). */
+function fixBrazilMobileZero(d: string): string {
+  if (d.length === 11 && !d.startsWith("55")) {
+    const ddd = d.slice(0, 2);
+    const rest = d.slice(2);
+    if (/^\d{2}$/.test(ddd) && rest.length >= 9 && rest[0] === "0") return ddd + "9" + rest.slice(1, 9);
+  }
+  if (d.length === 13 && d.startsWith("55")) {
+    const after55 = d.slice(2);
+    if (after55.length >= 9 && after55[2] === "0") {
+      const ddd = after55.slice(0, 2);
+      const rest = after55.slice(2, 11);
+      if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
+    }
+  }
+  return d;
+}
+/** Normaliza customer_phone para exibição (Brasil): corrige números malformados (ex.: 0 após DDD → 9). */
 function normalizePhoneForDisplay(raw: string | null | undefined): string | null {
   if (raw == null || raw === "") return null;
-  const d = (raw ?? "").replace(/\D/g, "");
+  let d = (raw ?? "").replace(/\D/g, "");
+  d = fixBrazilMobileZero(d);
   if (d.length === 10 || d.length === 11) return "55" + d;
   if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
   if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {

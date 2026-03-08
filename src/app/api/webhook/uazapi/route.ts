@@ -21,15 +21,35 @@ function phoneDigitsOnly(raw: string): string {
 }
 
 
+/** Corrige número Brasil malformado: DDD + 0 + 8 dígitos → DDD + 9 + 8 dígitos (celular). */
+function fixBrazilMobileZero(d: string): string {
+  if (d.length === 11 && d.startsWith("55") === false) {
+    const ddd = d.slice(0, 2);
+    const rest = d.slice(2);
+    if (/^\d{2}$/.test(ddd) && rest.length >= 9 && rest[0] === "0") {
+      return ddd + "9" + rest.slice(1, 9);
+    }
+  }
+  if (d.length === 13 && d.startsWith("55")) {
+    const after55 = d.slice(2);
+    if (after55.length >= 9 && after55[2] === "0") {
+      const ddd = after55.slice(0, 2);
+      const rest = after55.slice(2, 11);
+      if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
+    }
+  }
+  return d;
+}
+
 function toCanonicalPhone(digits: string, isGroup: boolean): string {
   if (isGroup || !digits) return digits;
-  const d = (digits ?? "").replace(/\D/g, "");
+  let d = (digits ?? "").replace(/\D/g, "");
+  d = fixBrazilMobileZero(d);
   if (d.length === 10 || d.length === 11) return "55" + d;
   if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
   if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
     const ddd = d.slice(0, 2);
-    const rest = d.slice(2);
-    const mobile = rest.slice(0, 9);
+    const mobile = d.slice(2, 11);
     if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
   }
   return d;

@@ -23,21 +23,36 @@ type Channel = { id: string; name: string };
 
 const PAGE_SIZE = 150;
 
+/** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). */
+function fixBrazilMobileZero(d: string): string {
+  if (d.length === 11 && !d.startsWith("55")) {
+    const ddd = d.slice(0, 2);
+    const rest = d.slice(2);
+    if (/^\d{2}$/.test(ddd) && rest.length >= 9 && rest[0] === "0") return ddd + "9" + rest.slice(1, 9);
+  }
+  if (d.length === 13 && d.startsWith("55")) {
+    const after55 = d.slice(2);
+    if (after55.length >= 9 && after55[2] === "0") {
+      const ddd = after55.slice(0, 2);
+      const rest = after55.slice(2, 11);
+      if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
+    }
+  }
+  return d;
+}
 /** Formata número para exibição: (DDD) 9 00000-0000. Aceita dígitos puros ou jid. */
 function formatPhoneBrazil(raw: string | null | undefined): string {
-  const s = (raw ?? "").trim().replace(/\D/g, "");
+  let s = (raw ?? "").trim().replace(/\D/g, "");
   if (!s) return "—";
-  // Brasil: 55 + DDD(2) + 9 + 8 dígitos = 13 dígitos
+  s = fixBrazilMobileZero(s);
   const withCountry = s.length >= 12 && s.startsWith("55");
   const digits = withCountry ? s.slice(2) : s;
   if (digits.length >= 10) {
     const ddd = digits.slice(0, 2);
     const rest = digits.slice(2);
-    // Celular: 9 + 8 dígitos (9xxxx-xxxx)
     if (rest.length >= 9 && rest[0] === "9") {
       return `(${ddd}) ${rest.slice(0, 1)} ${rest.slice(1, 6)}-${rest.slice(6, 10)}`;
     }
-    // Fixo: 8 dígitos (xxxx-xxxx)
     if (rest.length >= 8) {
       return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4, 8)}`;
     }
