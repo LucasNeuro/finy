@@ -259,8 +259,8 @@ function BlockedRow({
             )}
           </div>
           <div>
-            <div className="font-medium text-[#1E293B]">{displayName}</div>
-            <div className="text-sm text-[#64748B]">{displayPhone}</div>
+        <div className="font-medium text-[#1E293B]">{displayName}</div>
+        <div className="text-sm text-[#64748B]">{displayPhone}</div>
           </div>
         </div>
       </td>
@@ -1425,7 +1425,7 @@ export default function ContatosPage() {
     <div className="flex flex-col gap-4 px-4 py-6 sm:px-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[#1E293B]">Contatos e grupos</h1>
+        <h1 className="text-2xl font-bold text-[#1E293B]">Contatos e grupos</h1>
           <p className="mt-0.5 text-sm text-[#64748B]">
             Total: <span className="font-medium tabular-nums text-[#1E293B]">{contacts.length}</span> contato{contacts.length !== 1 ? "s" : ""} · <span className="font-medium tabular-nums text-[#1E293B]">{groups.length}</span> grupo{groups.length !== 1 ? "s" : ""}
             {filterChannelId ? ` (${channelName(filterChannelId)})` : " (todas as instâncias)"}
@@ -1553,7 +1553,7 @@ export default function ContatosPage() {
           className={`flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
             activeTab === "communities" ? "border-clicvend-orange text-clicvend-orange" : "border-transparent text-[#64748B] hover:text-[#1E293B]"
           }`}
-          >
+        >
           <MessageCircle className="h-4 w-4" />
           Comunidades ({communities.length})
           </button>
@@ -1793,16 +1793,16 @@ export default function ContatosPage() {
                           );
                         }
                         elements.push(
-                          <tr
-                            key={row.id}
-                            className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]"
-                          >
-                            {row.getVisibleCells().map((cell) => (
-                              <td key={cell.id} className="px-4 py-3">
-                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                              </td>
-                            ))}
-                          </tr>
+                      <tr
+                        key={row.id}
+                        className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]"
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} className="px-4 py-3">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
                         );
                         return elements;
                       });
@@ -2180,8 +2180,8 @@ export default function ContatosPage() {
                     {selectedCommunityIds.size} comunidade(s) selecionada(s)
                   </span>
                   <div className="inline-flex rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
-                    <button
-                      type="button"
+            <button
+              type="button"
                       onClick={() => {
                         const ids = Array.from(selectedCommunityIds);
                         const blob = new Blob([
@@ -2208,9 +2208,9 @@ export default function ContatosPage() {
                       title="Baixar as comunidades selecionadas em CSV"
                     >
                       Exportar CSV
-                    </button>
-                    <button
-                      type="button"
+            </button>
+            <button
+              type="button"
                       onClick={() => setSelectedCommunityIds(new Set())}
                       className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] last:border-r-0"
                       title="Limpar seleção"
@@ -2220,20 +2220,20 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={selectedCommunityIds.size !== 1}
-                      onClick={() => {
+              onClick={() => {
                         if (selectedCommunityIds.size !== 1) return;
                         const id = Array.from(selectedCommunityIds)[0];
                         const c = communities.find((x) => x.id === id);
                         if (c) {
                           setManageGroup(c);
-                          setManageGroupOpen(true);
+                setManageGroupOpen(true);
                         }
-                      }}
+              }}
                       className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-50 disabled:cursor-not-allowed border-r border-[#E2E8F0]"
                       title={selectedCommunityIds.size === 1 ? "Abrir configuração da comunidade" : "Selecione uma comunidade para configurar"}
-                    >
+            >
                       Configurar
-                    </button>
+            </button>
                     <button
                       type="button"
                       disabled={selectedCommunityIds.size === 0 || deletingGroup}
@@ -2287,13 +2287,13 @@ export default function ContatosPage() {
                         {row.getVisibleCells().map((cell) => (
                           <td key={cell.id} className="px-4 py-3">
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
+                    </td>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
               <div className="flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
                 <span className="text-sm text-[#64748B]">
                   Página {communitiesTable.getState().pagination.pageIndex + 1} de {communitiesTable.getPageCount() || 1} ({filteredCommunities.length} comunidade{filteredCommunities.length !== 1 ? "s" : ""})
@@ -2316,9 +2316,9 @@ export default function ContatosPage() {
                     <ChevronRight className="h-4 w-4" />
                   </button>
                 </div>
-              </div>
-            </>
-          )}
+          </div>
+        </>
+      )}
         </div>
       ) : null}
 

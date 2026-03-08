@@ -2,8 +2,23 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 import { getRedisClient } from "@/lib/redis/client";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
-import { getNextAgentForQueue } from "@/lib/queue/round-robin";
 import { NextResponse } from "next/server";
+
+/** Normaliza JID: @lid -> @s.whatsapp.net; garante sufixo @s.whatsapp.net para contato. */
+function normalizeWhatsAppJid(raw: string): string {
+  const s = (raw ?? "").trim();
+  if (!s) return "";
+  if (s.endsWith("@g.us")) return s.toLowerCase();
+  const normalized = s.replace(/@lid$/i, "@s.whatsapp.net");
+  if (normalized.includes("@")) return normalized.toLowerCase();
+  const digits = normalized.replace(/\D/g, "");
+  return digits ? `${digits}@s.whatsapp.net` : s;
+}
+
+/** Extrai só os dígitos do número/JID para channel_contacts.phone. */
+function phoneDigitsOnly(raw: string): string {
+  return (raw ?? "").replace(/\D/g, "");
+}
 
 type WebhookPayload = {
   event?: string;
@@ -129,19 +144,22 @@ export async function POST(request: Request) {
     const bodyChatSource = (body as { chatSource?: string }).chatSource;
     // Payload no formato { EventType: "messages", chat, message } sem body.data: montar um item a partir de chat + message
     if ((!data || Object.keys(data).length === 0) && bodyChat && bodyMessage && typeof bodyMessage === "object") {
-      const from = (bodyMessage as { from?: string }).from ?? (bodyMessage as { number?: string }).number ?? "";
+      const fromRaw = (bodyMessage as { from?: string }).from ?? (bodyMessage as { number?: string }).number ?? "";
+      const from = normalizeWhatsAppJid(fromRaw);
       const chatIdRaw =
         (typeof bodyChatSource === "string" && bodyChatSource.trim()) ||
         (typeof (bodyChat as { wa_chatid?: string }).wa_chatid === "string" && (bodyChat as { wa_chatid: string }).wa_chatid) ||
-        (typeof (bodyChat as { id?: string }).id === "string" && (bodyChat as { id: string }).id?.includes("@") && (bodyChat as { id: string }).id) ||
+        (typeof (bodyChat as { id?: string }).id === "string" && (bodyChat as { id: string }).id?.includes("@") && normalizeWhatsAppJid((bodyChat as { id: string }).id)) ||
         "";
-      const chatId = chatIdRaw || (from ? (from.includes("@") ? from : `${from.replace(/\D/g, "")}@s.whatsapp.net`) : "");
+      const chatId = chatIdRaw || (from || (fromRaw ? `${phoneDigitsOnly(fromRaw)}@s.whatsapp.net` : ""));
+      const pushName = (bodyMessage as { pushName?: string }).pushName ?? (bodyChat as { name?: string }).name ?? (bodyChat as { wa_contactName?: string }).wa_contactName ?? "";
       data = {
         ...(bodyMessage as Record<string, unknown>),
-        chatId: chatId || (from && !from.includes("@") ? `${from.replace(/\D/g, "")}@s.whatsapp.net` : from),
-        chatid: chatId || (from && !from.includes("@") ? `${from.replace(/\D/g, "")}@s.whatsapp.net` : from),
+        chatId: chatId || from,
+        chatid: chatId || from,
         from: from || (bodyMessage as { sender?: string }).sender,
         number: from,
+        pushName: pushName || undefined,
         text: (bodyMessage as { text?: string }).text ?? (bodyMessage as { body?: string }).body ?? (bodyMessage as { content?: string }).content,
         body: (bodyMessage as { body?: string }).body ?? (bodyMessage as { text?: string }).text,
         fromMe: (bodyMessage as { fromMe?: boolean }).fromMe === true,
@@ -301,8 +319,17 @@ async function processOneMessage(
     return true;
   }
 
-  const externalId = (data.chatId ?? data.chatid ?? "") as string;
-  const customerPhone = (data.from ?? data.number ?? data.wa_id ?? "") as string;
+  let externalId = (data.chatId ?? data.chatid ?? "") as string;
+  let customerPhone = (data.from ?? data.number ?? data.wa_id ?? "") as string;
+  externalId = normalizeWhatsAppJid(externalId);
+  customerPhone = normalizeWhatsAppJid(customerPhone);
+  if (!externalId && customerPhone) externalId = customerPhone;
+  if (!customerPhone && externalId) customerPhone = externalId;
+  const invalidExternalIds = ["updated", "undefined", ""];
+  if (invalidExternalIds.includes(externalId) || !externalId || externalId.length < 5) {
+    console.warn("[WEBHOOK] processOneMessage: externalId inválido ignorado", { rawChatId: (data.chatId ?? data.chatid) as string, rawFrom: (data.from ?? data.number) as string });
+    return true;
+  }
   const rawType = (data.type ?? data.mediaType ?? data.messageType ?? "") as string;
   const mediaUrl = (
     data.mediaUrl ?? data.file ?? data.url ?? data.image ?? data.base64 ?? (data as { media?: { url?: string } }).media?.url ?? ""
@@ -589,11 +616,9 @@ async function processOneMessage(
         .eq("id", conversationId);
       console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId });
     } else {
-      // Distribuição automática round-robin por fila (Redis + Supabase)
-      let assignedTo: string | null = null;
-      if (queueId) {
-        assignedTo = await getNextAgentForQueue(companyId, queueId);
-      }
+      // Nova conversa: fica em "Novos" (não atribuir). Só vai para fila/Meus quando o atendente clicar para pegar.
+      const assignedTo: string | null = null;
+      const displayPhone = phoneDigitsOnly(externalId) || phoneDigitsOnly(customerPhone) || customerPhone;
 
       const { data: inserted, error: insertConvError } = await supabase
         .from("conversations")
@@ -604,7 +629,7 @@ async function processOneMessage(
           wa_chat_jid: externalId,
           kind: "ticket",
           is_group: false,
-          customer_phone: customerPhone,
+          customer_phone: displayPhone,
           customer_name: customerName,
           queue_id: queueId,
           assigned_to: assignedTo,
@@ -619,19 +644,19 @@ async function processOneMessage(
         return false;
       }
       conversationId = inserted.id;
-      console.log("[WEBHOOK] Conversa criada:", { conversationId, queueId, assignedTo });
-      // Garante que o contato exista em channel_contacts para depois preencher avatar_url (sync-contacts ou chat-details).
+      console.log("[WEBHOOK] Conversa criada (Novos):", { conversationId, queueId });
       await supabase.from("channel_contacts").upsert(
         {
           channel_id: channelId,
           company_id: companyId,
           jid: externalId,
-          phone: customerPhone || null,
+          phone: displayPhone || null,
           contact_name: customerName || null,
+          first_name: (customerName || (data as { pushName?: string }).pushName) || null,
         },
         { onConflict: "channel_id,jid", ignoreDuplicates: false }
       );
-      console.log("[WEBHOOK] Contato criado/atualizado:", { jid: externalId, phone: customerPhone, name: customerName });
+      console.log("[WEBHOOK] Contato criado/atualizado:", { jid: externalId, phone: displayPhone, name: customerName });
     }
 
     const { error: msgError } = await supabase.from("messages").insert({
