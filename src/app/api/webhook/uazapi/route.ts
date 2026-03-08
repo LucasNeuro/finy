@@ -99,7 +99,8 @@ export async function POST(request: Request) {
     // Tentar extrair instance ID de diferentes lugares
     // Formato 1: { instance: "...", event: "...", data: {...} }
     // Formato 2: { instanceId: "...", ... }
-    // Formato 3: Headers ou query params
+    // Formato 3: { instanceName: "...", EventType: "messages", chat, message } (UAZAPI/Go)
+    // Formato 4: Headers ou query params
     let instanceId = body?.instance as string | undefined;
     if (!instanceId) {
       instanceId = (body as { instanceId?: string }).instanceId;
@@ -107,7 +108,9 @@ export async function POST(request: Request) {
     if (!instanceId) {
       instanceId = (body as { Instance?: string }).Instance;
     }
-    
+    if (!instanceId && typeof (body as { instanceName?: string }).instanceName === "string") {
+      instanceId = (body as { instanceName: string }).instanceName.trim();
+    }
     // Tentar extrair de headers ou query params
     if (!instanceId) {
       const url = new URL(request.url);
@@ -117,9 +120,36 @@ export async function POST(request: Request) {
       const headers = request.headers;
       instanceId = headers.get("x-instance-id") || headers.get("instance") || undefined;
     }
-    
+
     const event = body?.event as string | Record<string, unknown> | undefined;
-    const data = (body?.data ?? {}) as WebhookPayload["data"];
+    const eventTypeFromBody = (body as { EventType?: string }).EventType;
+    let data = (body?.data ?? {}) as WebhookPayload["data"];
+    const bodyChat = (body as { chat?: Record<string, unknown> }).chat;
+    const bodyMessage = (body as { message?: Record<string, unknown> }).message;
+    const bodyChatSource = (body as { chatSource?: string }).chatSource;
+    // Payload no formato { EventType: "messages", chat, message } sem body.data: montar um item a partir de chat + message
+    if ((!data || Object.keys(data).length === 0) && bodyChat && bodyMessage && typeof bodyMessage === "object") {
+      const from = (bodyMessage as { from?: string }).from ?? (bodyMessage as { number?: string }).number ?? "";
+      const chatIdRaw =
+        (typeof bodyChatSource === "string" && bodyChatSource.trim()) ||
+        (typeof (bodyChat as { wa_chatid?: string }).wa_chatid === "string" && (bodyChat as { wa_chatid: string }).wa_chatid) ||
+        (typeof (bodyChat as { id?: string }).id === "string" && (bodyChat as { id: string }).id?.includes("@") && (bodyChat as { id: string }).id) ||
+        "";
+      const chatId = chatIdRaw || (from ? (from.includes("@") ? from : `${from.replace(/\D/g, "")}@s.whatsapp.net`) : "");
+      data = {
+        chatId: chatId || (from && !from.includes("@") ? `${from.replace(/\D/g, "")}@s.whatsapp.net` : from),
+        chatid: chatId || (from && !from.includes("@") ? `${from.replace(/\D/g, "")}@s.whatsapp.net` : from),
+        from: from || (bodyMessage as { sender?: string }).sender,
+        number: from,
+        text: (bodyMessage as { text?: string }).text ?? (bodyMessage as { body?: string }).body ?? (bodyMessage as { content?: string }).content,
+        body: (bodyMessage as { body?: string }).body ?? (bodyMessage as { text?: string }).text,
+        fromMe: (bodyMessage as { fromMe?: boolean }).fromMe === true,
+        isGroup: (bodyChat as { wa_isGroup?: boolean })?.wa_isGroup === true || (typeof chatId === "string" && chatId.endsWith("@g.us")),
+        timestamp: (bodyMessage as { timestamp?: number }).timestamp ?? (bodyMessage as { sent_at?: number }).sent_at,
+        type: (bodyMessage as { type?: string }).type,
+        ...(bodyMessage as Record<string, unknown>),
+      } as WebhookPayload["data"];
+    }
 
     // UAZAPI pode enviar event como objeto (ex.: { Type: 'Delivered', Chat: '...' }) sem enviar instance.
     // Detectar tipo do evento tanto no topo quanto dentro de body.event
@@ -159,10 +189,15 @@ export async function POST(request: Request) {
         instanceId = possibleInstance;
         console.log("[WEBHOOK] Instance encontrado dentro do payload:", instanceId);
       } else {
-        // Tentar identificar canal pelo chatId (fallback para webhook global)
+        // Tentar identificar canal pelo chatId/JID (fallback para webhook global)
+        const msg = (body as { message?: { from?: string; number?: string } }).message;
         const chatId = (body as { Chat?: string; chatid?: string; chatId?: string }).Chat ||
                        (body as { chatid?: string }).chatid ||
                        (body as { chatId?: string }).chatId ||
+                       (typeof (body as { chatSource?: string }).chatSource === "string" && (body as { chatSource: string }).chatSource.trim()) ||
+                       (bodyChat && typeof (bodyChat as { wa_chatid?: string }).wa_chatid === "string" && (bodyChat as { wa_chatid: string }).wa_chatid) ||
+                       (bodyChat && typeof (bodyChat as { id?: string }).id === "string" && (bodyChat as { id: string }).id?.includes("@") && (bodyChat as { id: string }).id) ||
+                       (msg && typeof msg.from === "string" && (msg.from.includes("@") ? msg.from : `${String(msg.from).replace(/\D/g, "")}@s.whatsapp.net`)) ||
                        (eventObj && typeof eventObj === "object" && "Chat" in eventObj && (eventObj as { Chat?: string }).Chat) ||
                        (eventObj && typeof eventObj === "object" && "chatid" in eventObj && (eventObj as { chatid?: string }).chatid);
         
@@ -196,7 +231,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const eventName = typeof event === "string" ? event : undefined;
+    const eventName = (typeof eventTypeFromBody === "string" ? eventTypeFromBody : undefined) ?? (typeof event === "string" ? event : undefined);
     const isHistory = eventName === "history";
     const isMessageEvent =
       eventName === "messages" ||
