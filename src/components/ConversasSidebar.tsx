@@ -33,6 +33,26 @@ function formatLastMessageTime(iso: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
+/** Formata número para exibição: (DDD) 9 00000-0000. Aceita dígitos puros. */
+function formatPhoneBrazil(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim().replace(/\D/g, "");
+  if (!s) return "—";
+  const withCountry = s.length >= 12 && s.startsWith("55");
+  const digits = withCountry ? s.slice(2) : s;
+  if (digits.length >= 10) {
+    const ddd = digits.slice(0, 2);
+    const rest = digits.slice(2);
+    if (rest.length >= 9 && rest[0] === "9") {
+      return `(${ddd}) ${rest.slice(0, 1)} ${rest.slice(1, 6)}-${rest.slice(6, 10)}`;
+    }
+    if (rest.length >= 8) {
+      return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4, 8)}`;
+    }
+  }
+  if (s.length <= 14) return s;
+  return s.slice(0, 14) + "…";
+}
+
 type ViewMode = "mine" | "queues" | "unassigned";
 type ConversationTypeFilter = "all" | "individual" | "group";
 /** Tab ativa: só ícones — Novos, Filas, Meus atendimentos, Contatos (individuais), Grupos */
@@ -89,7 +109,7 @@ const ConversationListItem = memo(function ConversationListItem({
   showQueueColors?: boolean;
 }) {
   const href = `${base}/conversas/${c.id}`;
-  const displayName = (c.customer_name ?? c.customer_phone) ?? "?";
+  const displayName = (c.customer_name ?? formatPhoneBrazil(c.customer_phone)) ?? "?";
   const initial = displayName.slice(0, 1).toUpperCase();
   const isGroup = c.is_group === true;
   const showClaim = canClaim && (c.assigned_to == null || c.assigned_to === "");
@@ -133,7 +153,7 @@ const ConversationListItem = memo(function ConversationListItem({
                 {isNew && (
                   <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500 shadow-sm ring-2 ring-amber-100" title="Nova conversa (não atribuída)" aria-hidden />
                 )}
-                <span className="truncate">{c.customer_name || c.customer_phone}</span>
+                <span className="truncate">{c.customer_name || formatPhoneBrazil(c.customer_phone)}</span>
               </p>
               <span className="shrink-0 text-xs font-medium text-[#64748B]">
                 {formatLastMessageTime(c.last_message_at)}
@@ -765,7 +785,7 @@ export function ConversasSidebar() {
             <p className="mt-2 text-xs leading-relaxed">
               {activeTab === "mine" && "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."}
               {activeTab === "queues" && "Nenhuma conversa nas suas filas no momento."}
-              {activeTab === "novos" && "Nenhum chamado novo (não atribuído) no momento. Novos entram pela aba Filas."}
+              {activeTab === "novos" && "Novos chamados aparecem aqui. Clique em Pegar para assumir."}
             </p>
             <p className="mt-3 text-xs leading-relaxed">
               Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline font-medium">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline font-medium">Conexões</Link> recebem mensagens e histórico em segundo plano.

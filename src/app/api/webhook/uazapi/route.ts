@@ -20,6 +20,20 @@ function phoneDigitsOnly(raw: string): string {
   return (raw ?? "").replace(/\D/g, "");
 }
 
+/**
+ * Normaliza número para uma forma canônica (Brasil): um número = um contato/conversa.
+ * - 10 ou 11 dígitos (DDD + número sem 55) → adiciona 55 na frente
+ * - 12 ou 13 dígitos começando com 55 → mantém
+ * - Grupos não são normalizados (retorna null para não aplicar).
+ */
+function toCanonicalPhone(digits: string, isGroup: boolean): string {
+  if (isGroup || !digits) return digits;
+  const d = digits.replace(/\D/g, "");
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
+  return d;
+}
+
 type WebhookPayload = {
   event?: string;
   instance?: string;
@@ -166,6 +180,8 @@ export async function POST(request: Request) {
         isGroup: (bodyChat as { wa_isGroup?: boolean })?.wa_isGroup === true || (typeof chatId === "string" && chatId.endsWith("@g.us")),
         timestamp: (bodyMessage as { timestamp?: number }).timestamp ?? (bodyMessage as { sent_at?: number }).sent_at,
         type: (bodyMessage as { type?: string }).type,
+        chatImagePreview: (bodyChat as { imagePreview?: string }).imagePreview ?? (bodyChat as { image?: string }).image ?? "",
+        chatImage: (bodyChat as { image?: string }).image ?? (bodyChat as { imagePreview?: string }).imagePreview ?? "",
       } as WebhookPayload["data"];
     }
 
@@ -373,7 +389,7 @@ async function processOneMessage(
   const fileName = (data.fileName ?? data.filename ?? data.docName) as string | undefined;
   const finalFileName = fileName && typeof fileName === "string" ? fileName.slice(0, 255) : null;
 
-    const isGroup =
+  const isGroup =
       data.isGroup === true ||
       (typeof externalId === "string" && externalId.endsWith("@g.us"));
 
@@ -598,13 +614,37 @@ async function processOneMessage(
       queueId = listForHours[0].queue_id;
     }
 
-    const { data: existingTicket } = await supabase
+    const digitsForCanonical = phoneDigitsOnly(externalId) || phoneDigitsOnly(customerPhone);
+    const canonicalDigits = toCanonicalPhone(digitsForCanonical, isGroup);
+    const canonicalExternalId = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : externalId;
+
+    let existingTicket: { id: string } | null = null;
+    const { data: byExternal } = await supabase
       .from("conversations")
       .select("id")
       .eq("channel_id", channelId)
-      .eq("external_id", externalId)
+      .eq("external_id", canonicalExternalId)
       .eq("kind", "ticket")
-      .single();
+      .limit(1)
+      .maybeSingle();
+    if (byExternal) existingTicket = byExternal;
+    if (!existingTicket && canonicalDigits) {
+      const { data: byPhone } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("channel_id", channelId)
+        .eq("customer_phone", canonicalDigits)
+        .eq("kind", "ticket")
+        .limit(1)
+        .maybeSingle();
+      if (byPhone) existingTicket = byPhone;
+    }
+
+    const displayPhone = canonicalDigits || digitsForCanonical || phoneDigitsOnly(customerPhone);
+    const contactAvatarUrl =
+      ((data as { chatImagePreview?: string }).chatImagePreview?.trim() ||
+        (data as { chatImage?: string }).chatImage?.trim() ||
+        null) || null;
 
     let conversationId: string;
     if (existingTicket) {
@@ -614,22 +654,38 @@ async function processOneMessage(
         .update({
           last_message_at: sentAt,
           updated_at: new Date().toISOString(),
-          wa_chat_jid: externalId,
+          wa_chat_jid: canonicalExternalId,
+          external_id: canonicalExternalId,
+          customer_phone: displayPhone || undefined,
         })
         .eq("id", conversationId);
       console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId });
+      if (externalId !== canonicalExternalId) {
+        await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("jid", externalId);
+      }
+      await supabase.from("channel_contacts").upsert(
+        {
+          channel_id: channelId,
+          company_id: companyId,
+          jid: canonicalExternalId,
+          phone: displayPhone || null,
+          contact_name: customerName || null,
+          first_name: (customerName || (data as { pushName?: string }).pushName) || null,
+          ...(contactAvatarUrl && { avatar_url: contactAvatarUrl }),
+        },
+        { onConflict: "channel_id,jid", ignoreDuplicates: false }
+      );
     } else {
       // Nova conversa: fica em "Novos" (não atribuir). Só vai para fila/Meus quando o atendente clicar para pegar.
       const assignedTo: string | null = null;
-      const displayPhone = phoneDigitsOnly(externalId) || phoneDigitsOnly(customerPhone) || customerPhone;
 
       const { data: inserted, error: insertConvError } = await supabase
         .from("conversations")
         .insert({
           company_id: companyId,
           channel_id: channelId,
-          external_id: externalId,
-          wa_chat_jid: externalId,
+          external_id: canonicalExternalId,
+          wa_chat_jid: canonicalExternalId,
           kind: "ticket",
           is_group: false,
           customer_phone: displayPhone,
@@ -648,18 +704,22 @@ async function processOneMessage(
       }
       conversationId = inserted.id;
       console.log("[WEBHOOK] Conversa criada (Novos):", { conversationId, queueId });
+      if (externalId !== canonicalExternalId) {
+        await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("jid", externalId);
+      }
       await supabase.from("channel_contacts").upsert(
         {
           channel_id: channelId,
           company_id: companyId,
-          jid: externalId,
+          jid: canonicalExternalId,
           phone: displayPhone || null,
           contact_name: customerName || null,
           first_name: (customerName || (data as { pushName?: string }).pushName) || null,
+          ...(contactAvatarUrl && { avatar_url: contactAvatarUrl }),
         },
         { onConflict: "channel_id,jid", ignoreDuplicates: false }
       );
-      console.log("[WEBHOOK] Contato criado/atualizado:", { jid: externalId, phone: displayPhone, name: customerName });
+      console.log("[WEBHOOK] Contato criado/atualizado:", { jid: canonicalExternalId, phone: displayPhone, name: customerName });
     }
 
     const { error: msgError } = await supabase.from("messages").insert({
