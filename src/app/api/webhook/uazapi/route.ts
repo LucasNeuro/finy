@@ -93,38 +93,126 @@ function triggerSyncHistoryForInstance(instanceId: string): void {
  */
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as WebhookPayload;
-    const event = body?.event;
-    const instanceId = body?.instance;
-    const data = body?.data ?? {};
-
-    console.log("[WEBHOOK] Recebido:", { event, instanceId, hasData: !!data });
-
+    const body = (await request.json()) as WebhookPayload & Record<string, unknown>;
+    
+    // Tentar extrair instance ID de diferentes lugares
+    // Formato 1: { instance: "...", event: "...", data: {...} }
+    // Formato 2: { instanceId: "...", ... }
+    // Formato 3: Headers ou query params
+    let instanceId = body?.instance as string | undefined;
     if (!instanceId) {
-      console.error("[WEBHOOK] ERRO: Missing instance");
-      return NextResponse.json(
-        { error: "Missing instance" },
-        { status: 400 }
-      );
+      instanceId = (body as { instanceId?: string }).instanceId;
+    }
+    if (!instanceId) {
+      instanceId = (body as { Instance?: string }).Instance;
+    }
+    
+    // Tentar extrair de headers ou query params
+    if (!instanceId) {
+      const url = new URL(request.url);
+      instanceId = url.searchParams.get("instance") || undefined;
+    }
+    if (!instanceId) {
+      const headers = request.headers;
+      instanceId = headers.get("x-instance-id") || headers.get("instance") || undefined;
+    }
+    
+    const event = body?.event as string | Record<string, unknown> | undefined;
+    const data = (body?.data ?? {}) as WebhookPayload["data"];
+
+    // UAZAPI pode enviar event como objeto (ex.: { Type: 'Delivered', Chat: '...' }) sem enviar instance.
+    // Detectar tipo do evento tanto no topo quanto dentro de body.event
+    const eventObj = typeof event === "object" && event !== null ? event : undefined;
+    const eventTypeFromObj = eventObj && typeof eventObj === "object"
+      ? (eventObj as { Type?: string; type?: string }).Type ?? (eventObj as { type?: string }).type
+      : undefined;
+    const eventTypeTop = (body as { Type?: string; type?: string }).Type ?? (body as { type?: string }).type;
+    const eventType = eventTypeTop ?? eventTypeFromObj;
+
+    // Se não tem instance, tratar primeiro eventos de status (não precisam de instance)
+    if (!instanceId) {
+      if (eventType === "Delivered" || eventType === "Read" || eventType === "Sent") {
+        console.log("[WEBHOOK] Evento de status ignorado:", eventType);
+        return NextResponse.json({ ok: true });
+      }
     }
 
-    const isHistory = event === "history";
+    // Log completo do payload para debug
+    console.log("[WEBHOOK] Recebido:", { 
+      event: typeof event === "string" ? event : eventType ?? "object", 
+      instanceId, 
+      hasData: !!data,
+      bodyKeys: Object.keys(body),
+      payloadPreview: JSON.stringify(body).slice(0, 800)
+    });
+
+    // Se ainda não tem instance ID, tentar outras fontes
+    if (!instanceId) {
+      // Tentar buscar instance dentro do payload (pode estar em diferentes lugares)
+      const possibleInstance = (body as Record<string, unknown>).instanceId || 
+                               (body as Record<string, unknown>).InstanceId ||
+                               (body as Record<string, unknown>).instance ||
+                               (body as Record<string, unknown>).Instance;
+      
+      if (possibleInstance && typeof possibleInstance === "string") {
+        instanceId = possibleInstance;
+        console.log("[WEBHOOK] Instance encontrado dentro do payload:", instanceId);
+      } else {
+        // Tentar identificar canal pelo chatId (fallback para webhook global)
+        const chatId = (body as { Chat?: string; chatid?: string; chatId?: string }).Chat ||
+                       (body as { chatid?: string }).chatid ||
+                       (body as { chatId?: string }).chatId ||
+                       (eventObj && typeof eventObj === "object" && "Chat" in eventObj && (eventObj as { Chat?: string }).Chat) ||
+                       (eventObj && typeof eventObj === "object" && "chatid" in eventObj && (eventObj as { chatid?: string }).chatid);
+        
+        if (chatId) {
+          console.log("[WEBHOOK] Tentando identificar canal por chatId:", chatId);
+          const supabase = createServiceRoleClient();
+          const { data: convData } = await supabase
+            .from("conversations")
+            .select("channel_id, channels!inner(uazapi_instance_id)")
+            .eq("external_id", chatId)
+            .limit(1)
+            .single();
+          
+          if (convData) {
+            const channelsData = convData as unknown as { channels?: { uazapi_instance_id?: string } | Array<{ uazapi_instance_id?: string }> };
+            const channels = Array.isArray(channelsData.channels) ? channelsData.channels[0] : channelsData.channels;
+            if (channels && typeof channels === "object" && "uazapi_instance_id" in channels && channels.uazapi_instance_id) {
+              instanceId = channels.uazapi_instance_id;
+              console.log("[WEBHOOK] Instance identificado via chatId:", instanceId);
+            }
+          }
+        }
+        
+        if (!instanceId) {
+          console.error("[WEBHOOK] ERRO: Missing instance - payload:", JSON.stringify(body).slice(0, 1000));
+          return NextResponse.json(
+            { error: "Missing instance" },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    const eventName = typeof event === "string" ? event : undefined;
+    const isHistory = eventName === "history";
     const isMessageEvent =
-      event === "messages" ||
-      event === "message" ||
-      event === "onmessage" ||
-      event === "message.update" ||
-      event === "message_create" ||
-      event === "message.create";
+      eventName === "messages" ||
+      eventName === "message" ||
+      eventName === "onmessage" ||
+      eventName === "message.update" ||
+      eventName === "message_create" ||
+      eventName === "message.create";
     const hasMessageLikeData =
       (data?.chatId || data?.chatid) &&
       (data?.text != null || data?.body != null || data?.content != null || data?.caption != null ||
        data?.mediaUrl != null || data?.file != null || (data?.type && data?.type !== "conversation"));
-    const treatAsMessage = isMessageEvent || isHistory || (!event && hasMessageLikeData);
+    const treatAsMessage = isMessageEvent || isHistory || (!eventName && hasMessageLikeData);
 
     if (!treatAsMessage) {
-      console.log("[WEBHOOK] Não é mensagem, evento:", event, "payload:", JSON.stringify(body).slice(0, 500));
-      if (event === "connection" || event === "connected" || event === "onconnection") {
+      console.log("[WEBHOOK] Não é mensagem, evento:", eventName ?? eventType ?? "object", "payload:", JSON.stringify(body).slice(0, 500));
+      if (eventName === "connection" || eventName === "connected" || eventName === "onconnection") {
         triggerSyncHistoryForInstance(instanceId);
       }
       return NextResponse.json({ ok: true });

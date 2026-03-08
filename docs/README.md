@@ -25,6 +25,8 @@ Esta pasta contém a documentação para construção do sistema por um agente o
 | **verificar-usuario-owner.sql** | Queries para verificar owner da empresa e explicar por que só aparece 1 usuário (owner não precisa estar em queue_assignments). |
 | **webhook-local-vs-producao.md** | Explicação de por que mensagens não chegam localmente (webhook aponta para produção) e como configurar ngrok/localtunnel. |
 | **webhook-desenvolvimento-industria.md** | Como plataformas como Zendesk, Intercom e Freshdesk lidam com webhooks em desenvolvimento (práticas da indústria). |
+| **teste-producao-webhook.md** | Checklist para testar webhook em produção após deploy no Render (verificações e troubleshooting). |
+| **webhook-uazapi-opcoes-avancadas.md** | Explicação das opções `addUrlEvents` e `addUrlTypesMessages` do webhook UAZAPI e se são necessárias para nossa aplicação. |
 | **design/references/** | Pasta para imagens de referência de UI (ver README na pasta para nomes sugeridos). |
 | **uazapi-openapi-spec (8).yaml** | OpenAPI da uazapi (WhatsApp): endpoints, webhook, envio de mensagens. |
 
