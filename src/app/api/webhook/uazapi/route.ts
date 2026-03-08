@@ -42,11 +42,12 @@ const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
 
 /**
  * Dispara sincronização de histórico em background quando o WhatsApp conecta.
- * Chamado sem await para o webhook responder 200 rápido.
- * Debounce: mesmo canal não dispara de novo antes de 5 min (evita gargalo com muitas empresas).
- * No deploy (ex.: Render) defina: APP_URL=https://clicvend.onrender.com e INTERNAL_SYNC_SECRET=<senha secreta>.
+ * Só roda se ENABLE_SYNC_HISTORY_ON_CONNECT=true (por padrão desligado: fluxo é só fila por chamado;
+ * histórico/contatos antigos entram apenas quando o usuário clicar em Sincronizar).
  */
 function triggerSyncHistoryForInstance(instanceId: string): void {
+  if (process.env.ENABLE_SYNC_HISTORY_ON_CONNECT !== "true") return;
+
   const now = Date.now();
   const last = lastSyncTriggerByInstance.get(instanceId) ?? 0;
   if (now - last < SYNC_DEBOUNCE_MS) return;
@@ -74,7 +75,7 @@ function triggerSyncHistoryForInstance(instanceId: string): void {
         headers: { "X-Internal-Sync-Secret": secret, "Content-Type": "application/json" },
       });
     } catch {
-      // ignorar erros; sync pode ser refeito manualmente ou na próxima conexão
+      // ignorar erros; sync pode ser refeito manualmente na tela de Conexões
     }
   })();
 }
@@ -86,7 +87,7 @@ function triggerSyncHistoryForInstance(instanceId: string): void {
  * - messages          → processamos: cria/atualiza conversa, insere mensagem, distribui fila (até 80 itens/request).
  * - messages_update   → só 200 (status lido/entregue; não grava no nosso DB para não sobrecarregar).
  * - contacts, groups, chats, chat_labels, leads → só 200 (não processamos; evita gargalo).
- * - connection / connected / onconnection → 200 + dispara sync de histórico em background (com debounce 5 min).
+ * - connection / connected / onconnection → 200 (não dispara mais sync automático; histórico só ao clicar em Sincronizar).
  * - history           → processamos como lote de mensagens (até 80 itens).
  *
  * Manter "wasSentByApi" excluído no painel para não entrar em loop.
