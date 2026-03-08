@@ -55,6 +55,34 @@ function toCanonicalPhone(digits: string, isGroup: boolean): string {
   return d;
 }
 
+/**
+ * Remove contatos duplicados do mesmo número (JID em outro formato).
+ * Ex.: sync gravou 4184727733@s.whatsapp.net e o webhook usa 554184727733@s.whatsapp.net —
+ * ficamos só com o canônico e evitamos dois cards "Vô Dos Meninos".
+ */
+async function mergeDuplicateContacts(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  channelId: string,
+  companyId: string,
+  canonicalDigits: string,
+  canonicalExternalId: string
+): Promise<void> {
+  if (!canonicalDigits || !canonicalExternalId) return;
+  const { data: rows } = await supabase
+    .from("channel_contacts")
+    .select("id, jid")
+    .eq("channel_id", channelId)
+    .eq("company_id", companyId);
+  for (const row of rows ?? []) {
+    const jid = (row as { jid?: string }).jid ?? "";
+    const digits = jid.replace(/\D/g, "").replace(/@.*$/, "").trim();
+    const rowCanonical = toCanonicalPhone(digits, false);
+    if (rowCanonical === canonicalDigits && jid !== canonicalExternalId) {
+      await supabase.from("channel_contacts").delete().eq("id", (row as { id: string }).id);
+    }
+  }
+}
+
 type WebhookPayload = {
   event?: string;
   instance?: string;
@@ -754,6 +782,7 @@ async function processOneMessage(
       if (externalId !== canonicalExternalId) {
         await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("jid", externalId);
       }
+      await mergeDuplicateContacts(supabase, channelId, companyId, canonicalDigits ?? "", canonicalExternalId);
       await supabase.from("channel_contacts").upsert(
         {
           channel_id: channelId,
@@ -798,6 +827,7 @@ async function processOneMessage(
       if (externalId !== canonicalExternalId) {
         await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("jid", externalId);
       }
+      await mergeDuplicateContacts(supabase, channelId, companyId, canonicalDigits ?? "", canonicalExternalId);
       await supabase.from("channel_contacts").upsert(
         {
           channel_id: channelId,
@@ -843,11 +873,10 @@ async function processOneMessage(
     const prevSnapshot = Array.isArray((convRow as { messages_snapshot?: unknown } | null)?.messages_snapshot)
       ? ((convRow as { messages_snapshot: unknown[] }).messages_snapshot)
       : [];
-    const hasDuplicate = prevSnapshot.some(
-      (m: { id?: string; external_id?: string }) =>
-        (insertedMsg.id && (m as { id?: string }).id === insertedMsg.id) ||
-        (messageExternalId && (m as { external_id?: string }).external_id === messageExternalId)
-    );
+    const hasDuplicate = prevSnapshot.some((m: unknown) => {
+      const row = m as { id?: string; external_id?: string };
+      return (insertedMsg.id && row.id === insertedMsg.id) || (messageExternalId && row.external_id === messageExternalId);
+    });
     const newSnapshot = hasDuplicate ? prevSnapshot : [...prevSnapshot, insertedMsg].slice(-SNAPSHOT_MAX);
     await supabase
       .from("conversations")

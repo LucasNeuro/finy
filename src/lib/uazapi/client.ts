@@ -1292,25 +1292,58 @@ export async function findMessages(
 }
 
 /**
- * Envia mensagem de texto (token da instância).
- * number: telefone ou JID (ex: 5511999999999 ou 120363...@g.us para grupos).
+ * Envia mensagem de texto (POST /send/text).
+ * number: ID do chat — número internacional (ex: 5511999999999), JID de grupo (@g.us) ou @s.whatsapp.net / @lid.
+ * Aceita opções: linkPreview, replyid, mentions, readchat, readmessages, delay, forward, track_source, track_id, async.
  */
+export type SendTextOptions = {
+  replyid?: string;
+  delay?: number;
+  linkPreview?: boolean;
+  linkPreviewTitle?: string;
+  linkPreviewDescription?: string;
+  linkPreviewImage?: string;
+  linkPreviewLarge?: boolean;
+  mentions?: string;
+  readchat?: boolean;
+  readmessages?: boolean;
+  forward?: boolean;
+  track_source?: string;
+  track_id?: string;
+  async?: boolean;
+};
+
 export async function sendText(
   token: string,
   number: string,
   text: string,
-  opts?: { replyid?: string; delay?: number }
+  opts?: SendTextOptions
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   const normalizedNumber = number.includes("@") ? number : number.replace(/\D/g, "");
+  const body: Record<string, unknown> = {
+    number: normalizedNumber,
+    text,
+  };
+  if (opts) {
+    if (opts.replyid) body.replyid = opts.replyid;
+    if (opts.delay != null) body.delay = opts.delay;
+    if (opts.linkPreview != null) body.linkPreview = opts.linkPreview;
+    if (opts.linkPreviewTitle != null) body.linkPreviewTitle = opts.linkPreviewTitle;
+    if (opts.linkPreviewDescription != null) body.linkPreviewDescription = opts.linkPreviewDescription;
+    if (opts.linkPreviewImage != null) body.linkPreviewImage = opts.linkPreviewImage;
+    if (opts.linkPreviewLarge != null) body.linkPreviewLarge = opts.linkPreviewLarge;
+    if (opts.mentions != null) body.mentions = opts.mentions;
+    if (opts.readchat != null) body.readchat = opts.readchat;
+    if (opts.readmessages != null) body.readmessages = opts.readmessages;
+    if (opts.forward != null) body.forward = opts.forward;
+    if (opts.track_source != null) body.track_source = opts.track_source;
+    if (opts.track_id != null) body.track_id = opts.track_id;
+    if (opts.async != null) body.async = opts.async;
+  }
   const { data, ok, error, status } = await uazapiFetch("/send/text", {
     method: "POST",
     token,
-    body: {
-      number: normalizedNumber,
-      text,
-      ...(opts?.replyid && { replyid: opts.replyid }),
-      ...(opts?.delay != null && { delay: opts.delay }),
-    },
+    body,
   });
   return {
     ok,

@@ -27,11 +27,26 @@ function normalizeGroupJid(jid: string): string {
 /** Normaliza JID de contato para formato único: número em dígitos + @s.whatsapp.net (lowercase) */
 function normalizeContactJid(jid: string): string {
   const s = (jid ?? "").trim();
-  const digits = s.replace(/\D/g, "");
-  if (digits) return `${digits}@s.whatsapp.net`;
-  const lower = s.toLowerCase();
-  if (lower.endsWith("@s.whatsapp.net")) return lower;
-  return s || jid;
+  const digits = s.replace(/\D/g, "").replace(/@.*$/, "").trim();
+  if (!digits) {
+    const lower = s.toLowerCase();
+    if (lower.endsWith("@s.whatsapp.net")) return lower;
+    return s || jid;
+  }
+  const canonical = toCanonicalContactDigits(digits);
+  return `${canonical}@s.whatsapp.net`;
+}
+
+/** Mesmo critério do webhook: 55 + DDD + número para evitar duplicata sync vs webhook */
+function toCanonicalContactDigits(d: string): string {
+  if (!d) return d;
+  let s = d;
+  if (s.length === 11 && s[2] === "0") {
+    s = s.slice(0, 2) + "9" + s.slice(3, 11);
+  }
+  if (s.length === 10 || s.length === 11) return "55" + s;
+  if ((s.length === 12 || s.length === 13) && s.startsWith("55")) return s;
+  return s;
 }
 
 type ProgressCallback = (progress: number, data?: { contacts_synced?: number; groups_synced?: number; avatars_synced?: number; error?: string }) => void;
