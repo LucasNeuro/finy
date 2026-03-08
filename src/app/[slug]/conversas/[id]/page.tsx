@@ -167,12 +167,12 @@ function ChatAudioPlayer({
 
   if (isLoading || !src) {
     return (
-      <div className="flex items-center gap-3 rounded-full bg-[#F1F5F9] border border-[#E2E8F0] px-4 py-2.5 min-w-[240px] max-w-[320px]">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
-          <Loader2 className="h-4 w-4 animate-spin text-[#64748B]" />
+      <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[260px] max-w-[340px]">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
+          <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="h-1.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
+          <div className="h-2 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
           <p className="mt-1 text-xs text-[#64748B]">Carregando áudio…</p>
         </div>
       </div>
@@ -180,22 +180,22 @@ function ChatAudioPlayer({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-full bg-[#F1F5F9] border border-[#E2E8F0] px-4 py-2.5 min-w-[240px] max-w-[320px] shadow-sm">
+    <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[260px] max-w-[340px] shadow-sm hover:border-[#CBD5E1] transition-colors">
       {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
       <button
         type="button"
         onClick={togglePlay}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark transition-colors focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-2"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-2"
         aria-label={playing ? "Pausar" : "Reproduzir"}
       >
         {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
       </button>
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-[#64748B] tabular-nums">
+        <p className="text-xs font-medium text-[#475569] tabular-nums">
           {formatDuration(currentTime)} / {loaded ? formatDuration(duration) : "–:––"}
         </p>
         <div
-          className="h-1.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-0.5"
+          className="h-2 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-1"
           onClick={(e) => {
             const el = audioRef.current;
             if (!el) return;
@@ -206,18 +206,21 @@ function ChatAudioPlayer({
             setCurrentTime(el.currentTime);
           }}
         >
-          <div className="h-full rounded-full bg-clicvend-orange transition-all duration-150" style={{ width: `${progress}%` }} />
+          <div
+            className="h-full rounded-full bg-clicvend-orange transition-all duration-150 ease-out"
+            style={{ width: `${progress}%` }}
+          />
         </div>
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
-        <span className="p-1.5 text-[#64748B]" title="Volume" aria-hidden>
+        <span className="p-1.5 text-[#64748B]" title="Áudio" aria-hidden>
           <Volume2 className="h-4 w-4" />
         </span>
         <div className="relative">
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
-            className="p-1.5 rounded-full text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#1E293B]"
+            className="p-1.5 rounded-full text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#1E293B] transition-colors"
             aria-label="Opções"
           >
             <MoreVerticalIcon className="h-4 w-4" />
@@ -293,6 +296,7 @@ function MessageBubble({
   apiHeaders,
   onReaction,
   onOpenDocumentViewer,
+  onDeleteMessage,
 }: {
   m: Message;
   name: string;
@@ -300,6 +304,7 @@ function MessageBubble({
   apiHeaders?: Record<string, string>;
   onReaction?: (messageId: string, emoji: string) => void;
   onOpenDocumentViewer?: (messageId: string, conversationId: string, fileName?: string | null, fileUrl?: string | null) => void;
+  onDeleteMessage?: (messageId: string, forEveryone: boolean) => void;
 }) {
   const type = m.message_type ?? "text";
   const displayType = inferDisplayType(type, m.content ?? "");
@@ -321,7 +326,9 @@ function MessageBubble({
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [moreEmojisOpen, setMoreEmojisOpen] = useState(false);
+  const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const deleteMenuRef = useRef<HTMLDivElement>(null);
 
   const canFetchDownload = Boolean(
     conversationId && apiHeaders && m.external_id &&
@@ -357,6 +364,15 @@ function MessageBubble({
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
   }, [reactionPickerOpen]);
+
+  useEffect(() => {
+    if (!deleteMenuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (deleteMenuRef.current && !deleteMenuRef.current.contains(e.target as Node)) setDeleteMenuOpen(false);
+    };
+    document.addEventListener("click", close, true);
+    return () => document.removeEventListener("click", close, true);
+  }, [deleteMenuOpen]);
 
   async function handleDownloadClick() {
     if (downloadUrl) {
@@ -568,6 +584,37 @@ function MessageBubble({
         <div className="flex items-center gap-0.5">
           {m.direction === "out" && (
             <CheckCheck className="h-3.5 w-3.5 text-[#64748B] shrink-0" aria-hidden />
+          )}
+          {conversationId && apiHeaders && onDeleteMessage && !String(m.id).startsWith("temp-") && (
+            <div className="relative" ref={deleteMenuRef}>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setDeleteMenuOpen((v) => !v); }}
+                className="p-1 rounded hover:bg-black/10 text-[#64748B] hover:text-red-600 transition-colors"
+                title="Apagar mensagem"
+                aria-label="Apagar mensagem"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              {deleteMenuOpen && (
+                <div className="absolute right-0 bottom-full mb-1 rounded-lg border border-[#E2E8F0] bg-white shadow-lg py-1 min-w-[160px] z-50">
+                  <button
+                    type="button"
+                    onClick={() => { onDeleteMessage(m.id, false); setDeleteMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] text-left"
+                  >
+                    <Trash2 className="h-4 w-4 shrink-0" /> Apagar para mim
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { onDeleteMessage(m.id, true); setDeleteMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#64748B] hover:bg-red-50 hover:text-red-600 text-left"
+                  >
+                    <Trash2 className="h-4 w-4 shrink-0" /> Apagar para todos
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {conversationId && apiHeaders && m.external_id && onReaction && (
             <div className="relative" ref={pickerRef}>
@@ -1149,6 +1196,26 @@ export default function ConversaThreadPage({
     }
   }
 
+  async function handleDeleteMessage(messageId: string, forEveryone: boolean) {
+    if (!resolved?.id || !apiHeaders) return;
+    try {
+      const res = await fetch(`/api/conversations/${resolved.id}/messages/${messageId}/delete`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ forEveryone }),
+      });
+      if (res.ok) {
+        await refetchConversation();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data?.error ?? "Falha ao apagar mensagem");
+      }
+    } catch {
+      setError("Falha ao apagar mensagem");
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (mediaRecorderRef.current && recording) {
@@ -1403,6 +1470,7 @@ export default function ConversaThreadPage({
                       onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
                         setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
                       }
+                      onDeleteMessage={handleDeleteMessage}
                     />
                   </div>
                 ))}

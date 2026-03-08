@@ -1524,6 +1524,25 @@ export async function sendReaction(
   };
 }
 
+/**
+ * Apaga uma mensagem para todos (revoga no WhatsApp). POST /message/delete.
+ * id: ID da mensagem na UAZAPI (external_id da mensagem).
+ */
+export async function deleteMessage(
+  token: string,
+  messageId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const { ok, error, status } = await uazapiFetch("/message/delete", {
+    method: "POST",
+    token,
+    body: { id: messageId },
+  });
+  return {
+    ok,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
 export const uazapi = {
   getBaseUrl,
   getAdminToken,
@@ -1540,6 +1559,7 @@ export const uazapi = {
   messageDownload,
   sendMessagePresence,
   sendReaction,
+  deleteMessage,
   listTriggers,
   editTrigger,
   listQuickReplies,
