@@ -117,6 +117,26 @@ function numberForApi(contact: Contact): string {
   return jid.replace(/@.*$/, "").trim() || jid;
 }
 
+/** Formata número para exibição Brasil. */
+function formatPhoneBrazil(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim().replace(/\D/g, "");
+  if (!s) return "—";
+  const withCountry = s.length >= 12 && s.startsWith("55");
+  const digits = withCountry ? s.slice(2) : s;
+  if (digits.length >= 10) {
+    const ddd = digits.slice(0, 2);
+    const rest = digits.slice(2);
+    if (rest.length >= 9 && rest[0] === "9") {
+      return `(${ddd}) ${rest.slice(0, 1)} ${rest.slice(1, 6)}-${rest.slice(6, 10)}`;
+    }
+    if (rest.length >= 8) {
+      return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4, 8)}`;
+    }
+  }
+  if (s.length <= 14) return s;
+  return s.slice(0, 14) + "…";
+}
+
 export function ContactDetailSideOver({
   open,
   onClose,
@@ -195,8 +215,11 @@ export function ContactDetailSideOver({
 
   const displayName =
     details?.name ?? details?.wa_name ?? details?.wa_contactName ?? contact?.contact_name ?? contact?.first_name ?? "—";
-  const displayPhone = details?.phone ?? contact?.phone ?? contact?.jid ?? "—";
-  const imageUrl = details?.imagePreview ?? details?.image ?? contact?.avatar_url?.trim() ?? null;
+  /** Preferir sempre o número salvo no contato (lista); a API pode retornar formato errado */
+  const formattedPhone = formatPhoneBrazil(contact?.phone ?? contact?.jid);
+  const displayPhone = formattedPhone !== "—" ? formattedPhone : (details?.phone ?? contact?.jid ?? "—");
+  /** Preferir a foto já salva do contato (mesma da lista); só usar UAZAPI se não tiver */
+  const imageUrl = (contact?.avatar_url?.trim() || details?.imagePreview || details?.image || null) || null;
   const [imageError, setImageError] = useState(false);
   const showImage = imageUrl && !imageError;
   const imageSrc =
