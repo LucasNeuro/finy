@@ -117,7 +117,7 @@ function triggerSyncHistoryForInstance(instanceId: string): void {
  * - messages_update   → só 200 (status lido/entregue; não grava no nosso DB para não sobrecarregar).
  * - contacts, groups, chats, chat_labels, leads → só 200 (não processamos; evita gargalo).
  * - connection / connected / onconnection → 200 (não dispara mais sync automático; histórico só ao clicar em Sincronizar).
- * - history           → processamos como lote de mensagens (até 80 itens).
+ * - history           → processamos só para conversas que JÁ EXISTEM (não criamos conversa nem contato; evita encher Novos/Contatos ao conectar). Novas conversas/contatos só quando chega evento "messages".
  *
  * Manter "wasSentByApi" excluído no painel para não entrar em loop.
  */
@@ -303,7 +303,7 @@ export async function POST(request: Request) {
     console.log("[WEBHOOK] Itens para processar:", toProcess.length);
 
     for (const item of toProcess) {
-      const ok = await processOneMessage(instanceId, item ?? {}, isHistory);
+      const ok = await processOneMessage(instanceId, item ?? {}, isHistory, isHistory);
       if (!ok) {
         console.warn("[WEBHOOK] processOneMessage retornou false, parando processamento");
         break;
@@ -322,7 +322,8 @@ export async function POST(request: Request) {
 async function processOneMessage(
   instanceId: string,
   data: WebhookPayload["data"],
-  allowFromMe: boolean
+  allowFromMe: boolean,
+  isHistoryEvent: boolean
 ): Promise<boolean> {
   if (!data) {
     console.warn("[WEBHOOK] processOneMessage: sem data");
@@ -512,6 +513,18 @@ async function processOneMessage(
 
       if (!groupQueueId) return true;
 
+      const { data: existing } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("channel_id", channelId)
+        .eq("external_id", externalId)
+        .eq("kind", "group")
+        .single();
+
+      if (isHistoryEvent && !existing) {
+        return true;
+      }
+
       await supabase.from("channel_groups").upsert(
         {
           channel_id: channelId,
@@ -522,14 +535,6 @@ async function processOneMessage(
         },
         { onConflict: "channel_id,jid" }
       );
-
-      const { data: existing } = await supabase
-        .from("conversations")
-        .select("id")
-        .eq("channel_id", channelId)
-        .eq("external_id", externalId)
-        .eq("kind", "group")
-        .single();
 
       let conversationId: string;
       if (existing) {
@@ -638,6 +643,10 @@ async function processOneMessage(
         .limit(1)
         .maybeSingle();
       if (byPhone) existingTicket = byPhone;
+    }
+
+    if (isHistoryEvent && !existingTicket) {
+      return true;
     }
 
     const displayPhone = canonicalDigits || digitsForCanonical || phoneDigitsOnly(customerPhone);

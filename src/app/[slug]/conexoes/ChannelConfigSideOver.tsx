@@ -105,6 +105,8 @@ export function ChannelConfigSideOver({
   const [connectLoading, setConnectLoading] = useState(false);
   const [connectMode, setConnectMode] = useState<"qrcode" | "phone">("qrcode");
   const [connectPhone, setConnectPhone] = useState("");
+  const [connectedNumber, setConnectedNumber] = useState<string | null>(null);
+  const [checkingConnection, setCheckingConnection] = useState(false);
 
   const [queueId, setQueueId] = useState<string>(channelQueueId ?? "");
   const [queueSaving, setQueueSaving] = useState(false);
@@ -145,6 +147,8 @@ export function ChannelConfigSideOver({
         setConnectStatus(s);
         if (data.qrcode) setQrcode(data.qrcode);
         if (data.paircode) setPaircode(data.paircode);
+        if (data.connectedNumber) setConnectedNumber(data.connectedNumber);
+        else setConnectedNumber(null);
         return data;
       }
     } catch {
@@ -159,6 +163,7 @@ export function ChannelConfigSideOver({
     setActiveTab("conectar");
     setQrcode(null);
     setPaircode(null);
+    setConnectedNumber(null);
     hasAutoSyncedRef.current = false;
     fetchConnectStatus();
     fetchPrivacy();
@@ -204,7 +209,8 @@ export function ChannelConfigSideOver({
   useEffect(() => {
     if (!open || activeTab !== "conectar" || connectStatus !== "connecting" || !channelId) return;
     let cancelled = false;
-    const deadline = Date.now() + 120000;
+    const deadline = Date.now() + 180000; // 3 min
+    let pollCount = 0;
     const poll = async () => {
       if (cancelled || Date.now() > deadline) return;
       const data = await fetchConnectStatus();
@@ -215,9 +221,11 @@ export function ChannelConfigSideOver({
         onCloseRef.current?.();
         return;
       }
-      setTimeout(poll, 2500);
+      pollCount += 1;
+      const delay = pollCount <= 8 ? 1500 : 2500;
+      setTimeout(poll, delay);
     };
-    const t = setTimeout(poll, 2500);
+    const t = setTimeout(poll, 1500);
     return () => {
       cancelled = true;
       clearTimeout(t);
@@ -726,6 +734,20 @@ export function ChannelConfigSideOver({
               <div className="space-y-3">
                 <div className="rounded-lg bg-[#DCFCE7] p-4 text-center">
                   <p className="font-medium text-[#16A34A]">WhatsApp conectado</p>
+                  {connectedNumber && (
+                    <p className="mt-1 font-mono text-lg font-semibold text-[#15803D]">
+                      {(() => {
+                        const d = connectedNumber.replace(/\D/g, "");
+                        if (d.length >= 12 && d.startsWith("55")) {
+                          const ddd = d.slice(2, 4);
+                          const rest = d.slice(4);
+                          const part = rest.length > 5 ? `${rest.slice(0, 5)}-${rest.slice(5)}` : rest;
+                          return `+55 (${ddd}) ${part}`;
+                        }
+                        return connectedNumber;
+                      })()}
+                    </p>
+                  )}
                   <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens. Novas mensagens e grupos entram automaticamente nas filas. Ao abrir esta tela, as conversas antigas deste número são sincronizadas em segundo plano.</p>
                 </div>
                 <p className="text-xs text-[#64748B]">Para forçar de novo o histórico antigo, use o botão abaixo. Pode levar até 2 minutos.</p>
@@ -795,6 +817,37 @@ export function ChannelConfigSideOver({
                   </div>
                 )}
                 <p className="text-center text-sm font-medium text-clicvend-orange">Conectando…</p>
+                <p className="text-center text-xs text-[#64748B]">
+                  Quando o WhatsApp conectar, esta tela fechará sozinha e a lista será atualizada. Já conectou no celular? Clique em <strong>Verificar conexão</strong>.
+                </p>
+                <button
+                  type="button"
+                  disabled={checkingConnection}
+                  onClick={async () => {
+                    setCheckingConnection(true);
+                    try {
+                      const data = await fetchConnectStatus();
+                      if (data?.connected || data?.loggedIn) {
+                        setConnectStatus("connected");
+                        setConnectedNumber(data.connectedNumber ?? null);
+                        onSaved?.();
+                        onClose();
+                      }
+                    } finally {
+                      setCheckingConnection(false);
+                    }
+                  }}
+                  className="mt-2 w-full rounded-lg border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  {checkingConnection ? (
+                    <>
+                      <Loader2 className="inline h-4 w-4 animate-spin" />
+                      {" "}Verificando…
+                    </>
+                  ) : (
+                    "Verificar conexão"
+                  )}
+                </button>
               </>
             ) : (
               <>
@@ -923,14 +976,6 @@ export function ChannelConfigSideOver({
                   </>
                 )}
               </div>
-              <p className="mt-2 text-xs text-[#94A3B8]">Ou cole uma URL de imagem:</p>
-              <input
-                type="url"
-                value={profileImage}
-                onChange={(e) => setProfileImage(e.target.value)}
-                placeholder="https://..."
-                className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-              />
             </div>
           </div>
         )}
@@ -1158,8 +1203,37 @@ export function ChannelConfigSideOver({
                   </p>
                 )}
 
+                <div className="rounded-lg border border-[#E0E7FF] bg-[#EEF2FF] p-3 space-y-2">
+                  <p className="text-xs font-medium text-[#3730A3]">Assistente — sugestões de mensagens</p>
+                  <p className="text-[11px] text-[#64748B]">
+                    Clique em uma sugestão para usar no campo <strong>Texto</strong> da nova resposta rápida. Edite como quiser antes de salvar.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      "Olá! Como posso ajudar hoje?",
+                      "Obrigado pelo contato! Em que posso ajudar?",
+                      "Estamos fora do horário. Retornaremos em breve.",
+                      "Para falar com um atendente, digite: atendente",
+                      "Recebemos sua mensagem. Um atendente responderá em breve.",
+                      "Desculpe o atraso. Já estamos verificando.",
+                    ].map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => setNewQuickReply((cur) => ({ ...cur, text: suggestion }))}
+                        className="rounded-md border border-[#C7D2FE] bg-white px-2 py-1 text-[11px] text-[#334155] hover:bg-[#E0E7FF] hover:border-[#A5B4FC]"
+                      >
+                        {suggestion.length > 42 ? `${suggestion.slice(0, 42)}…` : suggestion}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="rounded-lg border border-dashed border-[#CBD5E1] bg-[#F8FAFC] p-3 space-y-3">
                   <p className="text-xs font-medium text-[#0F172A]">Nova resposta rápida</p>
+                  <p className="text-[11px] text-[#64748B]">
+                    <strong>Criar:</strong> preencha atalho e texto abaixo. <strong>Na UAZAPI</strong> você pode atualizar (envie o <code className="bg-[#E2E8F0] px-0.5 rounded">id</code>) ou excluir (<code className="bg-[#E2E8F0] px-0.5 rounded">delete: true</code> + <code className="bg-[#E2E8F0] px-0.5 rounded">id</code>). Templates do WhatsApp não podem ser alterados.
+                  </p>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                     <div>
                       <label className="block text-[11px] font-medium text-[#64748B] mb-1">

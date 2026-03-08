@@ -43,6 +43,7 @@ export default function ConexoesPage() {
   const [configChannelName, setConfigChannelName] = useState("");
   const [configChannelQueueId, setConfigChannelQueueId] = useState<string | null>(null);
   const [channelStatuses, setChannelStatuses] = useState<Record<string, ChannelStatus>>({});
+  const [channelConnectedNumbers, setChannelConnectedNumbers] = useState<Record<string, string>>({});
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [channelStats, setChannelStats] = useState<Record<string, { conversations_count: number; messages_count: number; open_conversations: number }>>({});
 
@@ -67,13 +68,20 @@ export default function ConexoesPage() {
       if (r.ok) {
         const s: ChannelStatus = data.connected || data.loggedIn ? "connected" : data.qrcode || data.paircode ? "connecting" : "disconnected";
         setChannelStatuses((prev) => ({ ...prev, [chId]: s }));
+        if (data.connectedNumber) {
+          setChannelConnectedNumbers((prev) => ({ ...prev, [chId]: data.connectedNumber }));
+        } else {
+          setChannelConnectedNumbers((prev) => {
+            const next = { ...prev };
+            delete next[chId];
+            return next;
+          });
+        }
         return data;
       } else {
-        // Falha ao consultar status – marcamos como "error" em vez de "disconnected"
         setChannelStatuses((prev) => ({ ...prev, [chId]: "error" }));
       }
     } catch {
-      // Erro de rede ou similar – não sabemos o estado real da instância
       setChannelStatuses((prev) => ({ ...prev, [chId]: "error" }));
     }
     return null;
@@ -104,6 +112,10 @@ export default function ConexoesPage() {
     if (channels.length === 0) return;
     channels.forEach((c) => fetchStatus(c.id));
   }, [channels, fetchStatus]);
+
+  useEffect(() => {
+    if (channels.length > 0) fetchStats();
+  }, [channels.length, fetchStats]);
 
   useEffect(() => {
     fetch("/api/queues", { credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined })
@@ -224,6 +236,11 @@ export default function ConexoesPage() {
       });
       if (r.ok) {
         setChannelStatuses((prev) => ({ ...prev, [ch.id]: "disconnected" }));
+        setChannelConnectedNumbers((prev) => {
+          const next = { ...prev };
+          delete next[ch.id];
+          return next;
+        });
         fetchChannels();
       }
     } catch {
@@ -247,6 +264,11 @@ export default function ConexoesPage() {
       if (r.ok) {
         setChannels((prev) => prev.filter((c) => c.id !== ch.id));
         setChannelStatuses((prev) => {
+          const next = { ...prev };
+          delete next[ch.id];
+          return next;
+        });
+        setChannelConnectedNumbers((prev) => {
           const next = { ...prev };
           delete next[ch.id];
           return next;
@@ -277,6 +299,17 @@ export default function ConexoesPage() {
       error: "text-[#DC2626] bg-[#FEF2F2]",
     };
     return status ? map[status] ?? "text-[#64748B] bg-[#F1F5F9]" : "text-[#64748B] bg-[#F1F5F9]";
+  };
+
+  const formatConnectedNumber = (raw: string) => {
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length >= 12 && digits.startsWith("55")) {
+      const ddd = digits.slice(2, 4);
+      const rest = digits.slice(4);
+      const part = rest.length > 5 ? `${rest.slice(0, 5)}-${rest.slice(5)}` : rest;
+      return `+55 (${ddd}) ${part}`;
+    }
+    return raw;
   };
 
   return (
@@ -327,16 +360,30 @@ export default function ConexoesPage() {
           {/* Resumo total */}
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
             <p className="text-sm text-[#64748B]">
-              {channels.length} de {MAX_CHANNELS_PER_COMPANY} números conectados
+              {channels.length} de {MAX_CHANNELS_PER_COMPANY} números ·{" "}
+              <span className="font-medium text-[#1E293B]">
+                {channels.filter((c) => channelStatuses[c.id] === "connected").length} conectados
+              </span>
+              {channels.filter((c) => channelStatuses[c.id] === "connecting").length > 0 && (
+                <span className="ml-1 text-amber-600">
+                  · {channels.filter((c) => channelStatuses[c.id] === "connecting").length} conectando
+                </span>
+              )}
             </p>
             <div className="flex items-center gap-4 text-sm">
               <span className="flex items-center gap-1.5 text-[#64748B]">
                 <Users className="h-4 w-4 text-clicvend-orange" />
-                Total: <strong className="text-[#1E293B]">{channels.reduce((s, c) => s + (channelStats[c.id]?.conversations_count ?? 0), 0)}</strong> conversas
+                <span className="uppercase text-[10px] font-medium tracking-wider text-[#64748B]">Conversas</span>
+                <strong className="text-[#1E293B]">{channels.reduce((s, c) => s + (channelStats[c.id]?.conversations_count ?? 0), 0)}</strong>
               </span>
               <span className="flex items-center gap-1.5 text-[#64748B]">
                 <MessageSquare className="h-4 w-4 text-clicvend-blue" />
-                <strong className="text-[#1E293B]">{channels.reduce((s, c) => s + (channelStats[c.id]?.messages_count ?? 0), 0)}</strong> mensagens
+                <span className="uppercase text-[10px] font-medium tracking-wider text-[#64748B]">Mensagens</span>
+                <strong className="text-[#1E293B]">{channels.reduce((s, c) => s + (channelStats[c.id]?.messages_count ?? 0), 0)}</strong>
+              </span>
+              <span className="flex items-center gap-1.5 text-[#64748B]">
+                <span className="uppercase text-[10px] font-medium tracking-wider text-[#64748B]">Abertas</span>
+                <strong className="text-[#16A34A]">{channels.reduce((s, c) => s + (channelStats[c.id]?.open_conversations ?? 0), 0)}</strong>
               </span>
             </div>
           </div>
@@ -411,6 +458,13 @@ export default function ConexoesPage() {
                         );
                         setSelectedChannelIds(new Set());
                         toDisconnect.forEach((id) => setChannelStatuses((prev) => ({ ...prev, [id]: "disconnected" })));
+                        toDisconnect.forEach((id) =>
+                          setChannelConnectedNumbers((prev) => {
+                            const next = { ...prev };
+                            delete next[id];
+                            return next;
+                          })
+                        );
                         fetchChannels();
                       } finally {
                         setBulkActionLoading(false);
@@ -442,6 +496,11 @@ export default function ConexoesPage() {
                         );
                         setChannels((prev) => prev.filter((c) => !ids.includes(c.id)));
                         setChannelStatuses((prev) => {
+                          const next = { ...prev };
+                          ids.forEach((id) => delete next[id]);
+                          return next;
+                        });
+                        setChannelConnectedNumbers((prev) => {
                           const next = { ...prev };
                           ids.forEach((id) => delete next[id]);
                           return next;
@@ -488,6 +547,7 @@ export default function ConexoesPage() {
                     />
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Nome</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Número WhatsApp</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Caixa de entrada</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Status</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Conversas</th>
@@ -532,6 +592,15 @@ export default function ConexoesPage() {
                             {ch.uazapi_instance_id.length > 16 ? `${ch.uazapi_instance_id.slice(0, 12)}…` : ch.uazapi_instance_id}
                           </p>
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {status === "connected" && channelConnectedNumbers[ch.id] ? (
+                          <span className="font-medium text-[#1E293B]" title={channelConnectedNumbers[ch.id]}>
+                            {formatConnectedNumber(channelConnectedNumbers[ch.id])}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-[#94A3B8]">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-sm text-[#64748B]">
                         {ch.queue_id ? (queues.find((q) => q.id === ch.queue_id)?.name ?? "—") : "—"}

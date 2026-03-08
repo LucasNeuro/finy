@@ -45,12 +45,20 @@ export async function GET(request: Request) {
     );
   }
 
+  // Número WhatsApp conectado (jid ex: 5511999999999@s.whatsapp.net)
+  const jid = result.status?.jid;
+  const connectedNumber =
+    typeof jid === "string" && jid
+      ? jid.replace(/@s\.whatsapp\.net$/i, "").trim() || undefined
+      : undefined;
+
   return NextResponse.json({
     instance: result.instance,
     status: result.status,
     qrcode: result.instance?.qrcode,
     paircode: result.instance?.paircode,
-    connected: result.status?.connected,
-    loggedIn: result.status?.loggedIn,
+    connected: result.status?.connected ?? !!connectedNumber,
+    loggedIn: result.status?.loggedIn ?? !!connectedNumber,
+    connectedNumber: connectedNumber || undefined,
   });
 }
