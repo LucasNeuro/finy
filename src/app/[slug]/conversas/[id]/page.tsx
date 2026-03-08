@@ -3,12 +3,13 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Eye, Volume2, MoreVertical as MoreVerticalIcon } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
 import { RealtimeMessages } from "@/components/RealtimeMessages";
+import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 
 type Message = {
   id: string;
@@ -106,7 +107,8 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Mini player de áudio estilo WhatsApp Web: botão play/pause, barra de progresso, tempo e download.
+ * Mini player de áudio na conversa (enviados e recebidos): reprodução direta na interface.
+ * Estilo: pill, play/pause, tempo atual/total, barra de progresso, volume, menu (baixar).
  */
 function ChatAudioPlayer({
   src,
@@ -122,6 +124,7 @@ function ChatAudioPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
@@ -164,56 +167,79 @@ function ChatAudioPlayer({
 
   if (isLoading || !src) {
     return (
-      <div className="flex items-center gap-3 rounded-xl bg-black/5 px-3 py-2 min-w-[200px] max-w-[280px]">
+      <div className="flex items-center gap-3 rounded-full bg-[#F1F5F9] border border-[#E2E8F0] px-4 py-2.5 min-w-[240px] max-w-[320px]">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
           <Loader2 className="h-4 w-4 animate-spin text-[#64748B]" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="h-1.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
-          <p className="mt-1 text-xs text-[#64748B]">Carregando…</p>
+          <p className="mt-1 text-xs text-[#64748B]">Carregando áudio…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-black/5 px-3 py-2 min-w-[200px] max-w-[280px]">
+    <div className="flex items-center gap-3 rounded-full bg-[#F1F5F9] border border-[#E2E8F0] px-4 py-2.5 min-w-[240px] max-w-[320px] shadow-sm">
       {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
       <button
         type="button"
         onClick={togglePlay}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark transition-colors focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-1"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark transition-colors focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-2"
         aria-label={playing ? "Pausar" : "Reproduzir"}
       >
         {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
       </button>
       <div className="flex-1 min-w-0">
-        <div className="h-1.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer" onClick={(e) => {
-          const el = audioRef.current;
-          if (!el) return;
-          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const pct = x / rect.width;
-          el.currentTime = pct * el.duration;
-          setCurrentTime(el.currentTime);
-        }}>
+        <p className="text-xs font-medium text-[#64748B] tabular-nums">
+          {formatDuration(currentTime)} / {loaded ? formatDuration(duration) : "–:––"}
+        </p>
+        <div
+          className="h-1.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-0.5"
+          onClick={(e) => {
+            const el = audioRef.current;
+            if (!el) return;
+            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const pct = Math.max(0, Math.min(1, x / rect.width));
+            el.currentTime = pct * el.duration;
+            setCurrentTime(el.currentTime);
+          }}
+        >
           <div className="h-full rounded-full bg-clicvend-orange transition-all duration-150" style={{ width: `${progress}%` }} />
         </div>
-        <div className="flex justify-between mt-0.5">
-          <span className="text-xs text-[#64748B]">{formatDuration(currentTime)}</span>
-          <span className="text-xs text-[#64748B]">{loaded ? formatDuration(duration) : "–:––"}</span>
+      </div>
+      <div className="flex items-center gap-0.5 shrink-0">
+        <span className="p-1.5 text-[#64748B]" title="Volume" aria-hidden>
+          <Volume2 className="h-4 w-4" />
+        </span>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            className="p-1.5 rounded-full text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#1E293B]"
+            aria-label="Opções"
+          >
+            <MoreVerticalIcon className="h-4 w-4" />
+          </button>
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
+              <div className="absolute right-0 top-full mt-1 z-20 rounded-lg border border-[#E2E8F0] bg-white shadow-lg py-1 min-w-[120px]">
+                {onDownload && (
+                  <button
+                    type="button"
+                    onClick={() => { onDownload(); setMenuOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange text-left"
+                  >
+                    <Download className="h-4 w-4" /> Baixar
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
-      {onDownload && (
-        <button
-          type="button"
-          onClick={onDownload}
-          className="shrink-0 p-1.5 rounded-full text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
-          title="Baixar áudio"
-        >
-          <Download className="h-4 w-4" />
-        </button>
-      )}
     </div>
   );
 }
@@ -266,12 +292,14 @@ function MessageBubble({
   conversationId,
   apiHeaders,
   onReaction,
+  onOpenDocumentViewer,
 }: {
   m: Message;
   name: string;
   conversationId?: string;
   apiHeaders?: Record<string, string>;
   onReaction?: (messageId: string, emoji: string) => void;
+  onOpenDocumentViewer?: (messageId: string, conversationId: string, fileName?: string | null, fileUrl?: string | null) => void;
 }) {
   const type = m.message_type ?? "text";
   const displayType = inferDisplayType(type, m.content ?? "");
@@ -422,11 +450,11 @@ function MessageBubble({
           {caption && caption !== "[video]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl) && (
+      {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || (canFetchDownload && (needsDownloadForPlay || needsDownloadForMedia))) && (
         <div className="space-y-1">
           <ChatAudioPlayer
             src={audioSrc}
-            isLoading={downloadLoading}
+            isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
             onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
           />
           {caption && caption !== "[audio]" && caption !== "[ptt]" && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
@@ -453,27 +481,39 @@ function MessageBubble({
                 {downloadUrl ? " • Ver e baixar" : needsDownloadForDocument && downloadLoading ? " • Carregando…" : ""}
               </p>
             </div>
-            {(downloadUrl || mediaUrl) ? (
-              <a
-                href={downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : "#")}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
-                title="Ver e baixar"
-              >
-                <Download className="h-5 w-5" />
-              </a>
-            ) : needsDownloadForDocument ? (
-              <button
-                type="button"
-                onClick={handleDownloadClick}
-                disabled={downloadLoading}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors disabled:opacity-50"
-                title="Baixar"
-              >
-                {downloadLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
-              </button>
-            ) : null}
+            <div className="flex shrink-0 items-center gap-0.5">
+              {conversationId && onOpenDocumentViewer && (
+                <button
+                  type="button"
+                  onClick={() => onOpenDocumentViewer(m.id, conversationId, m.file_name ?? null, downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : null))}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
+                  title="Visualizar"
+                >
+                  <Eye className="h-5 w-5" />
+                </button>
+              )}
+              {(downloadUrl || mediaUrl) ? (
+                <a
+                  href={downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : "#")}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
+                  title="Ver e baixar"
+                >
+                  <Download className="h-5 w-5" />
+                </a>
+              ) : needsDownloadForDocument ? (
+                <button
+                  type="button"
+                  onClick={handleDownloadClick}
+                  disabled={downloadLoading}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors disabled:opacity-50"
+                  title="Baixar"
+                >
+                  {downloadLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
+                </button>
+              ) : null}
+            </div>
           </div>
           {needsDownloadForDocument && !downloadUrl && !downloadLoading && (
             <button type="button" onClick={handleDownloadClick} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline">
@@ -623,6 +663,12 @@ export default function ConversaThreadPage({
   const [canTransfer, setCanTransfer] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [hasMoreOlderMessages, setHasMoreOlderMessages] = useState(true);
+  const [documentViewer, setDocumentViewer] = useState<{
+    messageId: string;
+    conversationId: string;
+    fileName?: string | null;
+    initialFileUrl?: string | null;
+  } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -1348,7 +1394,16 @@ export default function ConversaThreadPage({
                     key={(m as Message).id}
                     className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
                   >
-                    <MessageBubble m={m as Message} name={name} conversationId={resolved?.id} apiHeaders={apiHeaders} onReaction={handleReaction} />
+                    <MessageBubble
+                      m={m as Message}
+                      name={name}
+                      conversationId={resolved?.id}
+                      apiHeaders={apiHeaders}
+                      onReaction={handleReaction}
+                      onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
+                        setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
+                      }
+                    />
                   </div>
                 ))}
                 <div ref={messagesEndRef} data-messages-end />
@@ -1465,6 +1520,27 @@ export default function ConversaThreadPage({
           </form>
         </div>
       </div>
+
+      {/* Modal de visualização de documento (PDF, etc.) — zoom, baixar, nova aba, sem IA */}
+      <DocumentViewerModal
+        open={!!documentViewer}
+        onClose={() => setDocumentViewer(null)}
+        fileUrl={documentViewer?.initialFileUrl ?? undefined}
+        fetchDownload={
+          documentViewer && !documentViewer.initialFileUrl
+            ? async () => {
+                if (!documentViewer || !apiHeaders) return null;
+                const res = await fetch(
+                  `/api/conversations/${documentViewer.conversationId}/messages/${documentViewer.messageId}/download`,
+                  { credentials: "include", headers: apiHeaders }
+                );
+                const data = await res.json().catch(() => ({}));
+                return data?.fileURL ?? null;
+              }
+            : undefined
+        }
+        fileName={documentViewer?.fileName ?? undefined}
+      />
 
       {/* SideOver de informações do contato — abre só ao clicar no botão (padrão do sistema), com rolagem própria e fotos/infos */}
       <SideOver
