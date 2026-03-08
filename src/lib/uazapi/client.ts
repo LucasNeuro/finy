@@ -1397,6 +1397,73 @@ export async function sendMenu(
   };
 }
 
+/**
+ * Baixa mídia de uma mensagem (UAZAPI POST /message/download).
+ * id: ID da mensagem na UAZAPI (pode ser "owner:messageid" ou apenas messageid).
+ * Retorna fileURL, mimetype, base64Data (se return_base64), transcription (se transcribe).
+ */
+export async function messageDownload(
+  token: string,
+  messageId: string,
+  opts?: {
+    return_base64?: boolean;
+    return_link?: boolean;
+    generate_mp3?: boolean;
+    transcribe?: boolean;
+    download_quoted?: boolean;
+  }
+): Promise<{
+  ok: boolean;
+  data?: { fileURL?: string; mimetype?: string; base64Data?: string; transcription?: string };
+  error?: string;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<{
+    fileURL?: string;
+    mimetype?: string;
+    base64Data?: string;
+    transcription?: string;
+  }>("/message/download", {
+    method: "POST",
+    token,
+    body: {
+      id: messageId,
+      ...(opts?.return_base64 != null && { return_base64: opts.return_base64 }),
+      ...(opts?.return_link != null && { return_link: opts.return_link }),
+      ...(opts?.generate_mp3 != null && { generate_mp3: opts.generate_mp3 }),
+      ...(opts?.transcribe != null && { transcribe: opts.transcribe }),
+      ...(opts?.download_quoted != null && { download_quoted: opts.download_quoted }),
+    },
+  });
+  return {
+    ok,
+    data,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
+ * Envia presença "digitando" ou "gravando" por chat (UAZAPI POST /message/presence).
+ * presence: "composing" | "recording" | "paused". delay: ms (máx 5 min).
+ */
+export async function sendMessagePresence(
+  token: string,
+  number: string,
+  presence: "composing" | "recording" | "paused",
+  delay?: number
+): Promise<{ ok: boolean; error?: string }> {
+  const normalizedNumber = number.includes("@") ? number : number.replace(/\D/g, "");
+  const { ok, error, status } = await uazapiFetch("/message/presence", {
+    method: "POST",
+    token,
+    body: {
+      number: normalizedNumber,
+      presence,
+      ...(delay != null && delay >= 0 && { delay }),
+    },
+  });
+  return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
+}
+
 export const uazapi = {
   getBaseUrl,
   getAdminToken,
@@ -1410,6 +1477,8 @@ export const uazapi = {
   sendText,
   sendMedia,
   sendMenu,
+  messageDownload,
+  sendMessagePresence,
   listTriggers,
   editTrigger,
   listQuickReplies,

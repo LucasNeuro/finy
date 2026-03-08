@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
@@ -19,6 +19,7 @@ type Message = {
   media_url?: string | null;
   caption?: string | null;
   file_name?: string | null;
+  external_id?: string | null;
 };
 
 type ConversationDetail = {
@@ -77,7 +78,23 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   return s.slice(0, 14) + "…";
 }
 
-function MessageBubble({ m, name }: { m: Message; name: string }) {
+/** Retorna se a URL é utilizável diretamente no front (reproduzir/abrir). */
+function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
+  if (!url?.trim()) return false;
+  return url.startsWith("http") || url.startsWith("data:");
+}
+
+function MessageBubble({
+  m,
+  name,
+  conversationId,
+  apiHeaders,
+}: {
+  m: Message;
+  name: string;
+  conversationId?: string;
+  apiHeaders?: Record<string, string>;
+}) {
   const type = m.message_type ?? "text";
   const rawMediaUrl = m.media_url;
   const mediaUrl = rawMediaUrl && (rawMediaUrl.startsWith("http") || rawMediaUrl.startsWith("data:"))
@@ -93,6 +110,47 @@ function MessageBubble({ m, name }: { m: Message; name: string }) {
       : null;
   const caption = m.caption ?? m.content;
 
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const canFetchDownload = Boolean(conversationId && apiHeaders && m.external_id && (type === "audio" || type === "ptt" || type === "document" || type === "image" || type === "video"));
+  const needsDownloadForPlay = (type === "audio" || type === "ptt") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
+  const needsDownloadForMedia = (type === "image" || type === "video") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
+  const needsDownloadForDocument = type === "document" && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
+
+  useEffect(() => {
+    if (!(needsDownloadForPlay || needsDownloadForMedia) || !conversationId || !apiHeaders || !m.id) return;
+    let cancelled = false;
+    setDownloadLoading(true);
+    fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { fileURL?: string } | null) => {
+        if (!cancelled && data?.fileURL) setDownloadUrl(data.fileURL);
+      })
+      .finally(() => { if (!cancelled) setDownloadLoading(false); });
+    return () => { cancelled = true; };
+  }, [needsDownloadForPlay, needsDownloadForMedia, conversationId, apiHeaders, m.id]);
+
+  const audioSrc = (type === "audio" || type === "ptt") ? (downloadUrl || mediaUrl) : null;
+
+  async function handleDownloadClick() {
+    if (downloadUrl) {
+      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (!conversationId || !apiHeaders || !m.id) return;
+    setDownloadLoading(true);
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders });
+      const data = await res.json().catch(() => ({}));
+      if (data?.fileURL) {
+        setDownloadUrl(data.fileURL);
+        window.open(data.fileURL, "_blank", "noopener,noreferrer");
+      }
+    } finally {
+      setDownloadLoading(false);
+    }
+  }
+
   return (
     <div
       className={`max-w-[80%] rounded-lg px-3 py-2 ${
@@ -104,23 +162,66 @@ function MessageBubble({ m, name }: { m: Message; name: string }) {
       <p className="text-xs font-medium text-[#64748B] mb-0.5">
         {m.direction === "out" ? "Você" : name}
       </p>
-      {type === "image" && mediaUrl && (
+      {type === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
         <div className="space-y-1">
-          <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="block rounded overflow-hidden">
-            <img src={mediaUrl} alt="" className="max-h-64 w-full object-contain rounded" />
-          </a>
+          {(mediaUrl || downloadUrl) ? (
+            <>
+              <a href={downloadUrl || mediaUrl || "#"} target="_blank" rel="noopener noreferrer" className="block rounded overflow-hidden">
+                <img src={mediaUrl || downloadUrl || ""} alt="" className="max-h-64 w-full object-contain rounded" />
+              </a>
+              {canFetchDownload && (
+                <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
+                  {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  Baixar
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center gap-2 py-4 text-sm text-[#64748B]">
+              <Loader2 className="h-5 w-5 animate-spin shrink-0" /> Carregando imagem…
+            </div>
+          )}
           {caption && caption !== "[image]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {type === "video" && mediaUrl && (
+      {type === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
         <div className="space-y-1">
-          <video src={mediaUrl} controls className="max-h-64 w-full rounded" />
+          {(mediaUrl || downloadUrl) ? (
+            <>
+              <video src={downloadUrl || mediaUrl || ""} controls className="max-h-64 w-full rounded" />
+              {canFetchDownload && (
+                <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
+                  {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  Baixar
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center gap-2 py-4 text-sm text-[#64748B]">
+              <Loader2 className="h-5 w-5 animate-spin shrink-0" /> Carregando vídeo…
+            </div>
+          )}
           {caption && caption !== "[video]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {(type === "audio" || type === "ptt") && mediaUrl && (
+      {(type === "audio" || type === "ptt") && (audioSrc || downloadLoading || mediaUrl) && (
         <div className="space-y-1">
-          <audio src={mediaUrl} controls className="w-full max-w-sm" />
+          <div className="flex items-center gap-2 min-w-[240px] max-w-sm">
+            {audioSrc ? (
+              <audio src={audioSrc} controls className="flex-1 h-9" />
+            ) : downloadLoading ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-[#64748B]">
+                <Loader2 className="h-4 w-4 animate-spin" /> Carregando áudio…
+              </span>
+            ) : (
+              <span className="text-sm text-[#64748B]">Áudio não disponível</span>
+            )}
+            {canFetchDownload && audioSrc && (
+              <a href={audioSrc} download className="shrink-0 p-1.5 rounded text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange" title="Baixar áudio">
+                <Download className="h-4 w-4" />
+              </a>
+            )}
+          </div>
           {caption && caption !== "[audio]" && caption !== "[ptt]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
@@ -133,13 +234,27 @@ function MessageBubble({ m, name }: { m: Message; name: string }) {
           ) : (
             <span className="text-sm">📎 {m.file_name || caption || "Documento"}</span>
           )}
+          {needsDownloadForDocument && (
+            <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-sm text-clicvend-orange hover:underline disabled:opacity-50">
+              {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Baixar arquivo
+            </button>
+          )}
           {caption && caption !== "[document]" && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {type === "sticker" && mediaUrl && (
-        <img src={mediaUrl} alt="" className="max-h-32 w-auto" />
+      {type === "sticker" && (mediaUrl || downloadUrl) && (
+        <div>
+          <img src={mediaUrl || downloadUrl || ""} alt="" className="max-h-32 w-auto" />
+          {canFetchDownload && (
+            <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="mt-1 inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
+              {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              Baixar
+            </button>
+          )}
+        </div>
       )}
-      {(type === "text" || !mediaUrl) && (
+      {(type === "text" || (!mediaUrl && !downloadUrl && type !== "document")) && (
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
       <div className="mt-1 flex items-center justify-end gap-1">
@@ -869,7 +984,7 @@ export default function ConversaThreadPage({
                     key={m.id}
                     className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
                   >
-                    <MessageBubble m={m} name={name} />
+                    <MessageBubble m={m} name={name} conversationId={resolved?.id} apiHeaders={apiHeaders} />
                   </div>
                 ))}
                 <div ref={messagesEndRef} data-messages-end />
