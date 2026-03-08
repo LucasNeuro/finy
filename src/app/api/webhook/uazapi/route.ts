@@ -326,7 +326,10 @@ async function processOneMessage(
   if (!externalId && customerPhone) externalId = customerPhone;
   if (!customerPhone && externalId) customerPhone = externalId;
   const invalidExternalIds = ["updated", "undefined", ""];
-  if (invalidExternalIds.includes(externalId) || !externalId || externalId.length < 5) {
+  const externalIdInvalid = invalidExternalIds.includes(externalId) || !externalId || externalId.length < 5;
+  if (externalIdInvalid && customerPhone && (customerPhone.endsWith("@s.whatsapp.net") || customerPhone.endsWith("@g.us"))) {
+    externalId = customerPhone;
+  } else if (invalidExternalIds.includes(externalId) || !externalId || externalId.length < 5) {
     console.warn("[WEBHOOK] processOneMessage: externalId inválido ignorado", { rawChatId: (data.chatId ?? data.chatid) as string, rawFrom: (data.from ?? data.number) as string });
     return true;
   }
