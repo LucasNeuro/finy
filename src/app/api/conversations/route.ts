@@ -12,6 +12,19 @@ function formatGroupJidForDisplay(jid: string): string {
   return raw ? `Grupo ${raw}` : "Grupo";
 }
 
+/** Chamados novos = não atribuídos e status open. Ordenação estilo Zendesk/Intercom: novos no topo, depois por última mensagem. */
+function sortQueuesListNewFirst<T extends { assigned_to?: string | null; status?: string; last_message_at: string }>(
+  list: T[]
+): T[] {
+  return [...list].sort((a, b) => {
+    const aNew = (a.assigned_to == null || a.assigned_to === "") && (a.status === "open" || a.status === "in_queue");
+    const bNew = (b.assigned_to == null || b.assigned_to === "") && (b.status === "open" || b.status === "in_queue");
+    if (aNew && !bNew) return -1;
+    if (!aNew && bNew) return 1;
+    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+  });
+}
+
 export async function GET(request: Request) {
   const startTime = performance.now();
   const companyId = await getCompanyIdFromRequest(request);
@@ -26,6 +39,7 @@ export async function GET(request: Request) {
   const queueIdParam = searchParams.get("queue_id") ?? undefined;
   const status = searchParams.get("status") ?? undefined;
   const onlyAssignedToMe = searchParams.get("only_assigned_to_me") === "1";
+  const onlyUnassigned = searchParams.get("only_unassigned") === "1";
   const includeClosed = searchParams.get("include_closed") === "1";
   const skipCache = searchParams.get("skip_cache") === "1" || searchParams.get("nocache") === "1";
   const limit = Math.min(Number(searchParams.get("limit")) || 200, 500);
@@ -79,11 +93,15 @@ export async function GET(request: Request) {
       status ?? "",
       onlyAssignedToMe ? "1" : "0",
       includeClosed,
+      onlyUnassigned,
       offset,
       limit
     );
     if (cached) {
-      const res = NextResponse.json(cached);
+      const sorted = !onlyAssignedToMe && !includeClosed && !onlyUnassigned
+        ? sortQueuesListNewFirst((cached.data ?? []) as { assigned_to?: string | null; status?: string; last_message_at: string }[])
+        : (cached.data ?? []);
+      const res = NextResponse.json({ data: sorted, total: cached.total ?? sorted.length });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }
@@ -105,6 +123,10 @@ export async function GET(request: Request) {
   }
   if (onlyAssignedToMe && user) {
     q = q.eq("assigned_to", user.id);
+  }
+  if (onlyUnassigned) {
+    q = q.is("assigned_to", null);
+    q = q.in("status", ["open", "in_queue"]);
   }
   if (status) {
     q = q.eq("status", status);
@@ -292,6 +314,10 @@ export async function GET(request: Request) {
     channel_name: channelNameById[c.channel_id] ?? null,
   }));
 
+  if (!onlyAssignedToMe && !includeClosed) {
+    listWithPreview = sortQueuesListNewFirst(listWithPreview);
+  }
+
   const payload = { data: listWithPreview, total: count ?? result.length };
   if (useCache && !skipCache) {
     await setCachedConversationList(
@@ -301,6 +327,7 @@ export async function GET(request: Request) {
       onlyAssignedToMe ? "1" : "0",
       payload,
       includeClosed,
+      onlyUnassigned,
       offset,
       limit
     );

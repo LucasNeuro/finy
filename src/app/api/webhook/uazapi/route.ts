@@ -2,6 +2,7 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 import { getRedisClient } from "@/lib/redis/client";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
+import { getNextAgentForQueue } from "@/lib/queue/round-robin";
 import { NextResponse } from "next/server";
 
 type WebhookPayload = {
@@ -97,7 +98,10 @@ export async function POST(request: Request) {
     const instanceId = body?.instance;
     const data = body?.data ?? {};
 
+    console.log("[WEBHOOK] Recebido:", { event, instanceId, hasData: !!data });
+
     if (!instanceId) {
+      console.error("[WEBHOOK] ERRO: Missing instance");
       return NextResponse.json(
         { error: "Missing instance" },
         { status: 400 }
@@ -119,11 +123,14 @@ export async function POST(request: Request) {
     const treatAsMessage = isMessageEvent || isHistory || (!event && hasMessageLikeData);
 
     if (!treatAsMessage) {
+      console.log("[WEBHOOK] Não é mensagem, evento:", event, "payload:", JSON.stringify(body).slice(0, 500));
       if (event === "connection" || event === "connected" || event === "onconnection") {
         triggerSyncHistoryForInstance(instanceId);
       }
       return NextResponse.json({ ok: true });
     }
+
+    console.log("[WEBHOOK] Processando mensagem(s)");
 
     const items: WebhookPayload["data"][] =
       isHistory && Array.isArray(body.data)
@@ -135,12 +142,18 @@ export async function POST(request: Request) {
     const MAX_ITEMS_PER_REQUEST = 80;
     const toProcess = items.slice(0, MAX_ITEMS_PER_REQUEST);
 
+    console.log("[WEBHOOK] Itens para processar:", toProcess.length);
+
     for (const item of toProcess) {
       const ok = await processOneMessage(instanceId, item ?? {}, isHistory);
-      if (!ok) break;
+      if (!ok) {
+        console.warn("[WEBHOOK] processOneMessage retornou false, parando processamento");
+        break;
+      }
     }
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error("[WEBHOOK] ERRO ao processar:", error);
     return NextResponse.json(
       { error: "Invalid payload" },
       { status: 400 }
@@ -153,10 +166,16 @@ async function processOneMessage(
   data: WebhookPayload["data"],
   allowFromMe: boolean
 ): Promise<boolean> {
-  if (!data) return true;
+  if (!data) {
+    console.warn("[WEBHOOK] processOneMessage: sem data");
+    return true;
+  }
 
   const fromMe = data.fromMe === true;
-  if (fromMe && !allowFromMe) return true;
+  if (fromMe && !allowFromMe) {
+    console.log("[WEBHOOK] processOneMessage: mensagem fromMe ignorada");
+    return true;
+  }
 
   const externalId = (data.chatId ?? data.chatid ?? "") as string;
   const customerPhone = (data.from ?? data.number ?? data.wa_id ?? "") as string;
@@ -173,7 +192,19 @@ async function processOneMessage(
       ? new Date(typeof rawTs === "number" ? rawTs * 1000 : rawTs).toISOString()
       : new Date().toISOString();
 
-  if (!externalId || (!content && !mediaUrl)) return true;
+  console.log("[WEBHOOK] processOneMessage:", { 
+    instanceId, 
+    externalId, 
+    customerPhone, 
+    hasContent: !!content, 
+    hasMediaUrl: !!mediaUrl,
+    content: content?.slice(0, 50) 
+  });
+
+  if (!externalId || (!content && !mediaUrl)) {
+    console.warn("[WEBHOOK] processOneMessage: sem externalId ou conteúdo", { externalId, hasContent: !!content, hasMediaUrl: !!mediaUrl });
+    return true;
+  }
 
   const mediaTypeMap: Record<string, string> = {
     image: "image", video: "video", audio: "audio", myaudio: "audio", ptt: "ptt", ptv: "video",
@@ -220,7 +251,12 @@ async function processOneMessage(
         .eq("is_active", true)
         .single();
 
-      if (error || !chData) return true;
+      if (error || !chData) {
+        console.error("[WEBHOOK] Canal não encontrado:", { instanceId, error: error?.message, chData });
+        return true;
+      }
+
+      console.log("[WEBHOOK] Canal encontrado:", { channelId: chData.id, companyId: chData.company_id, queueId: chData.queue_id });
 
       channel = {
         id: chData.id as string,
@@ -244,7 +280,12 @@ async function processOneMessage(
       .order("is_default", { ascending: false });
 
     const cqList = (cqData ?? []) as ChannelQueueRow[];
-  if (cqList.length === 0 && !channel.queue_id) return true;
+    if (cqList.length === 0 && !channel.queue_id) {
+      console.error("[WEBHOOK] Sem filas configuradas:", { channelId, queueId: channel.queue_id, cqListLength: cqList.length });
+      return true;
+    }
+
+    console.log("[WEBHOOK] Filas encontradas:", { channelId, queueId: channel.queue_id, cqListLength: cqList.length });
 
     const queueIds = cqList.length > 0
       ? cqList.map((cq) => cq.queue_id)
@@ -405,27 +446,12 @@ async function processOneMessage(
           wa_chat_jid: externalId,
         })
         .eq("id", conversationId);
+      console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId });
     } else {
+      // Distribuição automática round-robin por fila (Redis + Supabase)
       let assignedTo: string | null = null;
       if (queueId) {
-        const { data: assignments } = await supabase
-          .from("queue_assignments")
-          .select("user_id")
-          .eq("queue_id", queueId)
-          .eq("company_id", companyId)
-          .order("last_assigned_at", { ascending: true, nullsFirst: true })
-          .limit(1);
-
-        const first = (assignments ?? []) as { user_id: string }[];
-        if (first.length > 0) {
-          assignedTo = first[0].user_id;
-          await supabase
-            .from("queue_assignments")
-            .update({ last_assigned_at: new Date().toISOString() })
-            .eq("queue_id", queueId)
-            .eq("user_id", assignedTo)
-            .eq("company_id", companyId);
-        }
+        assignedTo = await getNextAgentForQueue(companyId, queueId);
       }
 
       const { data: inserted, error: insertConvError } = await supabase
@@ -447,8 +473,12 @@ async function processOneMessage(
         .select("id")
         .single();
 
-      if (insertConvError || !inserted) return false;
+      if (insertConvError || !inserted) {
+        console.error("[WEBHOOK] Erro ao criar conversa:", { insertConvError, inserted });
+        return false;
+      }
       conversationId = inserted.id;
+      console.log("[WEBHOOK] Conversa criada:", { conversationId, queueId, assignedTo });
       // Garante que o contato exista em channel_contacts para depois preencher avatar_url (sync-contacts ou chat-details).
       await supabase.from("channel_contacts").upsert(
         {
@@ -460,22 +490,32 @@ async function processOneMessage(
         },
         { onConflict: "channel_id,jid", ignoreDuplicates: false }
       );
+      console.log("[WEBHOOK] Contato criado/atualizado:", { jid: externalId, phone: customerPhone, name: customerName });
     }
 
-  await supabase.from("messages").insert({
-    conversation_id: conversationId,
-    direction: fromMe ? "out" : "in",
-    content: finalContent,
-    message_type: finalMessageType,
-    ...(finalMediaUrl && { media_url: finalMediaUrl }),
-    ...(finalCaption && { caption: finalCaption }),
-    ...(finalFileName && { file_name: finalFileName }),
-    external_id: messageExternalId,
-    sent_at: sentAt,
-  });
-  await Promise.all([
-    invalidateConversationList(companyId),
-    invalidateConversationDetail(conversationId),
-  ]);
-  return true;
+    const { error: msgError } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      direction: fromMe ? "out" : "in",
+      content: finalContent,
+      message_type: finalMessageType,
+      ...(finalMediaUrl && { media_url: finalMediaUrl }),
+      ...(finalCaption && { caption: finalCaption }),
+      ...(finalFileName && { file_name: finalFileName }),
+      external_id: messageExternalId,
+      sent_at: sentAt,
+    });
+
+    if (msgError) {
+      console.error("[WEBHOOK] Erro ao inserir mensagem:", msgError);
+      return false;
+    }
+
+    console.log("[WEBHOOK] Mensagem inserida com sucesso:", { conversationId, direction: fromMe ? "out" : "in" });
+
+    await Promise.all([
+      invalidateConversationList(companyId),
+      invalidateConversationDetail(conversationId),
+    ]);
+    console.log("[WEBHOOK] Cache invalidado, processamento concluído");
+    return true;
 }

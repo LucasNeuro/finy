@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { invalidateRoundRobinForCompany } from "@/lib/queue/round-robin";
 import { NextResponse } from "next/server";
 
 /** PATCH: atualiza cargo e/ou caixas do usuário (profile_id ou user_id) */
@@ -66,6 +67,7 @@ export async function PATCH(
       const rows = queueIds.map((queue_id) => ({ queue_id, user_id: row.user_id, company_id: companyId }));
       await admin.from("queue_assignments").insert(rows);
     }
+    await invalidateRoundRobinForCompany(companyId);
   }
 
   if (body.group_assignments !== undefined) {

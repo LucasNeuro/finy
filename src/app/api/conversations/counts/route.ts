@@ -3,6 +3,10 @@ import { getProfileForCompany, requirePermission } from "@/lib/auth/get-profile"
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { withMetricsHeaders } from "@/lib/api/metrics";
 import { getCachedCounts, setCachedCounts } from "@/lib/redis/inbox-state";
+import {
+  getCachedCountsFromSupabase,
+  setCachedCountsInSupabase,
+} from "@/lib/cache/inbox-counts-supabase";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -61,18 +65,25 @@ export async function GET(request: Request) {
 
   const userId = user?.id ?? "";
   if (userId) {
-    const cached = await getCachedCounts(companyId, userId);
-    if (cached) {
-      const res = NextResponse.json(cached);
+    const cachedRedis = await getCachedCounts(companyId, userId);
+    if (cachedRedis) {
+      const res = NextResponse.json(cachedRedis);
+      return withMetricsHeaders(res, { cacheHit: true, startTime });
+    }
+    const cachedSupabase = await getCachedCountsFromSupabase(companyId, userId);
+    if (cachedSupabase) {
+      const res = NextResponse.json(cachedSupabase);
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }
 
   const activeStatuses = ["open", "in_progress", "waiting"];
+  const unassignedStatuses = ["open", "in_queue"];
   let queuesQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).in("status", activeStatuses);
   let mineQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").in("status", activeStatuses);
   let individualQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", false).in("status", activeStatuses);
   let groupsQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", true).in("status", activeStatuses);
+  let unassignedQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).is("assigned_to", null).in("status", unassignedStatuses);
 
   if (allowedQueueIds !== null) {
     if (allowedGroupKeys.length === 0) {
@@ -80,29 +91,36 @@ export async function GET(request: Request) {
       mineQ = mineQ.in("queue_id", allowedQueueIds);
       individualQ = individualQ.in("queue_id", allowedQueueIds);
       groupsQ = groupsQ.in("queue_id", allowedQueueIds);
+      unassignedQ = unassignedQ.in("queue_id", allowedQueueIds);
     } else {
       const orPred = `queue_id.in.(${allowedQueueIds.join(",")}),external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`;
       queuesQ = queuesQ.or(orPred);
       mineQ = mineQ.or(orPred);
       individualQ = individualQ.or(orPred);
       groupsQ = groupsQ.or(orPred);
+      unassignedQ = unassignedQ.or(orPred);
     }
   }
 
-  const [queuesRes, mineRes, individualRes, groupsRes] = await Promise.all([
+  const [queuesRes, mineRes, individualRes, groupsRes, unassignedRes] = await Promise.all([
     queuesQ,
     mineQ,
     individualQ,
     groupsQ,
+    unassignedQ,
   ]);
 
   const mine = typeof mineRes.count === "number" ? mineRes.count : 0;
   const queues = typeof queuesRes.count === "number" ? queuesRes.count : 0;
   const individual = typeof individualRes.count === "number" ? individualRes.count : 0;
   const groups = typeof groupsRes.count === "number" ? groupsRes.count : 0;
+  const unassigned = typeof unassignedRes.count === "number" ? unassignedRes.count : 0;
 
-  const payload = { mine, queues, individual, groups };
-  if (userId) await setCachedCounts(companyId, userId, payload);
+  const payload = { mine, queues, individual, groups, unassigned };
+  if (userId) {
+    await setCachedCounts(companyId, userId, payload);
+    await setCachedCountsInSupabase(companyId, userId, payload);
+  }
 
   const res = NextResponse.json(payload);
   return withMetricsHeaders(res, { cacheHit: false, startTime });

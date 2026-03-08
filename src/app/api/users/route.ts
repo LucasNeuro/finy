@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { invalidateRoundRobinForCompany } from "@/lib/queue/round-robin";
 import { NextResponse } from "next/server";
 
 /** GET: lista usuários (perfis) da empresa com cargo e caixas atribuídas */
@@ -197,6 +198,7 @@ export async function POST(request: Request) {
     if (assignError) {
       return NextResponse.json({ error: assignError.message ?? "Falha ao atribuir caixas" }, { status: 500 });
     }
+    await invalidateRoundRobinForCompany(companyId);
   }
 
   if (groupAssignments.length > 0) {

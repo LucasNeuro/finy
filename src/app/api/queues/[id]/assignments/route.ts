@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { invalidateRoundRobinForQueue } from "@/lib/queue/round-robin";
 import { NextResponse } from "next/server";
 
 /**
@@ -129,6 +130,8 @@ export async function PUT(
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
   }
+
+  await invalidateRoundRobinForQueue(companyId, queueId);
 
   return NextResponse.json({ ok: true, user_ids: userIds });
 }

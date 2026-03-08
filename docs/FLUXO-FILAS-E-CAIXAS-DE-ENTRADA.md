@@ -231,3 +231,16 @@ Reabrir uma conversa `closed` exige permissão **inbox.reopen**.
 4. Se eu tiver **Pegar chamado da fila** (`inbox.claim`) e a conversa estiver sem atendente, **assumo automaticamente**: a conversa fica em **Meus atendimentos** e o status vai para **em atendimento**.  
 5. Só **supervisor / ADM / owner** (ou quem tiver `inbox.assign` ou `inbox.transfer`) pode **transferir** esse chamado para outro atendente.  
 6. Ao encerrar, mudo o status para **closed** (quem tem `inbox.close`).
+
+### 10.6 Exibição da fila (chamados novos no topo, cores)
+
+Para funcionar como **sistema completo de atendimento** (estilo Intercom, Zendesk, Freshdesk):
+
+- **Chamados novos** = conversas ainda **não atribuídas** (`assigned_to` vazio) e status **open** ou **in_queue**.
+- Na aba **Filas**, a lista é ordenada para que os **novos apareçam sempre no topo**; em seguida, o restante por última mensagem (mais recente primeiro).
+- **Cores na lista:**
+  - **Amarelo:** chamado novo (não atribuído, na fila).
+  - **Cinza:** padrão para as demais (já atribuídas ou em atendimento).
+- Quando um agente **assume** o chamado (botão "+" ou claim), a conversa passa a ter `assigned_to` e deixa de ser "novo"; ela some do topo amarelo e pode aparecer em **Meus atendimentos**. A fila é atualizada (invalidação de cache / refetch) para refletir quem está atendendo.
+
+**API:** `GET /api/conversations` (aba Filas, sem `only_assigned_to_me`) aplica a ordenação **novos primeiro** e o front pinta amarelo/cinza conforme acima. Assim a estrutura atual (Supabase + UAZAPI + cache) já suporta esse fluxo de fila e atendimento.

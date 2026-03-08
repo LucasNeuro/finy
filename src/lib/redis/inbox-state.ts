@@ -1,6 +1,7 @@
 "use server";
 
 import { getRedisClient } from "@/lib/redis/client";
+import { invalidateCountsInSupabase } from "@/lib/cache/inbox-counts-supabase";
 
 /**
  * Cache Redis APENAS para operação de atendimento (tickets e chats).
@@ -40,10 +41,11 @@ function listKey(
   status: string,
   onlyAssigned: string,
   includeClosed: string,
+  onlyUnassigned: string,
   offset: number,
   limit: number
 ): string {
-  return `${KEY_PREFIX}${companyId}:${queueId}:${status}:${onlyAssigned}:${includeClosed}:${offset}:${limit}`;
+  return `${KEY_PREFIX}${companyId}:${queueId}:${status}:${onlyAssigned}:${includeClosed}:${onlyUnassigned}:${offset}:${limit}`;
 }
 
 /**
@@ -55,13 +57,14 @@ export async function getCachedConversationList(
   status: string,
   onlyAssigned: string,
   includeClosed = false,
+  onlyUnassigned = false,
   offset = 0,
   limit = 100
 ): Promise<{ data: unknown[]; total: number } | null> {
   const redis = await getRedisClient();
   if (!redis) return null;
   try {
-    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", offset, limit);
+    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", onlyUnassigned ? "1" : "0", offset, limit);
     const raw = await redis.get(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { data: unknown[]; total: number };
@@ -81,13 +84,14 @@ export async function setCachedConversationList(
   onlyAssigned: string,
   payload: { data: unknown[]; total: number },
   includeClosed = false,
+  onlyUnassigned = false,
   offset = 0,
   limit = 100
 ): Promise<void> {
   const redis = await getRedisClient();
   if (!redis) return;
   try {
-    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", offset, limit);
+    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", onlyUnassigned ? "1" : "0", offset, limit);
     const ttl = includeClosed ? TTL_TICKETS_SECONDS : TTL_SECONDS;
     await redis.set(key, JSON.stringify(payload), { EX: ttl });
   } catch {
@@ -118,18 +122,18 @@ export async function invalidateConversationList(companyId: string): Promise<voi
 const COUNTS_KEY_PREFIX = "inbox:counts:";
 const COUNTS_TTL_SECONDS = 45;
 
-/** Retorna as contagens (mine, queues, individual, groups) do cache, se existirem. */
+/** Retorna as contagens (mine, queues, individual, groups, unassigned) do cache, se existirem. */
 export async function getCachedCounts(
   companyId: string,
   userId: string
-): Promise<{ mine: number; queues: number; individual: number; groups: number } | null> {
+): Promise<{ mine: number; queues: number; individual: number; groups: number; unassigned?: number } | null> {
   const redis = await getRedisClient();
   if (!redis) return null;
   try {
     const key = `${COUNTS_KEY_PREFIX}${companyId}:${userId}`;
     const raw = await redis.get(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { mine: number; queues: number; individual: number; groups: number };
+    const parsed = JSON.parse(raw) as { mine: number; queues: number; individual: number; groups: number; unassigned?: number };
     return parsed;
   } catch {
     return null;
@@ -140,7 +144,7 @@ export async function getCachedCounts(
 export async function setCachedCounts(
   companyId: string,
   userId: string,
-  payload: { mine: number; queues: number; individual: number; groups: number }
+  payload: { mine: number; queues: number; individual: number; groups: number; unassigned?: number }
 ): Promise<void> {
   const redis = await getRedisClient();
   if (!redis) return;
@@ -152,19 +156,19 @@ export async function setCachedCounts(
   }
 }
 
-/** Invalida o cache de contagens da empresa (todas as combinações companyId:userId). */
+/** Invalida o cache de contagens da empresa (Redis e Supabase). */
 export async function invalidateCounts(companyId: string): Promise<void> {
   const redis = await getRedisClient();
-  if (!redis) return;
-  try {
-    const pattern = `${COUNTS_KEY_PREFIX}${companyId}:*`;
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) {
-      await redis.del(keys);
+  if (redis) {
+    try {
+      const pattern = `${COUNTS_KEY_PREFIX}${companyId}:*`;
+      const keys = await redis.keys(pattern);
+      if (keys.length > 0) await redis.del(keys);
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
+  await invalidateCountsInSupabase(companyId);
 }
 
 const DETAIL_KEY_PREFIX = "inbox:detail:";

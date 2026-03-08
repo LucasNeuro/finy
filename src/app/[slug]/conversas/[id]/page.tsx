@@ -1,13 +1,14 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
+import { RealtimeMessages } from "@/components/RealtimeMessages";
 
 type Message = {
   id: string;
@@ -214,8 +215,8 @@ export default function ConversaThreadPage({
       return res.json() as Promise<ConversationDetail>;
     },
     enabled: !!resolved?.id && !!slug,
-    staleTime: 60 * 1000,
-    refetchInterval: 45_000,
+    staleTime: 5 * 60 * 1000, // 5 minutos - Realtime atualiza em tempo real
+    // Removido refetchInterval - Realtime cuida das atualizações
   });
 
   useEffect(() => {
@@ -266,10 +267,24 @@ export default function ConversaThreadPage({
     }
   }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders, queryClient]);
 
+  // Scroll automático apenas na primeira carga ou quando o usuário está no final
   useEffect(() => {
-    if (!conv?.messages?.length) return;
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [conv?.id, conv?.messages?.length]);
+    if (!conv?.messages?.length || !messagesScrollRef.current) return;
+    
+    const scrollContainer = messagesScrollRef.current;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 300;
+    
+    // Só faz scroll automático se estiver próximo do final
+    if (isNearBottom) {
+      const t = requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        });
+      });
+      return () => cancelAnimationFrame(t);
+    }
+  }, [conv?.messages?.length]);
 
   // Não atribuir ao abrir: atribuição só pelo botão "+" no minicard da lista.
 
@@ -475,6 +490,38 @@ export default function ConversaThreadPage({
         return;
       }
       if (!isMedia) setSendValue("");
+      
+      // Otimização: atualizar cache imediatamente com mensagem otimista
+      const sentMessage: Message = {
+        id: `temp-${Date.now()}`,
+        direction: "out",
+        content: isMedia ? (payload!.caption || "") : text,
+        sent_at: new Date().toISOString(),
+        message_type: payload?.type || "text",
+        media_url: payload?.file || null,
+        caption: payload?.caption || null,
+        file_name: payload?.docName || null,
+      };
+      
+      queryClient.setQueryData<ConversationDetail>(
+        queryKeys.conversation(resolved.id),
+        (oldData) => {
+          if (!oldData) return oldData;
+          return {
+            ...oldData,
+            messages: [...(oldData.messages || []), sentMessage],
+          };
+        }
+      );
+      
+      // Scroll imediato para a nova mensagem
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        });
+      });
+      
+      // Refetch para obter mensagem real do servidor (substitui a otimista)
       await refetchConversation();
       queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
     } catch {
@@ -542,8 +589,15 @@ export default function ConversaThreadPage({
               headers: { "Content-Type": "application/json", ...apiHeaders },
               body: JSON.stringify({ type: "ptt", file: base64 }),
             });
-            if (res.ok) await refetchConversation();
-            else setError("Falha ao enviar áudio");
+            if (res.ok) {
+              // Scroll imediato após enviar áudio
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+                });
+              });
+              await refetchConversation();
+            } else setError("Falha ao enviar áudio");
           } finally {
             setSending(false);
           }
@@ -587,6 +641,7 @@ export default function ConversaThreadPage({
   }
 
   const isLoading = loading && !conv;
+  const isInitialLoad = loading && !conv && !!resolved?.id;
 
   const name = conv?.customer_name || conv?.customer_phone || "";
   const displayName = contactDetails?.name ?? contactDetails?.wa_name ?? contactDetails?.wa_contactName ?? name;
@@ -754,11 +809,18 @@ export default function ConversaThreadPage({
         </div>
       </header>
 
+      {resolved?.id && typeof window !== "undefined" && <RealtimeMessages conversationId={resolved.id} />}
       <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-        <div ref={messagesScrollRef} className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
+        <div ref={messagesScrollRef} data-messages-scroll className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
           <div className="space-y-3">
             {isLoading ? (
               <>
+                {isInitialLoad && (
+                  <div className="flex flex-col items-center justify-center gap-2 py-8 text-[#64748B]">
+                    <Loader2 className="h-8 w-8 animate-spin" aria-hidden />
+                    <p className="text-sm font-medium">Abrindo conversa…</p>
+                  </div>
+                )}
                 <div className="flex justify-start"><Skeleton className="h-14 w-[75%] max-w-sm rounded-lg" /></div>
                 <div className="flex justify-end"><Skeleton className="h-10 w-[50%] max-w-xs rounded-lg" /></div>
                 <div className="flex justify-start"><Skeleton className="h-12 w-[60%] max-w-sm rounded-lg" /></div>
@@ -786,7 +848,7 @@ export default function ConversaThreadPage({
                     <MessageBubble m={m} name={name} />
                   </div>
                 ))}
-                <div ref={messagesEndRef} />
+                <div ref={messagesEndRef} data-messages-end />
               </>
             )}
           </div>

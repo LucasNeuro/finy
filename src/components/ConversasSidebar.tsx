@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo, useRef } from "react";
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, Inbox, UserCheck, User, Loader2, Plus } from "lucide-react";
+import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -33,10 +33,10 @@ function formatLastMessageTime(iso: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-type ViewMode = "mine" | "queues";
+type ViewMode = "mine" | "queues" | "unassigned";
 type ConversationTypeFilter = "all" | "individual" | "group";
-/** Tab ativa: só ícones — Filas, Meus atendimentos, Contatos (individuais), Grupos */
-type TabId = "queues" | "mine" | "contacts" | "groups";
+/** Tab ativa: só ícones — Novos, Filas, Meus atendimentos, Contatos (individuais), Grupos */
+type TabId = "novos" | "queues" | "mine" | "contacts" | "groups";
 
 /** Contato da API /api/contacts (mesma lista do módulo Contatos) */
 type SidebarContact = {
@@ -61,6 +61,15 @@ type SidebarGroup = {
   left_at: string | null;
 };
 
+/** Na aba Filas: amarelo = chamado novo (não atribuído); cinza = padrão para o resto. */
+const STYLE_NEW = "border-l-4 border-l-amber-400 bg-gradient-to-r from-amber-50/95 to-white shadow-sm";
+const STYLE_DEFAULT = "border-l-4 border-l-slate-200 bg-gradient-to-r from-slate-50/60 to-white";
+
+function getQueueRowStyle(isNew: boolean, showQueueColors: boolean): string {
+  if (!showQueueColors) return "";
+  return isNew ? STYLE_NEW : STYLE_DEFAULT;
+}
+
 const ConversationListItem = memo(function ConversationListItem({
   conversation: c,
   base,
@@ -68,6 +77,7 @@ const ConversationListItem = memo(function ConversationListItem({
   onHover,
   canClaim,
   onClaim,
+  showQueueColors = false,
 }: {
   conversation: Conversation;
   base: string;
@@ -75,6 +85,8 @@ const ConversationListItem = memo(function ConversationListItem({
   onHover?: (id: string) => void;
   canClaim?: boolean;
   onClaim?: (conversationId: string) => void;
+  /** Na aba Filas: aplicar amarelo (novo) / cinza (resto). */
+  showQueueColors?: boolean;
 }) {
   const href = `${base}/conversas/${c.id}`;
   const displayName = (c.customer_name ?? c.customer_phone) ?? "?";
@@ -82,6 +94,8 @@ const ConversationListItem = memo(function ConversationListItem({
   const isGroup = c.is_group === true;
   const showClaim = canClaim && (c.assigned_to == null || c.assigned_to === "");
   const [claiming, setClaiming] = useState(false);
+  const isNew = (c.assigned_to == null || c.assigned_to === "") && (c.status === "open" || c.status === "in_queue");
+  const rowStyle = getQueueRowStyle(isNew, showQueueColors);
 
   const handleClaimClick = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -97,12 +111,14 @@ const ConversationListItem = memo(function ConversationListItem({
 
   return (
     <li onMouseEnter={() => onHover?.(c.id)}>
-      <div className={`flex items-center gap-1 ${currentId === c.id ? "bg-clicvend-green/10" : ""}`}>
+      <div
+        className={`flex items-center gap-1.5 transition-all duration-150 ${currentId === c.id ? "bg-clicvend-green/10 ring-1 ring-clicvend-green/20" : ""} ${rowStyle}`}
+      >
         <Link
           href={href}
-          className="flex min-w-0 flex-1 items-center gap-3 p-3 hover:bg-[#F8FAFC]"
+          className="flex min-w-0 flex-1 items-center gap-3.5 p-3.5 hover:bg-[#F8FAFC] rounded-lg transition-colors duration-150"
         >
-          <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+          <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
             {c.avatar_url ? (
               <img src={c.avatar_url} alt="" className="h-full w-full object-cover" />
             ) : isGroup ? (
@@ -112,17 +128,20 @@ const ConversationListItem = memo(function ConversationListItem({
             )}
           </span>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-1">
-              <p className="truncate text-sm font-medium text-[#1E293B]">
-                {c.customer_name || c.customer_phone}
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-[#1E293B]">
+                {isNew && (
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500 shadow-sm ring-2 ring-amber-100" title="Nova conversa (não atribuída)" aria-hidden />
+                )}
+                <span className="truncate">{c.customer_name || c.customer_phone}</span>
               </p>
-              <span className="shrink-0 text-xs text-[#64748B]">
+              <span className="shrink-0 text-xs font-medium text-[#64748B]">
                 {formatLastMessageTime(c.last_message_at)}
               </span>
             </div>
-            <p className="truncate text-xs text-[#64748B] flex items-center gap-1.5">
+            <p className="truncate text-xs text-[#64748B] flex items-center gap-2 mt-0.5">
               {isGroup && (
-                <span className="shrink-0 rounded bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] font-medium text-[#64748B]">
+                <span className="shrink-0 rounded-md bg-[#E2E8F0] px-2 py-0.5 text-[10px] font-semibold text-[#64748B]">
                   Grupo
                 </span>
               )}
@@ -141,7 +160,7 @@ const ConversationListItem = memo(function ConversationListItem({
             type="button"
             onClick={handleClaimClick}
             disabled={claiming}
-            className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[#009B84] hover:bg-[#009B84] hover:text-white hover:border-[#009B84] disabled:opacity-60"
+            className="mr-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-[#E2E8F0] bg-white text-[#009B84] shadow-sm transition-all duration-200 hover:bg-[#009B84] hover:text-white hover:border-[#009B84] hover:shadow-md hover:scale-105 disabled:opacity-60 disabled:hover:scale-100"
             title="Atribuir a mim e colocar em atendimento"
             aria-label="Atribuir a mim"
           >
@@ -205,9 +224,9 @@ const ContactListItem = memo(function ContactListItem({
         type="button"
         onClick={handleClick}
         disabled={starting}
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-[#F8FAFC] disabled:opacity-70"
+        className="flex w-full items-center gap-3.5 p-3.5 text-left rounded-lg transition-all duration-150 hover:bg-[#F8FAFC] disabled:opacity-70"
       >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
           {starting ? (
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
           ) : (
@@ -215,10 +234,10 @@ const ContactListItem = memo(function ContactListItem({
           )}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-[#1E293B]">
+          <p className="truncate text-sm font-semibold text-[#1E293B]">
             {contact.contact_name || contact.first_name || "—"}
           </p>
-          <p className="truncate text-xs text-[#64748B]">
+          <p className="truncate text-xs text-[#64748B] mt-0.5">
             {contact.phone || contact.jid || ""}
           </p>
         </div>
@@ -275,9 +294,9 @@ const GroupListItem = memo(function GroupListItem({
         type="button"
         onClick={handleClick}
         disabled={opening}
-        className="flex w-full items-center gap-3 p-3 text-left hover:bg-[#F8FAFC] disabled:opacity-70"
+        className="flex w-full items-center gap-3.5 p-3.5 text-left rounded-lg transition-all duration-150 hover:bg-[#F8FAFC] disabled:opacity-70"
       >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
           {opening ? (
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
           ) : (
@@ -285,10 +304,10 @@ const GroupListItem = memo(function GroupListItem({
           )}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-[#1E293B]">
+          <p className="truncate text-sm font-semibold text-[#1E293B]">
             {group.name || group.topic || "Grupo"}
           </p>
-          <p className="truncate text-xs text-[#64748B]">{group.jid}</p>
+          <p className="truncate text-xs text-[#64748B] mt-0.5">{group.jid}</p>
         </div>
       </button>
     </li>
@@ -306,10 +325,13 @@ export function ConversasSidebar() {
   const [search, setSearch] = useState("");
   const [unassigning, setUnassigning] = useState(false);
   const [resettingToOpen, setResettingToOpen] = useState(false);
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab);
-    if ((tab === "queues" || tab === "mine") && slug) {
+    if ((tab === "queues" || tab === "mine" || tab === "novos") && slug) {
       setResettingToOpen(true);
       fetch("/api/conversations/reset-to-open", {
         method: "POST",
@@ -321,6 +343,7 @@ export function ConversasSidebar() {
           if (res.ok) {
             queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
             queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
+            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "unassigned") });
             queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
             if (typeof window !== "undefined") {
               window.dispatchEvent(new CustomEvent("conversations-status-reset"));
@@ -330,11 +353,47 @@ export function ConversasSidebar() {
         .finally(() => setResettingToOpen(false));
     }
   };
-  const viewMode: ViewMode = activeTab === "queues" ? "queues" : "mine";
+  const viewMode: ViewMode = activeTab === "queues" ? "queues" : activeTab === "novos" ? "unassigned" : "mine";
   const typeFilter: ConversationTypeFilter =
     activeTab === "groups" ? "group" : activeTab === "contacts" ? "individual" : "all";
   const queryClient = useQueryClient();
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+
+  // Verificar se pode rolar os tabs
+  const checkTabsScroll = () => {
+    const container = tabsScrollRef.current;
+    if (!container) return;
+    const hasScroll = container.scrollWidth > container.clientWidth;
+    setCanScrollLeft(hasScroll && container.scrollLeft > 1);
+    setCanScrollRight(hasScroll && container.scrollLeft < container.scrollWidth - container.clientWidth - 1);
+  };
+
+  // Scroll dos tabs
+  const scrollTabs = (direction: "left" | "right") => {
+    const container = tabsScrollRef.current;
+    if (!container) return;
+    const scrollAmount = container.clientWidth * 0.8; // Scroll 80% da largura visível
+    container.scrollBy({
+      left: direction === "left" ? -scrollAmount : scrollAmount,
+      behavior: "smooth",
+    });
+    // Verificar novamente após o scroll para atualizar os chevrons
+    setTimeout(checkTabsScroll, 300);
+  };
+
+  useEffect(() => {
+    const container = tabsScrollRef.current;
+    if (!container) return;
+    // Verificar após um pequeno delay para garantir que o DOM está renderizado
+    const timeoutId = setTimeout(checkTabsScroll, 100);
+    container.addEventListener("scroll", checkTabsScroll);
+    window.addEventListener("resize", checkTabsScroll);
+    return () => {
+      clearTimeout(timeoutId);
+      container.removeEventListener("scroll", checkTabsScroll);
+      window.removeEventListener("resize", checkTabsScroll);
+    };
+  }, [activeTab]); // Re-executar quando a tab ativa mudar
 
   const { data: permissionsData } = useQuery({
     queryKey: queryKeys.permissions(slug ?? ""),
@@ -350,14 +409,22 @@ export function ConversasSidebar() {
     queryFn: () =>
       fetch("/api/conversations/counts", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
     enabled: !!slug,
-    staleTime: 60 * 1000,
+    staleTime: 45 * 1000,
+    refetchInterval: 60 * 1000,
+    refetchIntervalInBackground: false,
   });
   const counts = {
     mine: typeof countsData?.mine === "number" ? countsData.mine : 0,
     queues: typeof countsData?.queues === "number" ? countsData.queues : 0,
     individual: typeof countsData?.individual === "number" ? countsData.individual : 0,
     groups: typeof countsData?.groups === "number" ? countsData.groups : 0,
+    unassigned: typeof (countsData as { unassigned?: number })?.unassigned === "number" ? (countsData as { unassigned: number }).unassigned : 0,
   };
+
+  // Re-verificar scroll dos tabs quando counts mudarem (após counts ser definido)
+  useEffect(() => {
+    checkTabsScroll();
+  }, [countsData]);
 
   const { data: contactsData, isLoading: contactsLoading } = useQuery({
     queryKey: queryKeys.contacts(slug ?? ""),
@@ -380,6 +447,7 @@ export function ConversasSidebar() {
   const conversationsParams = new URLSearchParams();
   conversationsParams.set("limit", "500");
   if (viewMode === "mine") conversationsParams.set("only_assigned_to_me", "1");
+  if (viewMode === "unassigned") conversationsParams.set("only_unassigned", "1");
 
   const {
     data: conversationsData,
@@ -476,40 +544,71 @@ export function ConversasSidebar() {
   // o usuário abre o painel de informações e chama chat-details. Sem chamadas em loop à UAZAPI.
 
   return (
-    <aside className="flex min-h-0 w-96 shrink-0 flex-col border-r border-[#E2E8F0] bg-white overflow-hidden self-stretch bg">
-      <div className="flex shrink-0 items-center p-3">
+    <aside className="flex min-h-0 w-[440px] shrink-0 flex-col border-r border-[#E2E8F0]/60 bg-white shadow-sm overflow-hidden self-stretch">
+      <div className="flex shrink-0 items-center p-4">
         
       </div>
-      <div className="shrink-0 p-2">
+      <div className="shrink-0 px-3 pb-3">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
           <input
             type="search"
             placeholder="Pesquisar por nome ou número…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] pl-9 pr-3 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] pl-10 pr-4 py-2.5 text-sm text-[#1E293B] placeholder-[#94A3B8] transition-all focus:border-clicvend-orange focus:bg-white focus:outline-none focus:ring-2 focus:ring-clicvend-orange/20 shadow-sm hover:border-[#CBD5E1]"
           />
         </div>
       </div>
-      {/* Tabs com ícone + nome + badge: Filas, Meus, Contatos, Grupos — scroll horizontal se não couber */}
-      <div className="flex shrink-0 border-b border-[#E2E8F0] overflow-x-auto px-2 py-2 scrollbar-thin">
-        <div className="flex min-w-min flex-nowrap items-stretch gap-1 rounded-lg bg-[#F1F5F9] p-1">
+      {/* Tabs: Novos, Filas, Meus, Contatos, Grupos — scroll horizontal se não couber */}
+      <div className="flex shrink-0 w-full border-b border-[#E2E8F0]/60 px-3 py-0.5 items-center gap-1 min-w-0">
+        <button
+          type="button"
+          onClick={() => scrollTabs("left")}
+          disabled={!canScrollLeft}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Rolar para esquerda"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <div
+          ref={tabsScrollRef}
+          className="scroll-tabs flex w-full flex-nowrap items-center gap-1.5 rounded-md bg-white py-0.5 px-1.5 overflow-x-auto touch-pan-x min-w-0"
+        >
+          <button
+            type="button"
+            onClick={() => handleTabChange("novos")}
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
+              activeTab === "novos"
+                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
+                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
+            }`}
+            title="Novos (não atribuídos)"
+            aria-label="Novos"
+          >
+            <Inbox className="h-5 w-5 shrink-0" />
+            <span className="truncate text-xs font-semibold">Novos</span>
+            {counts.unassigned > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-amber-500 to-amber-600 px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
+                {counts.unassigned > 99 ? "99+" : counts.unassigned}
+              </span>
+            )}
+          </button>
           <button
             type="button"
             onClick={() => handleTabChange("queues")}
-            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
               activeTab === "queues"
-                ? "bg-white text-clicvend-orange shadow-sm"
-                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
+                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
             }`}
             title="Filas"
             aria-label="Filas"
           >
             <Inbox className="h-5 w-5 shrink-0" />
-            <span className="truncate text-xs font-medium">Filas</span>
+            <span className="truncate text-xs font-semibold">Filas</span>
             {counts.queues > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[#008F7A] px-1 text-[10px] font-semibold text-white shadow-sm">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#008F7A] to-[#009B84] px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
                 {counts.queues > 99 ? "99+" : counts.queues}
               </span>
             )}
@@ -517,18 +616,18 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => handleTabChange("mine")}
-            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
               activeTab === "mine"
-                ? "bg-white text-clicvend-orange shadow-sm"
-                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
+                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
             }`}
             title="Meus atendimentos"
             aria-label="Meus atendimentos"
           >
             <UserCheck className="h-5 w-5 shrink-0" />
-            <span className="truncate text-xs font-medium">Meus</span>
+            <span className="truncate text-xs font-semibold">Meus</span>
             {counts.mine > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[#009B84] px-1 text-[10px] font-semibold text-white shadow-sm">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#009B84] to-[#00C4A7] px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
                 {counts.mine > 99 ? "99+" : counts.mine}
               </span>
             )}
@@ -536,40 +635,49 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => setActiveTab("contacts")}
-            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
               activeTab === "contacts"
-                ? "bg-white text-clicvend-orange shadow-sm"
-                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
+                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
             }`}
             title="Contatos (conversas individuais)"
             aria-label="Contatos"
           >
             <User className="h-5 w-5 shrink-0" />
-            <span className="truncate text-xs font-medium">Contatos</span>
+            <span className="truncate text-xs font-semibold">Contatos</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("groups")}
-            className={`relative flex min-w-[4.5rem] flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 transition-colors ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
               activeTab === "groups"
-                ? "bg-white text-clicvend-orange shadow-sm"
-                : "text-[#64748B] hover:bg-white/60 hover:text-[#1E293B]"
+                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
+                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
             }`}
             title="Grupos"
             aria-label="Grupos"
           >
             <Users className="h-5 w-5 shrink-0" />
-            <span className="truncate text-xs font-medium">Grupos</span>
+            <span className="truncate text-xs font-semibold">Grupos</span>
             {counts.groups > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[#00C4A7] px-1 text-[10px] font-semibold text-white shadow-sm">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#00C4A7] to-[#00D9C4] px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
                 {counts.groups > 99 ? "99+" : counts.groups}
               </span>
             )}
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => scrollTabs("right")}
+          disabled={!canScrollRight}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Rolar para direita"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
       {activeTab === "mine" && counts.mine > 0 && (
-        <div className="shrink-0 border-b border-[#E2E8F0] px-2 py-1.5">
+        <div className="shrink-0 border-b border-[#E2E8F0]/60 px-3 py-2.5">
           <button
             type="button"
             onClick={async () => {
@@ -591,7 +699,7 @@ export function ConversasSidebar() {
               }
             }}
             disabled={unassigning}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-[#E2E8F0] bg-[#F8FAFC] py-2 text-xs font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-2.5 text-xs font-semibold text-[#64748B] transition-all duration-200 hover:bg-[#F1F5F9] hover:text-[#1E293B] hover:border-[#CBD5E1] hover:shadow-sm disabled:opacity-60"
           >
             {unassigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             Esvaziar Meus
@@ -611,7 +719,7 @@ export function ConversasSidebar() {
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-[#E2E8F0]">
+            <ul className="divide-y divide-[#E2E8F0]/40 px-2">
               {filteredContacts.map((c) => (
                 <ContactListItem key={c.id} contact={c} base={base} apiHeaders={apiHeaders} />
               ))}
@@ -628,7 +736,7 @@ export function ConversasSidebar() {
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-[#E2E8F0]">
+            <ul className="divide-y divide-[#E2E8F0]/40 px-2">
               {filteredGroups.map((g) => (
                 <GroupListItem key={g.id} group={g} base={base} apiHeaders={apiHeaders} />
               ))}
@@ -651,58 +759,60 @@ export function ConversasSidebar() {
               Tentar novamente
             </button>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="p-4 text-center text-sm text-[#64748B]">
-            <p className="font-medium text-[#1E293B]">Nenhuma conversa</p>
-            <p className="mt-1 text-xs">
+          ) : filtered.length === 0 ? (
+          <div className="p-6 text-center text-sm text-[#64748B]">
+            <p className="font-semibold text-[#1E293B] text-base">Nenhuma conversa</p>
+            <p className="mt-2 text-xs leading-relaxed">
               {activeTab === "mine" && "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."}
               {activeTab === "queues" && "Nenhuma conversa nas suas filas no momento."}
+              {activeTab === "novos" && "Nenhum chamado novo (não atribuído) no momento. Novos entram pela aba Filas."}
             </p>
-            <p className="mt-2 text-xs">
-              Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link> recebem mensagens e histórico em segundo plano.
+            <p className="mt-3 text-xs leading-relaxed">
+              Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline font-medium">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline font-medium">Conexões</Link> recebem mensagens e histórico em segundo plano.
             </p>
           </div>
         ) : (
           <>
-          <ul className="divide-y divide-[#E2E8F0]">
-            {filtered.map((c) => (
-              <ConversationListItem
-                key={c.id}
-                conversation={c}
-                base={base}
-                currentId={currentId}
-                canClaim={Array.isArray(permissionsData?.permissions) && permissionsData.permissions.includes("inbox.claim")}
-                onClaim={async (conversationId) => {
-                  const res = await fetch(`/api/conversations/${conversationId}/claim`, {
-                    method: "POST",
-                    credentials: "include",
-                    headers: apiHeaders ?? {},
-                  });
-                  if (res.ok) {
-                    queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", viewMode) });
-                  }
-                }}
-                onHover={slug ? (id) => {
-                  queryClient.prefetchQuery({
-                    queryKey: queryKeys.conversation(id),
-                    queryFn: () =>
-                      fetch(`/api/conversations/${id}`, {
-                        credentials: "include",
-                        headers: apiHeaders,
-                      }).then((r) => r.json()),
-                  });
-                } : undefined}
-              />
-            ))}
-          </ul>
+            <ul className="divide-y divide-[#E2E8F0]/40 px-2">
+              {filtered.map((c) => (
+                <ConversationListItem
+                  key={c.id}
+                  conversation={c}
+                  base={base}
+                  currentId={currentId}
+                  canClaim={Array.isArray(permissionsData?.permissions) && permissionsData.permissions.includes("inbox.claim")}
+                  onClaim={async (conversationId) => {
+                    const res = await fetch(`/api/conversations/${conversationId}/claim`, {
+                      method: "POST",
+                      credentials: "include",
+                      headers: apiHeaders ?? {},
+                    });
+                    if (res.ok) {
+                      queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", viewMode) });
+                    }
+                  }}
+                  onHover={slug ? (id) => {
+                    queryClient.prefetchQuery({
+                      queryKey: queryKeys.conversation(id),
+                      queryFn: () =>
+                        fetch(`/api/conversations/${id}`, {
+                          credentials: "include",
+                          headers: apiHeaders,
+                        }).then((r) => r.json()),
+                    });
+                  } : undefined}
+                  showQueueColors={activeTab === "queues" || activeTab === "novos"}
+                />
+              ))}
+            </ul>
           {hasMore && <div ref={loadMoreSentinelRef} className="h-1" aria-hidden />}
           {hasMore && (
-            <div className="border-t border-[#E2E8F0] p-2">
+            <div className="border-t border-[#E2E8F0]/60 p-3">
               <button
                 type="button"
                 onClick={() => loadMore()}
                 disabled={loadingMore}
-                className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-60"
+                className="w-full rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] py-2.5 text-sm font-semibold text-[#64748B] transition-all duration-200 hover:bg-[#F1F5F9] hover:border-[#CBD5E1] hover:shadow-sm disabled:opacity-60"
               >
                 {loadingMore ? "Carregando…" : `Carregar mais (${totalFromApi - allConversations.length} restantes)`}
               </button>

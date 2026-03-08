@@ -67,6 +67,32 @@ body {
   background: #64748b;
 }
 
+/* Scrollbar transparente para container de tabs (rolagem apenas dos botões internamente) */
+.scroll-tabs {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  -webkit-overflow-scrolling: touch; /* Suporte para rolagem com dois dedos no touch */
+  overscroll-behavior-x: contain; /* Evita scroll do container pai */
+}
+.scroll-tabs::-webkit-scrollbar {
+  height: 2px; /* Mais fina que os botões */
+}
+.scroll-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-tabs::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 1px;
+  transition: background-color 0.2s;
+}
+.scroll-tabs:hover::-webkit-scrollbar-thumb {
+  background: rgba(203, 213, 225, 0.3);
+}
+.scroll-tabs:active::-webkit-scrollbar-thumb,
+.scroll-tabs:focus::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+}
+
 /* Barra de progresso indeterminada (sync) dentro do botão */
 @keyframes sync-progress-slide {
   0% { transform: translateX(-100%); }

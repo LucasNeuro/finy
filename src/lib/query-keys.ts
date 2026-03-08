@@ -5,7 +5,7 @@
 export const queryKeys = {
   permissions: (slug: string) => ["inbox", "permissions", slug] as const,
   counts: (slug: string) => ["inbox", "counts", slug] as const,
-  conversationListInfinite: (slug: string, viewMode: "mine" | "queues") =>
+  conversationListInfinite: (slug: string, viewMode: "mine" | "queues" | "unassigned") =>
     ["inbox", "conversations", slug, viewMode] as const,
   conversation: (id: string) => ["inbox", "conversation", id] as const,
   contacts: (slug: string) => ["inbox", "contacts", slug] as const,
