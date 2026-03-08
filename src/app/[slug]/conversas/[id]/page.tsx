@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
@@ -224,6 +224,21 @@ function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
   return url.startsWith("http") || url.startsWith("data:");
 }
 
+/** Inferir tipo de mídia quando message_type vem "text" mas o conteúdo é [image], [video], etc. */
+function inferDisplayType(messageType: string | undefined, content: string): string {
+  const t = (messageType ?? "text").toLowerCase();
+  if (t !== "text") return t;
+  const c = (content ?? "").trim();
+  const match = c.match(/^\[(image|video|audio|document|ptt|media|sticker)\]$/i);
+  if (match) {
+    const k = match[1].toLowerCase();
+    return k === "media" ? "document" : k;
+  }
+  return "text";
+}
+
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+
 function MessageBubble({
   m,
   name,
@@ -238,15 +253,16 @@ function MessageBubble({
   onReaction?: (messageId: string, emoji: string) => void;
 }) {
   const type = m.message_type ?? "text";
+  const displayType = inferDisplayType(type, m.content ?? "");
   const rawMediaUrl = m.media_url;
   const mediaUrl = rawMediaUrl && (rawMediaUrl.startsWith("http") || rawMediaUrl.startsWith("data:"))
     ? rawMediaUrl
     : rawMediaUrl
-      ? (type === "image"
+      ? (displayType === "image"
           ? `data:image/jpeg;base64,${rawMediaUrl}`
-          : type === "audio" || type === "ptt"
+          : displayType === "audio" || displayType === "ptt"
             ? `data:audio/ogg;base64,${rawMediaUrl}`
-            : type === "video"
+            : displayType === "video"
               ? `data:video/mp4;base64,${rawMediaUrl}`
               : rawMediaUrl)
       : null;
@@ -254,13 +270,19 @@ function MessageBubble({
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadLoading, setDownloadLoading] = useState(false);
-  const canFetchDownload = Boolean(conversationId && apiHeaders && m.external_id && (type === "audio" || type === "ptt" || type === "document" || type === "image" || type === "video"));
-  const needsDownloadForPlay = (type === "audio" || type === "ptt") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
-  const needsDownloadForMedia = (type === "image" || type === "video") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
-  const needsDownloadForDocument = type === "document" && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  const canFetchDownload = Boolean(
+    conversationId && apiHeaders && m.external_id &&
+    ["audio", "ptt", "document", "image", "video"].includes(displayType)
+  );
+  const needsDownloadForPlay = (displayType === "audio" || displayType === "ptt") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
+  const needsDownloadForMedia = (displayType === "image" || displayType === "video") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
+  const needsDownloadForDocument = displayType === "document" && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
 
   useEffect(() => {
-    if (!(needsDownloadForPlay || needsDownloadForMedia) || !conversationId || !apiHeaders || !m.id) return;
+    if (!(needsDownloadForPlay || needsDownloadForMedia || needsDownloadForDocument) || !conversationId || !apiHeaders || !m.id) return;
     let cancelled = false;
     setDownloadLoading(true);
     fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders })
@@ -270,9 +292,18 @@ function MessageBubble({
       })
       .finally(() => { if (!cancelled) setDownloadLoading(false); });
     return () => { cancelled = true; };
-  }, [needsDownloadForPlay, needsDownloadForMedia, conversationId, apiHeaders, m.id]);
+  }, [needsDownloadForPlay, needsDownloadForMedia, needsDownloadForDocument, conversationId, apiHeaders, m.id]);
 
-  const audioSrc = (type === "audio" || type === "ptt") ? (downloadUrl || mediaUrl) : null;
+  const audioSrc = (displayType === "audio" || displayType === "ptt") ? (downloadUrl || mediaUrl) : null;
+
+  useEffect(() => {
+    if (!reactionPickerOpen) return;
+    const close = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setReactionPickerOpen(false);
+    };
+    document.addEventListener("click", close, true);
+    return () => document.removeEventListener("click", close, true);
+  }, [reactionPickerOpen]);
 
   async function handleDownloadClick() {
     if (downloadUrl) {
@@ -307,7 +338,7 @@ function MessageBubble({
           <span className="text-[#64748B] font-normal animate-pulse">Enviando…</span>
         )}
       </p>
-      {type === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
+      {displayType === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
@@ -338,7 +369,7 @@ function MessageBubble({
           {caption && caption !== "[image]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {type === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
+      {displayType === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
@@ -365,7 +396,7 @@ function MessageBubble({
           {caption && caption !== "[video]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {(type === "audio" || type === "ptt") && (audioSrc || downloadLoading || mediaUrl) && (
+      {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl) && (
         <div className="space-y-1">
           <ChatAudioPlayer
             src={audioSrc}
