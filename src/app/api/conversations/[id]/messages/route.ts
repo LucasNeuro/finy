@@ -7,7 +7,7 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
-/** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). */
+/** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). Também 12 dígitos 55+DDD+8 (6/7/8) → 55+DDD+9+8. */
 function fixBrazilMobileZero(d: string): string {
   if (d.length === 11 && !d.startsWith("55")) {
     const ddd = d.slice(0, 2);
@@ -21,12 +21,17 @@ function fixBrazilMobileZero(d: string): string {
       const rest = after55.slice(2, 11);
       if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
     }
-    // Celular sem o 9: 95+649022386 → 95+9+64022386 (5595964022386)
-    if (after55.length === 11 && /^[678]/.test(after55.slice(2, 3))) {
+    // Celular sem o 9: 55+95+69022386 (11 dígitos após 55) → 55+95+9+69022386
+    if (after55.length === 11 && /^[678]/.test(after55[2]!)) {
       const ddd = after55.slice(0, 2);
-      const rest = after55.slice(2, 3) + after55.slice(4, 11);
+      const rest = after55.slice(2, 11); // 8 dígitos (não dropar nenhum)
       if (/^\d{2}$/.test(ddd) && rest.length === 8) return "55" + ddd + "9" + rest;
     }
+  }
+  // 12 dígitos 55+DDD+8 (primeiro da parte local 6/7/8) = celular sem o 9 → inserir 9
+  if (d.length === 12 && d.startsWith("55")) {
+    const after55 = d.slice(2); // 10 dígitos: DDD(2) + 8
+    if (/^\d{2}[678]\d{7}$/.test(after55)) return "55" + after55.slice(0, 2) + "9" + after55.slice(2);
   }
   return d;
 }
