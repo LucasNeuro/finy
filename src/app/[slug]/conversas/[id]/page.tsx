@@ -20,6 +20,7 @@ type Message = {
   caption?: string | null;
   file_name?: string | null;
   external_id?: string | null;
+  reaction?: string | null;
 };
 
 type ConversationDetail = {
@@ -228,11 +229,13 @@ function MessageBubble({
   name,
   conversationId,
   apiHeaders,
+  onReaction,
 }: {
   m: Message;
   name: string;
   conversationId?: string;
   apiHeaders?: Record<string, string>;
+  onReaction?: (messageId: string, emoji: string) => void;
 }) {
   const type = m.message_type ?? "text";
   const rawMediaUrl = m.media_url;
@@ -406,12 +409,32 @@ function MessageBubble({
       {(type === "text" || (!mediaUrl && !downloadUrl && type !== "document")) && (
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
-      <div className="mt-1 flex items-center justify-end gap-1">
+      <div className="mt-1 flex items-center justify-end gap-1 flex-wrap">
+        {m.reaction && (
+          <span className="text-sm mr-1" title="Reação">
+            {m.reaction}
+          </span>
+        )}
         <span className="text-xs text-[#64748B]">
           {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
         </span>
         {m.direction === "out" && (
           <CheckCheck className="h-3.5 w-3.5 text-[#64748B]" aria-hidden />
+        )}
+        {conversationId && apiHeaders && m.external_id && onReaction && (
+          <div className="flex items-center gap-0.5 ml-1 opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="p-0.5 rounded hover:bg-black/10 text-base leading-none disabled:opacity-50"
+                onClick={() => onReaction(m.id, m.reaction === emoji ? "" : emoji)}
+                title={m.reaction === emoji ? "Remover reação" : `Reagir ${emoji}`}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -905,6 +928,21 @@ export default function ConversaThreadPage({
     }
   }
 
+  async function handleReaction(messageId: string, emoji: string) {
+    if (!resolved?.id || !apiHeaders) return;
+    try {
+      const res = await fetch(`/api/conversations/${resolved.id}/messages/reaction`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ message_id: messageId, emoji }),
+      });
+      if (res.ok) await refetchConversation();
+    } catch {
+      // silent fail
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (mediaRecorderRef.current && recording) {
@@ -1150,7 +1188,7 @@ export default function ConversaThreadPage({
                     key={(m as Message).id}
                     className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
                   >
-                    <MessageBubble m={m as Message} name={name} conversationId={resolved?.id} apiHeaders={apiHeaders} />
+                    <MessageBubble m={m as Message} name={name} conversationId={resolved?.id} apiHeaders={apiHeaders} onReaction={handleReaction} />
                   </div>
                 ))}
                 <div ref={messagesEndRef} data-messages-end />
@@ -1205,6 +1243,26 @@ export default function ConversaThreadPage({
               type="text"
               value={sendValue}
               onChange={(e) => setSendValue(e.target.value)}
+              onFocus={() => {
+                if (resolved?.id && apiHeaders && canSendMessages) {
+                  fetch(`/api/conversations/${resolved.id}/presence`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                    body: JSON.stringify({ presence: "composing" }),
+                  }).catch(() => {});
+                }
+              }}
+              onBlur={() => {
+                if (resolved?.id && apiHeaders) {
+                  fetch(`/api/conversations/${resolved.id}/presence`, {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                    body: JSON.stringify({ presence: "paused" }),
+                  }).catch(() => {});
+                }
+              }}
               placeholder="Digite sua mensagem…"
               className="flex-1 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
               disabled={sending || isLoading}

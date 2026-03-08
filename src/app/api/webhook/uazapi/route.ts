@@ -491,6 +491,38 @@ async function processOneMessage(
     const companyId = channel.company_id;
     const channelId = channel.id;
 
+    // Evento de reação: atualizar a mensagem alvo e não inserir nova mensagem
+    const reactionPayload = dataObj.reaction && typeof dataObj.reaction === "object" ? (dataObj.reaction as { id?: string; emoji?: string }) : null;
+    const isReactionEvent = (rawType === "reaction" || reactionPayload?.id) && reactionPayload?.id;
+    if (isReactionEvent && reactionPayload) {
+      const canonicalExtId = toCanonicalJid(externalId, isGroup) || externalId;
+      const { data: conv } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("channel_id", channelId)
+        .eq("company_id", companyId)
+        .eq("external_id", canonicalExtId)
+        .eq("kind", isGroup ? "group" : "ticket")
+        .maybeSingle();
+      if (conv?.id) {
+        const { data: msg } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", (conv as { id: string }).id)
+          .eq("external_id", reactionPayload.id)
+          .maybeSingle();
+        if (msg?.id) {
+          await supabase
+            .from("messages")
+            .update({ reaction: reactionPayload.emoji ?? null })
+            .eq("id", (msg as { id: string }).id);
+          await invalidateConversationDetail((conv as { id: string }).id);
+          await invalidateConversationList(companyId);
+        }
+      }
+      return true;
+    }
+
     // Carrega channel_queues + queues com kind (ticket | group)
     const { data: cqData } = await supabase
       .from("channel_queues")
@@ -694,6 +726,7 @@ async function processOneMessage(
         .from("conversations")
         .select("id, status")
         .eq("channel_id", channelId)
+        .eq("company_id", companyId)
         .eq("customer_phone", canonicalDigits)
         .eq("kind", "ticket")
         .neq("status", "closed")

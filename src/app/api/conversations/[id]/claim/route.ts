@@ -11,6 +11,7 @@ import { NextResponse } from "next/server";
 /**
  * POST /api/conversations/[id]/claim
  * Assume o atendimento (atribui a conversa ao usuário logado).
+ * Nunca cria conversa nova: só atualiza assigned_to e status da conversa existente.
  * Só funciona se a conversa estiver sem atendente (assigned_to null).
  * Exige permissão inbox.claim.
  * Atualiza status para in_progress (ticket em atendimento).

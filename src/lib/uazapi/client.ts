@@ -1497,6 +1497,33 @@ export async function sendMessagePresence(
   return { ok, error: ok ? undefined : (error ?? `HTTP ${status}`) };
 }
 
+/**
+ * Envia reação (emoji) a uma mensagem. POST /message/react.
+ * text: emoji (ex: "👍") ou "" para remover. id: ID da mensagem no WhatsApp (external_id).
+ */
+export async function sendReaction(
+  token: string,
+  number: string,
+  messageId: string,
+  emoji: string
+): Promise<{ ok: boolean; data?: unknown; error?: string }> {
+  const normalizedNumber = number.includes("@") ? number : number.replace(/\D/g, "");
+  const { data, ok, error, status } = await uazapiFetch("/message/react", {
+    method: "POST",
+    token,
+    body: {
+      number: normalizedNumber,
+      id: messageId,
+      text: emoji ?? "",
+    },
+  });
+  return {
+    ok,
+    data,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
 export const uazapi = {
   getBaseUrl,
   getAdminToken,
@@ -1512,6 +1539,7 @@ export const uazapi = {
   sendMenu,
   messageDownload,
   sendMessagePresence,
+  sendReaction,
   listTriggers,
   editTrigger,
   listQuickReplies,

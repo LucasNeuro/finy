@@ -16,6 +16,7 @@ type Message = {
   caption?: string | null;
   file_name?: string | null;
   external_id?: string | null;
+  reaction?: string | null;
 };
 
 type ConversationDetail = {

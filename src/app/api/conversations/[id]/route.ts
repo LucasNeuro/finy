@@ -89,7 +89,7 @@ export async function GET(
   }
 
   const MESSAGES_LIMIT = 5000;
-  const messagesSelect = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
+  const messagesSelect = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
   let messages: unknown[] = [];
 
   const snapshot = (conversation as { messages_snapshot?: unknown }).messages_snapshot;

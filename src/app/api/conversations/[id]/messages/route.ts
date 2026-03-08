@@ -9,7 +9,7 @@ import { normalizePhoneForSend } from "@/lib/phone-canonical";
 import { NextResponse } from "next/server";
 
 const MEDIA_TYPES = ["image", "video", "audio", "ptt", "myaudio", "ptv", "document", "sticker"] as const;
-const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
+const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
 const MESSAGES_PAGE_LIMIT = 1000;
 
 export async function GET(
@@ -92,6 +92,8 @@ export async function POST(
     caption?: string;
     docName?: string;
     mimetype?: string;
+    replyid?: string;
+    linkPreview?: boolean;
   };
   try {
     body = await request.json();
@@ -105,6 +107,8 @@ export async function POST(
   const caption = typeof body?.caption === "string" ? body.caption.trim() : "";
   const docName = typeof body?.docName === "string" ? body.docName.trim() : "";
   const mimetype = typeof body?.mimetype === "string" ? body.mimetype.trim() : undefined;
+  const replyid = typeof body?.replyid === "string" ? body.replyid.trim() : undefined;
+  const linkPreview = body?.linkPreview === true;
 
   const isMedia = MEDIA_TYPES.includes(type as (typeof MEDIA_TYPES)[number]) && file;
   if (!isMedia && !content) {
@@ -176,7 +180,10 @@ export async function POST(
       mimetype,
     });
   } else {
-    result = await sendText(token, number, content);
+    result = await sendText(token, number, content, {
+      replyid,
+      linkPreview,
+    });
   }
 
   if (!result.ok) {
@@ -207,7 +214,7 @@ export async function POST(
     if (docName) insertPayload.file_name = docName;
   }
 
-  const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
+  const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
   const { data: newMsg, error: insertErr } = await supabase
     .from("messages")
     .insert(insertPayload)

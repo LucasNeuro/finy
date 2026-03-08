@@ -145,6 +145,30 @@ export async function GET(request: Request) {
     return NextResponse.json({ id: existing.id });
   }
 
+  // Mesmo contato pode existir com external_id antigo (ex.: LID). Buscar por customer_phone canônico para não duplicar.
+  if (canonicalPhone && canonicalPhone !== "—" && canonicalPhone.replace(/\D/g, "").length >= 10) {
+    const { data: byPhone } = await supabase
+      .from("conversations")
+      .select("id, external_id")
+      .eq("company_id", companyId)
+      .eq("channel_id", channelId)
+      .eq("kind", "ticket")
+      .eq("customer_phone", canonicalPhone)
+      .maybeSingle();
+    if (byPhone?.id) {
+      const existingId = (byPhone as { id: string }).id;
+      const currentExt = (byPhone as { external_id?: string }).external_id;
+      if (currentExt !== canonicalJid) {
+        await supabase
+          .from("conversations")
+          .update({ external_id: canonicalJid, wa_chat_jid: canonicalJid, updated_at: new Date().toISOString() })
+          .eq("id", existingId)
+          .eq("company_id", companyId);
+      }
+      return NextResponse.json({ id: existingId });
+    }
+  }
+
   const { data: chData } = await supabase
     .from("channels")
     .select("id, company_id, queue_id")
