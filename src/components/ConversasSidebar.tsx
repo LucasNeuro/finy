@@ -611,10 +611,10 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => handleTabChange("novos")}
-            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "novos"
-                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
-                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
+                ? "bg-amber-50 text-amber-800 shadow-md shadow-amber-200/60 border border-amber-200/70"
+                : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
             title="Novos (não atribuídos)"
             aria-label="Novos"
@@ -622,7 +622,7 @@ export function ConversasSidebar() {
             <Inbox className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Novos</span>
             {counts.unassigned > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-amber-500 to-amber-600 px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
                 {counts.unassigned > 99 ? "99+" : counts.unassigned}
               </span>
             )}
@@ -630,10 +630,10 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => handleTabChange("queues")}
-            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "queues"
-                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
-                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
+                ? "bg-sky-50 text-sky-800 shadow-md shadow-sky-200/60 border border-sky-200/70"
+                : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
             title="Filas"
             aria-label="Filas"
@@ -641,7 +641,7 @@ export function ConversasSidebar() {
             <Inbox className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Filas</span>
             {counts.queues > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#008F7A] to-[#009B84] px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-sky-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
                 {counts.queues > 99 ? "99+" : counts.queues}
               </span>
             )}
@@ -649,10 +649,10 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => handleTabChange("mine")}
-            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "mine"
-                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
-                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
+                ? "bg-violet-50 text-violet-800 shadow-md shadow-violet-200/60 border border-violet-200/70"
+                : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
             title="Meus atendimentos"
             aria-label="Meus atendimentos"
@@ -660,7 +660,7 @@ export function ConversasSidebar() {
             <UserCheck className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Meus</span>
             {counts.mine > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#009B84] to-[#00C4A7] px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-violet-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
                 {counts.mine > 99 ? "99+" : counts.mine}
               </span>
             )}
@@ -668,10 +668,10 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => setActiveTab("contacts")}
-            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "contacts"
-                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
-                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
+                ? "bg-slate-100 text-slate-800 shadow-md shadow-slate-200/50 border border-slate-200/70"
+                : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
             title="Contatos (conversas individuais)"
             aria-label="Contatos"
@@ -682,10 +682,10 @@ export function ConversasSidebar() {
           <button
             type="button"
             onClick={() => setActiveTab("groups")}
-            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded px-3 py-2 transition-all duration-200 ${
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "groups"
-                ? "bg-white text-clicvend-orange shadow-md shadow-clicvend-orange/10"
-                : "text-[#64748B] hover:bg-white/70 hover:text-[#1E293B] hover:shadow-sm"
+                ? "bg-slate-100 text-slate-800 shadow-md shadow-slate-200/50 border border-slate-200/70"
+                : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
             title="Grupos"
             aria-label="Grupos"
@@ -693,7 +693,7 @@ export function ConversasSidebar() {
             <Users className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Grupos</span>
             {counts.groups > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-gradient-to-r from-[#00C4A7] to-[#00D9C4] px-1.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/20">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-slate-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
                 {counts.groups > 99 ? "99+" : counts.groups}
               </span>
             )}
