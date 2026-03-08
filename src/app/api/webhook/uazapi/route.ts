@@ -658,27 +658,32 @@ async function processOneMessage(
     const canonicalDigits = toCanonicalPhone(digitsForCanonical, isGroup);
     const canonicalExternalId = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : externalId;
 
-    let existingTicket: { id: string } | null = null;
+    let existingTicket: { id: string; status?: string } | null = null;
     const { data: byExternal } = await supabase
       .from("conversations")
-      .select("id")
+      .select("id, status")
       .eq("channel_id", channelId)
       .eq("external_id", canonicalExternalId)
       .eq("kind", "ticket")
+      .neq("status", "closed")
+      .order("last_message_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (byExternal) existingTicket = byExternal;
     if (!existingTicket && canonicalDigits) {
       const { data: byPhone } = await supabase
         .from("conversations")
-        .select("id")
+        .select("id, status")
         .eq("channel_id", channelId)
         .eq("customer_phone", canonicalDigits)
         .eq("kind", "ticket")
+        .neq("status", "closed")
+        .order("last_message_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (byPhone) existingTicket = byPhone;
     }
+    // Só reutilizamos conversas abertas (closed já excluído no filtro acima); se não houver, criamos novo chamado.
 
     if (isHistoryEvent && !existingTicket) {
       return true;
