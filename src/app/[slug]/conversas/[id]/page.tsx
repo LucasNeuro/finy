@@ -749,9 +749,7 @@ export default function ConversaThreadPage({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        const msg = err?.error ?? "Falha ao enviar";
-        const details = err?.details;
-        setError(details ? `${msg}: ${details}` : msg);
+        setError(err?.error ?? "Falha ao enviar");
         return;
       }
       if (!isMedia) setSendValue("");
@@ -862,12 +860,7 @@ export default function ConversaThreadPage({
                 });
               });
               await refetchConversation();
-            } else {
-              const err = await res.json().catch(() => ({}));
-              const msg = err?.error ?? "Falha ao enviar áudio";
-              const details = err?.details;
-              setError(details ? `${msg}: ${details}` : msg);
-            }
+            } else setError("Falha ao enviar áudio");
           } finally {
             setSending(false);
           }

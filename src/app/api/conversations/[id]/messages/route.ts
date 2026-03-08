@@ -80,6 +80,7 @@ export async function POST(
 ) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
+    console.error("[messages POST] Unauthorized: companyId not found (header X-Company-Slug ou cookie)");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { id: conversationId } = await params;
@@ -120,7 +121,15 @@ export async function POST(
     .eq("company_id", companyId)
     .single();
   if (convError || !conversation) {
+    console.error("[messages POST] Conversation not found", { conversationId, companyId, convError: convError?.message });
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  }
+  if (!conversation.channel_id) {
+    console.error("[messages POST] Conversation without channel", { conversationId });
+    return NextResponse.json(
+      { error: "Canal não vinculado a esta conversa" },
+      { status: 400 }
+    );
   }
 
   const { data: channel, error: chError } = await supabase
@@ -130,8 +139,9 @@ export async function POST(
     .eq("company_id", companyId)
     .single();
   if (chError || !channel?.uazapi_token_encrypted) {
+    console.error("[messages POST] Channel or token missing", { conversationId, channelId: conversation.channel_id, chError: chError?.message });
     return NextResponse.json(
-      { error: "Channel or token not configured" },
+      { error: "Canal ou token não configurado" },
       { status: 400 }
     );
   }
@@ -157,8 +167,14 @@ export async function POST(
   }
 
   if (!result.ok) {
+    console.error("[messages POST] UAZAPI send failed", {
+      conversationId,
+      isMedia,
+      number: number.slice(0, 20) + (number.length > 20 ? "…" : ""),
+      error: result.error,
+    });
     return NextResponse.json(
-      { error: "Failed to send via UAZAPI", details: result.error },
+      { error: "Falha ao enviar. Tente novamente." },
       { status: 502 }
     );
   }
