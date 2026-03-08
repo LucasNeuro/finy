@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
@@ -237,6 +237,26 @@ function inferDisplayType(messageType: string | undefined, content: string): str
   return "text";
 }
 
+/** Mensagens que são mídia/documento para listar no painel do contato. */
+function getMediaMessages(messages: Message[] | undefined): Message[] {
+  if (!Array.isArray(messages)) return [];
+  return messages.filter((m) => {
+    const type = inferDisplayType(m.message_type, m.content ?? "");
+    return ["image", "video", "document", "audio", "ptt"].includes(type);
+  });
+}
+
+function mediaTypeLabel(type: string): string {
+  switch (type) {
+    case "image": return "Imagem";
+    case "video": return "Vídeo";
+    case "document": return "Documento";
+    case "audio":
+    case "ptt": return "Áudio";
+    default: return "Arquivo";
+  }
+}
+
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
 const MORE_REACTIONS = ["🔥", "👏", "😊", "🥺", "🙌", "😎", "🤔", "👀"] as const;
 
@@ -378,11 +398,12 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[320px]">
+              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[280px] bg-black/5">
                 <video
                   src={downloadUrl || mediaUrl || ""}
                   controls
-                  className="w-full max-h-[240px] object-cover rounded-xl"
+                  preload="metadata"
+                  className="w-full max-h-[220px] object-contain rounded-xl"
                   playsInline
                 />
               </div>
@@ -413,21 +434,50 @@ function MessageBubble({
       )}
       {displayType === "document" && (
         <div className="space-y-1">
-          {(downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")))) ? (
-            <a href={downloadUrl || mediaUrl || "#"} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-clicvend-orange hover:underline">
-              📎 {m.file_name || "Documento"}
-            </a>
-          ) : needsDownloadForDocument && downloadLoading ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-[#64748B]">
-              <Loader2 className="h-4 w-4 animate-spin shrink-0" /> Carregando documento…
+          <div
+            className={`flex items-center gap-3 rounded-xl border p-3 min-w-[200px] max-w-[280px] ${
+              m.direction === "out"
+                ? "border-[#BBF7D0] bg-[#DCFCE7]/50"
+                : "border-[#E2E8F0] bg-[#F8FAFC]"
+            }`}
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600">
+              <FileText className="h-5 w-5" />
             </div>
-          ) : (
-            <span className="text-sm">📎 {m.file_name || caption || "Documento"}</span>
-          )}
-          {needsDownloadForDocument && !downloadUrl && (
-            <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-sm text-clicvend-orange hover:underline disabled:opacity-50">
-              {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-              Baixar arquivo
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-[#1E293B]">
+                {m.file_name || "Documento"}
+              </p>
+              <p className="text-xs text-[#64748B]">
+                {m.file_name?.toLowerCase().endsWith(".pdf") ? "PDF" : "Documento"}
+                {downloadUrl ? " • Ver e baixar" : needsDownloadForDocument && downloadLoading ? " • Carregando…" : ""}
+              </p>
+            </div>
+            {(downloadUrl || mediaUrl) ? (
+              <a
+                href={downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : "#")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
+                title="Ver e baixar"
+              >
+                <Download className="h-5 w-5" />
+              </a>
+            ) : needsDownloadForDocument ? (
+              <button
+                type="button"
+                onClick={handleDownloadClick}
+                disabled={downloadLoading}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors disabled:opacity-50"
+                title="Baixar"
+              >
+                {downloadLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
+              </button>
+            ) : null}
+          </div>
+          {needsDownloadForDocument && !downloadUrl && !downloadLoading && (
+            <button type="button" onClick={handleDownloadClick} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline">
+              <Download className="h-3.5 w-3.5" /> Baixar arquivo
             </button>
           )}
           {caption && caption !== "[document]" && caption !== "[media]" && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
@@ -450,7 +500,7 @@ function MessageBubble({
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
       <footer className="mt-2 pt-1.5 border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
           <span className="text-xs text-[#64748B]">
             {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
           </span>
@@ -458,6 +508,21 @@ function MessageBubble({
             <span className="text-sm" title="Reação">
               {m.reaction}
             </span>
+          )}
+          {displayType === "video" && (downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")))) && (
+            <a
+              href={downloadUrl || mediaUrl || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-clicvend-orange hover:underline"
+            >
+              <Download className="h-3 w-3" /> Baixar vídeo
+            </a>
+          )}
+          {displayType === "video" && canFetchDownload && !downloadUrl && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))) && (
+            <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
+              {downloadLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Baixar vídeo
+            </button>
           )}
         </div>
         <div className="flex items-center gap-0.5">
@@ -565,6 +630,7 @@ export default function ConversaThreadPage({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const p = Promise.resolve(params);
@@ -947,7 +1013,7 @@ export default function ConversaThreadPage({
     });
   }
 
-  async function onFileChoose(type: "image" | "document" | "audio", e: React.ChangeEvent<HTMLInputElement>) {
+  async function onFileChoose(type: "image" | "document" | "audio" | "video", e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !resolved?.id) return;
     e.target.value = "";
@@ -955,7 +1021,7 @@ export default function ConversaThreadPage({
     setError(null);
     try {
       const base64 = await fileToBase64(file);
-      const uazType = type === "image" ? "image" : type === "audio" ? "audio" : "document";
+      const uazType = type === "image" ? "image" : type === "audio" ? "audio" : type === "video" ? "video" : "document";
       await handleSend(undefined, {
         type: uazType,
         file: base64,
@@ -1316,6 +1382,13 @@ export default function ConversaThreadPage({
               className="hidden"
               onChange={(e) => onFileChoose("document", e)}
             />
+            <input
+              type="file"
+              ref={videoInputRef}
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => onFileChoose("video", e)}
+            />
             <div className="flex shrink-0 items-center gap-0.5 border border-[#E2E8F0] rounded-lg overflow-hidden bg-white">
               <button
                 type="button"
@@ -1328,6 +1401,7 @@ export default function ConversaThreadPage({
               {attachOpen && (
                 <div className="flex items-center border-l border-[#E2E8F0]">
                   <button type="button" onClick={() => { fileInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Imagem</button>
+                  <button type="button" onClick={() => { videoInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Vídeo</button>
                   <button type="button" onClick={() => { audioInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Áudio</button>
                   <button type="button" onClick={() => { docInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Documento</button>
                 </div>
@@ -1439,7 +1513,53 @@ export default function ConversaThreadPage({
                 </div>
                 <div className="space-y-3">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Mídias e documentos</h3>
-                  <p className="text-sm text-[#94A3B8]">0</p>
+                  {(() => {
+                    const mediaList = getMediaMessages(conv?.messages);
+                    if (mediaList.length === 0) {
+                      return <p className="text-sm text-[#94A3B8]">Nenhuma mídia ou documento nesta conversa.</p>;
+                    }
+                    return (
+                      <div className="space-y-2">
+                        <p className="text-sm text-[#64748B]">{mediaList.length} {mediaList.length === 1 ? "arquivo" : "arquivos"}</p>
+                        <ul className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {mediaList.map((msg) => {
+                            const type = inferDisplayType(msg.message_type, msg.content ?? "");
+                            const label = type === "document" ? (msg.file_name || "Documento") : mediaTypeLabel(type);
+                            const Icon = type === "image" ? Image : type === "video" ? Video : type === "document" ? FileText : Music;
+                            return (
+                              <li key={msg.id} className="flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-1.5 text-sm">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#E2E8F0] text-[#64748B]">
+                                  <Icon className="h-4 w-4" />
+                                </div>
+                                <span className="min-w-0 flex-1 truncate text-[#1E293B]" title={label}>{label}</span>
+                                <span className="text-xs text-[#94A3B8] shrink-0">
+                                  {new Date(msg.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                                </span>
+                                <a
+                                  href="#"
+                                  onClick={async (e) => {
+                                    e.preventDefault();
+                                    if (!resolved?.id || !apiHeaders) return;
+                                    try {
+                                      const res = await fetch(`/api/conversations/${resolved.id}/messages/${msg.id}/download`, { credentials: "include", headers: apiHeaders });
+                                      const data = await res.json().catch(() => ({}));
+                                      if (data?.fileURL) window.open(data.fileURL, "_blank", "noopener,noreferrer");
+                                    } catch {
+                                      // ignorar
+                                    }
+                                  }}
+                                  className="shrink-0 rounded p-1 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
+                                  title="Ver e baixar"
+                                >
+                                  <Download className="h-4 w-4" />
+                                </a>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Pessoa</h3>
