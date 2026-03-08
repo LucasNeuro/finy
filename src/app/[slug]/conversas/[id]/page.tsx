@@ -298,8 +298,11 @@ function MessageBubble({
           : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       }`}
     >
-      <p className="text-xs font-medium text-[#64748B] mb-0.5">
+      <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
         {m.direction === "out" ? "Você" : name}
+        {typeof m.id === "string" && m.id.startsWith("temp-") && (
+          <span className="text-[#64748B] font-normal animate-pulse">Enviando…</span>
+        )}
       </p>
       {type === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
         <div className="space-y-1">
@@ -961,6 +964,11 @@ export default function ConversaThreadPage({
         <div className="min-w-0 flex-1">
           <p className="font-medium text-[#1E293B]">{isLoading ? "Carregando…" : (displayName || name)}</p>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {!isLoading && displayPhone && displayPhone !== "—" && (
+              <span className="rounded bg-[#F1F5F9] px-1.5 py-0.5 text-xs font-medium text-[#64748B]" title="Número normalizado para envio">
+                {displayPhone}
+              </span>
+            )}
             {!isLoading && conv?.channel_name && (
               <span className="rounded bg-clicvend-green/15 px-1.5 py-0.5 text-xs font-medium text-clicvend-green">
                 {conv.channel_name}
@@ -1131,12 +1139,18 @@ export default function ConversaThreadPage({
                     </button>
                   </div>
                 )}
-                {(Array.isArray(conv?.messages) ? conv.messages : []).map((m) => (
+                {(Array.isArray(conv?.messages) ? conv.messages : [])
+                  .filter((m, i, arr) => {
+                    const id = (m as Message).id;
+                    const first = arr.findIndex((x) => (x as Message).id === id);
+                    return first === i;
+                  })
+                  .map((m) => (
                   <div
-                    key={m.id}
-                    className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
+                    key={(m as Message).id}
+                    className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
                   >
-                    <MessageBubble m={m} name={name} conversationId={resolved?.id} apiHeaders={apiHeaders} />
+                    <MessageBubble m={m as Message} name={name} conversationId={resolved?.id} apiHeaders={apiHeaders} />
                   </div>
                 ))}
                 <div ref={messagesEndRef} data-messages-end />

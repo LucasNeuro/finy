@@ -7,7 +7,7 @@ import { queryKeys } from "@/lib/query-keys";
 
 type Message = {
   id: string;
-  conversation_id: string;
+  conversation_id?: string;
   direction: "in" | "out";
   content: string;
   sent_at: string;
@@ -15,6 +15,7 @@ type Message = {
   media_url?: string | null;
   caption?: string | null;
   file_name?: string | null;
+  external_id?: string | null;
 };
 
 type ConversationDetail = {
@@ -66,10 +67,18 @@ export function RealtimeMessages({ conversationId }: { conversationId: string })
             (oldData) => {
               if (!oldData) return oldData;
 
-              // Verificar se a mensagem já existe (evitar duplicatas)
-              const existingMessages = Array.isArray(oldData.messages) ? oldData.messages : [];
-              const messageExists = existingMessages.some((m) => m.id === newMessage.id);
-              if (messageExists) return oldData;
+              // Verificar se a mensagem já existe (evitar duplicatas por id ou external_id+sent_at+direction)
+          const existingMessages = Array.isArray(oldData.messages) ? oldData.messages : [];
+          const messageExists =
+            existingMessages.some((m) => m.id === newMessage.id) ||
+            (newMessage.external_id &&
+              existingMessages.some(
+                (m) =>
+                  (m as { external_id?: string }).external_id === newMessage.external_id &&
+                  m.sent_at === newMessage.sent_at &&
+                  m.direction === newMessage.direction
+              ));
+          if (messageExists) return oldData;
 
               // Adicionar nova mensagem no final (mensagens já vêm ordenadas por sent_at)
               return {

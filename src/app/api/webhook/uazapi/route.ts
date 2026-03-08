@@ -843,7 +843,12 @@ async function processOneMessage(
     const prevSnapshot = Array.isArray((convRow as { messages_snapshot?: unknown } | null)?.messages_snapshot)
       ? ((convRow as { messages_snapshot: unknown[] }).messages_snapshot)
       : [];
-    const newSnapshot = [...prevSnapshot, insertedMsg].slice(-SNAPSHOT_MAX);
+    const hasDuplicate = prevSnapshot.some(
+      (m: { id?: string; external_id?: string }) =>
+        (insertedMsg.id && (m as { id?: string }).id === insertedMsg.id) ||
+        (messageExternalId && (m as { external_id?: string }).external_id === messageExternalId)
+    );
+    const newSnapshot = hasDuplicate ? prevSnapshot : [...prevSnapshot, insertedMsg].slice(-SNAPSHOT_MAX);
     await supabase
       .from("conversations")
       .update({ messages_snapshot: newSnapshot, updated_at: new Date().toISOString() })

@@ -21,6 +21,12 @@ function fixBrazilMobileZero(d: string): string {
       const rest = after55.slice(2, 11);
       if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
     }
+    // Celular sem o 9: 95+649022386 → 95+9+64022386 (5595964022386)
+    if (after55.length === 11 && /^[678]/.test(after55.slice(2, 3))) {
+      const ddd = after55.slice(0, 2);
+      const rest = after55.slice(2, 3) + after55.slice(4, 11);
+      if (/^\d{2}$/.test(ddd) && rest.length === 8) return "55" + ddd + "9" + rest;
+    }
   }
   return d;
 }
@@ -252,7 +258,9 @@ export async function POST(
     const SNAPSHOT_MAX = 1000;
     const { data: convRow } = await supabase.from("conversations").select("messages_snapshot").eq("id", conversationId).eq("company_id", companyId).single();
     const prev = Array.isArray((convRow as { messages_snapshot?: unknown } | null)?.messages_snapshot) ? (convRow as { messages_snapshot: unknown[] }).messages_snapshot : [];
-    const newSnapshot = [...prev, newMsg].slice(-SNAPSHOT_MAX);
+  const newMsgId = (newMsg as { id?: string }).id;
+  const hasDup = newMsgId && prev.some((m: unknown) => (m as { id?: string }).id === newMsgId);
+  const newSnapshot = hasDup ? prev : [...prev, newMsg].slice(-SNAPSHOT_MAX);
     await supabase
       .from("conversations")
       .update({ messages_snapshot: newSnapshot, last_message_at: sentAt, updated_at: sentAt })

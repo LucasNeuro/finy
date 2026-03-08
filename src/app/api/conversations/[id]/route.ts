@@ -164,6 +164,22 @@ export async function GET(
     }
   }
 
+  // Remover duplicatas por id e por external_id para evitar balões repetidos
+  const seenIds = new Set<string>();
+  const seenExternal = new Set<string>();
+  messages = (messages as Record<string, unknown>[]).filter((m) => {
+    const id = m?.id as string | undefined;
+    const ext = m?.external_id as string | undefined;
+    if (id && seenIds.has(id)) return false;
+    if (id) seenIds.add(id);
+    if (ext && ext.trim()) {
+      const key = `${String(ext)}|${m?.sent_at}|${m?.direction}`;
+      if (seenExternal.has(key)) return false;
+      seenExternal.add(key);
+    }
+    return true;
+  });
+
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
   const displayPhone = contact_phone_from_cc ?? conversation.customer_phone;
   const canonicalPhone = toCanonicalDigits(displayPhone || conversation.customer_phone) ?? displayPhone ?? conversation.customer_phone;

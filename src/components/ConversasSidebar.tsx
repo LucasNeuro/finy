@@ -209,6 +209,14 @@ const ConversationListItem = memo(function ConversationListItem({
                   Grupo
                 </span>
               )}
+              {!isGroup && c.customer_phone && (
+                <span className="shrink-0 text-[#64748B]" title="Número normalizado para envio">
+                  {formatPhoneBrazil(c.customer_phone)}
+                </span>
+              )}
+              {!isGroup && c.customer_phone && (c.last_message_preview != null && c.last_message_preview !== "" || c.status) && (
+                <span className="text-[#94A3B8]">·</span>
+              )}
               {c.last_message_preview != null && c.last_message_preview !== ""
                 ? c.last_message_preview
                 : c.status === "open"
