@@ -173,7 +173,7 @@ function ChatAudioPlayer({
 
   if (isLoading || !src) {
     return (
-      <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[260px] max-w-[340px]">
+      <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[280px] max-w-[380px]">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
           <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />
         </div>
@@ -186,7 +186,7 @@ function ChatAudioPlayer({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[260px] max-w-[340px] shadow-sm hover:border-[#CBD5E1] transition-colors">
+    <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[280px] max-w-[380px] shadow-sm hover:border-[#CBD5E1] transition-colors">
       {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
       <button
         type="button"
@@ -438,7 +438,7 @@ function MessageBubble({
                 <img
                   src={mediaUrl || downloadUrl || ""}
                   alt=""
-                  className="max-h-[280px] min-h-[120px] w-full object-cover cursor-pointer"
+                  className="max-h-[380px] min-h-[140px] w-full object-cover cursor-pointer"
                 />
               </a>
               {canFetchDownload && (
@@ -460,7 +460,7 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[300px] bg-[#0F172A] group">
+              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[420px] bg-[#0F172A] group">
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
@@ -468,7 +468,7 @@ function MessageBubble({
                   src={downloadUrl || mediaUrl || ""}
                   controls
                   preload="metadata"
-                  className="w-full max-h-[240px] min-h-[140px] object-contain rounded-xl"
+                  className="w-full max-h-[320px] min-h-[180px] object-contain rounded-xl"
                   playsInline
                 />
                 {canFetchDownload && (
@@ -490,7 +490,7 @@ function MessageBubble({
               )}
             </>
           ) : (
-            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 max-w-[300px]">
+            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 max-w-[420px]">
               <Loader2 className="h-6 w-6 animate-spin shrink-0 text-clicvend-orange" />
               <div>
                 <p className="text-sm font-medium text-[#475569]">Carregando vídeo…</p>
@@ -514,7 +514,7 @@ function MessageBubble({
       {displayType === "document" && (
         <div className="space-y-1">
           <div
-            className={`flex items-center gap-3 rounded-xl border p-3 min-w-[200px] max-w-[280px] ${
+            className={`flex items-center gap-3 rounded-xl border p-3 min-w-[240px] max-w-[360px] ${
               m.direction === "out"
                 ? "border-[#BBF7D0] bg-[#DCFCE7]/50"
                 : "border-[#E2E8F0] bg-[#F8FAFC]"
@@ -738,6 +738,7 @@ export default function ConversaThreadPage({
   const [contactDetailsError, setContactDetailsError] = useState<string | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [recordingVideo, setRecordingVideo] = useState(false);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteOptions, setDeleteOptions] = useState({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
@@ -755,7 +756,11 @@ export default function ConversaThreadPage({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const videoStreamRef = useRef<MediaStream | null>(null);
+  const videoRecorderRef = useRef<MediaRecorder | null>(null);
+  const videoChunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -1216,6 +1221,77 @@ export default function ConversaThreadPage({
     }
   }
 
+  async function startRecordingVideo() {
+    if (!resolved?.id || recordingVideo) return;
+    setAttachOpen(false);
+    setError(null);
+    setRecordingVideo(true);
+    await new Promise((r) => setTimeout(r, 100));
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      videoStreamRef.current = stream;
+      const videoEl = videoPreviewRef.current;
+      if (videoEl) {
+        videoEl.srcObject = stream;
+      }
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+        ? "video/webm;codecs=vp9"
+        : MediaRecorder.isTypeSupported("video/webm")
+          ? "video/webm"
+          : "video/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      videoChunksRef.current = [];
+      recorder.ondataavailable = (ev) => ev.data.size && videoChunksRef.current.push(ev.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        videoStreamRef.current = null;
+        if (videoEl) videoEl.srcObject = null;
+        const blob = new Blob(videoChunksRef.current, { type: mimeType });
+        const base64 = await new Promise<string>((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res((r.result as string).split(",")[1] || "");
+          r.onerror = rej;
+          r.readAsDataURL(blob);
+        });
+        if (base64 && resolved?.id) {
+          setSending(true);
+          try {
+            const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json", ...apiHeaders },
+              body: JSON.stringify({ type: "video", file: base64, mimetype: mimeType }),
+            });
+            if (res.ok) {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+                });
+              });
+              await refetchConversation();
+            } else setError("Falha ao enviar vídeo");
+          } finally {
+            setSending(false);
+          }
+        }
+        setRecordingVideo(false);
+      };
+      recorder.start(1000);
+      videoRecorderRef.current = recorder;
+      setRecordingVideo(true);
+    } catch (err) {
+      setError("Não foi possível acessar a câmera. Verifique as permissões do navegador.");
+      setRecordingVideo(false);
+    }
+  }
+
+  function stopRecordingVideo() {
+    if (videoRecorderRef.current && recordingVideo) {
+      videoRecorderRef.current.stop();
+      videoRecorderRef.current = null;
+    }
+  }
+
   async function handleReaction(messageId: string, emoji: string) {
     if (!resolved?.id || !apiHeaders) return;
     try {
@@ -1233,6 +1309,13 @@ export default function ConversaThreadPage({
 
   async function handleDeleteMessage(messageId: string, forEveryone: boolean) {
     if (!resolved?.id || !apiHeaders) return;
+    const prev = queryClient.getQueryData<ConversationDetail>(queryKeys.conversation(resolved.id));
+    if (prev?.messages) {
+      queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), {
+        ...prev,
+        messages: prev.messages.filter((msg) => String(msg.id) !== String(messageId)),
+      });
+    }
     try {
       const res = await fetch(`/api/conversations/${resolved.id}/messages/${messageId}/delete`, {
         method: "POST",
@@ -1245,9 +1328,11 @@ export default function ConversaThreadPage({
       } else {
         const data = await res.json().catch(() => ({}));
         setError(data?.error ?? "Falha ao apagar mensagem");
+        if (prev) queryClient.setQueryData(queryKeys.conversation(resolved.id), prev);
       }
     } catch {
       setError("Falha ao apagar mensagem");
+      if (prev) queryClient.setQueryData(queryKeys.conversation(resolved.id), prev);
     }
   }
 
@@ -1557,9 +1642,12 @@ export default function ConversaThreadPage({
                 <Paperclip className="h-5 w-5" />
               </button>
               {attachOpen && (
-                <div className="flex items-center border-l border-[#E2E8F0]">
+                <div className="flex items-center border-l border-[#E2E8F0] flex-wrap">
                   <button type="button" onClick={() => { fileInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Imagem</button>
                   <button type="button" onClick={() => { videoInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Vídeo</button>
+                  <button type="button" onClick={() => { startRecordingVideo(); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC] flex items-center gap-1">
+                    <Video className="h-3.5 w-3.5" /> Gravar vídeo
+                  </button>
                   <button type="button" onClick={() => { audioInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Áudio</button>
                   <button type="button" onClick={() => { docInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Documento</button>
                 </div>
@@ -1623,6 +1711,31 @@ export default function ConversaThreadPage({
           </form>
         </div>
       </div>
+
+      {/* Modal gravação de vídeo pela câmera */}
+      {recordingVideo && (
+        <div className="fixed inset-0 z-[110] flex flex-col items-center justify-center bg-black/70 p-4">
+          <div className="relative rounded-xl overflow-hidden bg-[#0F172A] max-w-lg w-full aspect-video shadow-xl">
+            <video
+              ref={videoPreviewRef}
+              autoPlay
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={stopRecordingVideo}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
+              >
+                <Square className="h-4 w-4" /> Parar e enviar
+              </button>
+            </div>
+          </div>
+          <p className="mt-2 text-sm text-white/90">Grave seu vídeo e clique em Parar e enviar.</p>
+        </div>
+      )}
 
       {/* Modal de visualização de documento (PDF, etc.) — zoom, baixar, nova aba, sem IA */}
       <DocumentViewerModal

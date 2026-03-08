@@ -4,6 +4,7 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { deleteMessage as uazapiDeleteMessage } from "@/lib/uazapi/client";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
+import { invalidateConversationDetail } from "@/lib/redis/inbox-state";
 import { NextResponse } from "next/server";
 
 /**
@@ -88,6 +89,26 @@ export async function POST(
       { status: 500 }
     );
   }
+
+  // Atualizar messages_snapshot na conversa para remover a mensagem (GET usa o snapshot).
+  const { data: convRow } = await supabase
+    .from("conversations")
+    .select("messages_snapshot")
+    .eq("id", conversationId)
+    .eq("company_id", companyId)
+    .single();
+
+  const snapshot = (convRow as { messages_snapshot?: unknown[] } | null)?.messages_snapshot;
+  if (Array.isArray(snapshot) && snapshot.length > 0) {
+    const filtered = snapshot.filter((msg: unknown) => String((msg as { id?: string })?.id) !== String(messageId));
+    await supabase
+      .from("conversations")
+      .update({ messages_snapshot: filtered, updated_at: new Date().toISOString() })
+      .eq("id", conversationId)
+      .eq("company_id", companyId);
+  }
+
+  await invalidateConversationDetail(conversationId);
 
   return NextResponse.json({ ok: true, forEveryone });
 }
