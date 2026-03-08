@@ -265,8 +265,11 @@ export function ContactDetailSideOver({
       ) : (
         <div className="space-y-4">
           {loading && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
+            <div className="flex justify-center py-2">
+              <span className="inline-flex items-center gap-2 text-sm text-[#64748B]">
+                <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />
+                Buscando detalhes no WhatsApp…
+              </span>
             </div>
           )}
           {error && (
@@ -274,7 +277,7 @@ export function ContactDetailSideOver({
               {error}
             </div>
           )}
-          {!loading && (details || !error) && (
+          {contact && (
             <>
               <div className="flex flex-col items-center gap-3 border-b border-[#E2E8F0] pb-4">
                 <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0]">
