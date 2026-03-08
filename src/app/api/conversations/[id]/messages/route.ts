@@ -178,6 +178,7 @@ export async function POST(
       ? conversation.wa_chat_jid
       : normalizePhoneForSend(conversation.customer_phone, isGroup);
 
+  // Envio não usa Redis (conversa veio do Supabase). Erro "number is not on WhatsApp" = resposta da UAZAPI/WhatsApp (número inexistente ou inacessível).
   let result: { ok: boolean; error?: string };
   if (isMedia) {
     const uazType = type === "myaudio" ? "myaudio" : type === "ptv" ? "ptv" : type as "image" | "video" | "document" | "audio" | "ptt" | "sticker";
