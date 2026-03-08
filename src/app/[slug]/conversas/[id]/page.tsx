@@ -124,6 +124,7 @@ function ChatAudioPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [volume, setVolume] = useState(1);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const togglePlay = useCallback(() => {
@@ -162,6 +163,11 @@ function ChatAudioPlayer({
       el.removeEventListener("loadeddata", onLoadedData);
     };
   }, [src]);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (el) el.volume = volume;
+  }, [volume]);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -213,9 +219,21 @@ function ChatAudioPlayer({
         </div>
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
-        <span className="p-1.5 text-[#64748B]" title="Áudio" aria-hidden>
-          <Volume2 className="h-4 w-4" />
-        </span>
+        <div className="flex items-center gap-1" title="Volume">
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => setVolume(parseFloat(e.target.value))}
+            className="w-12 h-1.5 accent-clicvend-orange cursor-pointer"
+            aria-label="Volume"
+          />
+          <span className="text-[#64748B]" aria-hidden>
+            <Volume2 className="h-4 w-4" />
+          </span>
+        </div>
         <div className="relative">
           <button
             type="button"
@@ -442,25 +460,42 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[280px] bg-black/5">
+              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[300px] bg-[#0F172A] group">
+                <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
+                  Vídeo
+                </span>
                 <video
                   src={downloadUrl || mediaUrl || ""}
                   controls
                   preload="metadata"
-                  className="w-full max-h-[220px] object-contain rounded-xl"
+                  className="w-full max-h-[240px] min-h-[140px] object-contain rounded-xl"
                   playsInline
                 />
+                {canFetchDownload && (
+                  <a
+                    href={downloadUrl || mediaUrl || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-clicvend-orange transition-colors"
+                    title="Baixar vídeo"
+                  >
+                    <Download className="h-4 w-4" />
+                  </a>
+                )}
               </div>
-              {canFetchDownload && (
-                <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
-                  {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                  Baixar
+              {canFetchDownload && !downloadUrl && downloadLoading && (
+                <button type="button" disabled className="inline-flex items-center gap-1.5 text-xs text-[#64748B]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Baixar…
                 </button>
               )}
             </>
           ) : (
-            <div className="flex items-center gap-2 py-4 text-sm text-[#64748B]">
-              <Loader2 className="h-5 w-5 animate-spin shrink-0" /> Carregando vídeo…
+            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 max-w-[300px]">
+              <Loader2 className="h-6 w-6 animate-spin shrink-0 text-clicvend-orange" />
+              <div>
+                <p className="text-sm font-medium text-[#475569]">Carregando vídeo…</p>
+                <p className="text-xs text-[#64748B]">A miniatura aparecerá em instantes.</p>
+              </div>
             </div>
           )}
           {caption && caption !== "[video]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}

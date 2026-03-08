@@ -34,6 +34,7 @@ export function DocumentViewerModal({
 }: DocumentViewerModalProps) {
   const [fileUrl, setFileUrl] = useState<string | null>(initialFileUrl ?? null);
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -63,9 +64,27 @@ export function DocumentViewerModal({
   const handleZoomOut = () => setZoom((z) => Math.max(MIN_ZOOM, z - ZOOM_STEP));
   const handleZoomReset = () => setZoom(1);
 
-  const handleDownload = () => {
-    if (fileUrl) window.open(fileUrl, "_blank", "noopener,noreferrer");
+  const handleDownload = async () => {
+    if (fileUrl) {
+      window.open(fileUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (fetchDownload) {
+      setDownloading(true);
+      try {
+        const url = await fetchDownload();
+        if (url) {
+          setFileUrl(url);
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
+      } finally {
+        setDownloading(false);
+      }
+    }
   };
+
+  const canDownload = !!fileUrl || !!fetchDownload;
+  const downloadBusy = downloading;
 
   useEffect(() => {
     if (!open) return;
@@ -131,11 +150,11 @@ export function DocumentViewerModal({
             <button
               type="button"
               onClick={handleDownload}
-              disabled={!fileUrl}
+              disabled={!canDownload || downloadBusy}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-50"
               title="Baixar arquivo"
             >
-              <Download className="h-4 w-4" />
+              {downloadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               Baixar
             </button>
             <button
@@ -174,7 +193,11 @@ export function DocumentViewerModal({
           {!loading && !fileUrl && (
             <div className="text-center text-[#64748B]">
               <p className="text-sm">Não foi possível carregar o documento.</p>
-              <p className="mt-1 text-xs">Use o botão Baixar no card da mensagem.</p>
+              <p className="mt-1 text-xs">
+                {fetchDownload
+                  ? "Clique em Baixar acima para tentar obter o arquivo."
+                  : "Use o botão Baixar no card da mensagem."}
+              </p>
             </div>
           )}
           {!loading && fileUrl && isPdf && (
