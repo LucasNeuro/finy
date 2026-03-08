@@ -368,25 +368,41 @@ async function processOneMessage(
     }
 
     if (!channel) {
-      const { data: chList, error } = await supabase
+      let chList: unknown[] | null = null;
+      let err: Error | null = null;
+      const { data: chListByInstance, error: errByInstance } = await supabase
         .from("channels")
         .select("id, company_id, queue_id")
         .eq("uazapi_instance_id", instanceId)
         .eq("is_active", true)
         .limit(1);
-
-      const chData = Array.isArray(chList) ? chList[0] : chList;
-      if (error || !chData) {
-        console.error("[WEBHOOK] Canal não encontrado:", { instanceId, error: error?.message, chData: chList });
+      chList = Array.isArray(chListByInstance) ? chListByInstance : null;
+      err = errByInstance ?? null;
+      if ((!chList || chList.length === 0) && !err) {
+        const { data: chListByName, error: errByName } = await supabase
+          .from("channels")
+          .select("id, company_id, queue_id")
+          .eq("name", instanceId)
+          .eq("is_active", true)
+          .limit(1);
+        if (Array.isArray(chListByName) && chListByName.length > 0) {
+          chList = chListByName;
+          err = errByName ?? null;
+          if (process.env.NODE_ENV !== "test") console.log("[WEBHOOK] Canal encontrado por nome (fallback):", instanceId);
+        }
+      }
+      const chData = Array.isArray(chList) && chList.length > 0 ? chList[0] : null;
+      if (err || !chData) {
+        console.error("[WEBHOOK] Canal não encontrado:", { instanceId, error: err?.message, chData: chList });
         return true;
       }
 
-      console.log("[WEBHOOK] Canal encontrado:", { channelId: chData.id, companyId: chData.company_id, queueId: chData.queue_id });
+      console.log("[WEBHOOK] Canal encontrado:", { channelId: (chData as { id: string }).id, companyId: (chData as { company_id: string }).company_id, queueId: (chData as { queue_id?: string }).queue_id });
 
       channel = {
-        id: chData.id as string,
-        company_id: chData.company_id as string,
-        queue_id: (chData.queue_id as string | null) ?? null,
+        id: (chData as { id: string }).id,
+        company_id: (chData as { company_id: string }).company_id,
+        queue_id: ((chData as { queue_id?: string }).queue_id as string | null) ?? null,
       };
 
       if (redis) {
