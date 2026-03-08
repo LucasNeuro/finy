@@ -5,14 +5,34 @@
 :root {
   --background: #ffffff;
   --foreground: #0a0a0a;
-  /* ClicVend - verde, degradê, branco e preto */
-  --clicvend-green: #00A78F;
-  --clicvend-green-dark: #008F7A;
-  --clicvend-green-light: #00C4A7;
-  --clicvend-blue: #00A78F;
-  --clicvend-orange: #00A78F;
-  --clicvend-orange-dark: #008F7A;
+
+  /* Cores Primárias (verde) - Mais vibrantes */
+  --clicvend-green-lightest: #5EF0C2;  /* Verde água vibrante */
+  --clicvend-green-lighter: #00E6B8;   /* Verde menta intenso */
+  --clicvend-green-light: #00C896;    /* Verde claro vibrante */
+  --clicvend-green: #00A854;          /* Verde principal forte */
+  --clicvend-green-dark: #008A45;     /* Verde escuro vibrante */
+  --clicvend-green-darker: #006B35;   /* Verde profundo */
+
+  /* Cores Secundárias (azuis) - Mais saturados */
+  --clicvend-teal: #00C4C4;           /* Azul-esverdeado vibrante */
+  --clicvend-teal-dark: #00A0A0;      /* Azul-esverdeado escuro */
+  --clicvend-blue-light: #00A2FF;     /* Azul claro elétrico */
+  --clicvend-blue: #0066CC;           /* Azul médio intenso */
+  --clicvend-blue-dark: #004099;      /* Azul escuro profundo */
+  --clicvend-blue-darker: #002266;    /* Azul muito escuro */
+
+  /* Cores de Destaque (para CTAs, links, etc.) - Chamativas */
+  --clicvend-highlight: #00FFCC;      /* Verde neon brilhante */
+  --clicvend-highlight-blue: #00CCFF; /* Azul vibrante para ações */
+
+  /* Cores de Fundo (para seções, cards, etc.) - Mais contrastantes */
+  --clicvend-bg-light: #D4FFEC;       /* Fundo verde claro vibrante */
+  --clicvend-bg-blue: #E6F2FF;        /* Fundo azul claro suave */
 }
+
+
+
 
 body {
   color: var(--foreground);

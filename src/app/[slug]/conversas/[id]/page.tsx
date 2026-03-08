@@ -173,7 +173,7 @@ function ChatAudioPlayer({
 
   if (isLoading || !src) {
     return (
-      <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[280px] max-w-[380px]">
+      <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[300px] max-w-[440px]">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
           <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />
         </div>
@@ -186,7 +186,7 @@ function ChatAudioPlayer({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[280px] max-w-[380px] shadow-sm hover:border-[#CBD5E1] transition-colors">
+    <div className="flex items-center gap-3 rounded-full bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 min-w-[300px] max-w-[440px] shadow-sm hover:border-[#CBD5E1] transition-colors">
       {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
       <button
         type="button"
@@ -413,9 +413,9 @@ function MessageBubble({
 
   return (
     <div
-      className={`max-w-[80%] rounded-lg px-3 py-2 ${
+      className={`max-w-[90%] rounded-lg px-3 py-2 ${
         m.direction === "out"
-          ? "bg-[#DCFCE7] text-[#1E293B]"
+          ? "bg-[#F1F5F9] border border-[#E2E8F0] text-[#1E293B]"
           : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       }`}
     >
@@ -460,7 +460,7 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[420px] bg-[#0F172A] group">
+              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm max-w-[520px] bg-[#0F172A] group">
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
@@ -490,7 +490,7 @@ function MessageBubble({
               )}
             </>
           ) : (
-            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 max-w-[420px]">
+            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 max-w-[520px]">
               <Loader2 className="h-6 w-6 animate-spin shrink-0 text-clicvend-orange" />
               <div>
                 <p className="text-sm font-medium text-[#475569]">Carregando vídeo…</p>
@@ -513,23 +513,23 @@ function MessageBubble({
       )}
       {displayType === "document" && (
         <div className="space-y-1">
+          {/* Miniatura do documento: ícone + nome + Ver (só documentos) + Baixar */}
           <div
-            className={`flex items-center gap-3 rounded-xl border p-3 min-w-[240px] max-w-[360px] ${
+            className={`flex items-center gap-2 rounded-lg border py-2 px-2.5 min-w-0 max-w-[320px] ${
               m.direction === "out"
-                ? "border-[#BBF7D0] bg-[#DCFCE7]/50"
+                ? "border-[#E2E8F0] bg-[#F1F5F9]"
                 : "border-[#E2E8F0] bg-[#F8FAFC]"
             }`}
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600">
-              <FileText className="h-5 w-5" />
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600">
+              <FileText className="h-4 w-4" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-[#1E293B]">
                 {m.file_name || "Documento"}
               </p>
-              <p className="text-xs text-[#64748B]">
-                {m.file_name?.toLowerCase().endsWith(".pdf") ? "PDF" : "Documento"}
-                {downloadUrl ? " • Ver e baixar" : needsDownloadForDocument && downloadLoading ? " • Carregando…" : ""}
+              <p className="text-[10px] text-[#64748B]">
+                {downloadUrl ? "Ver · Baixar" : needsDownloadForDocument && downloadLoading ? "Carregando…" : "Baixar"}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
@@ -537,10 +537,10 @@ function MessageBubble({
                 <button
                   type="button"
                   onClick={() => onOpenDocumentViewer(m.id, conversationId, m.file_name ?? null, downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : null))}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
-                  title="Visualizar"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
+                  title="Visualizar documento"
                 >
-                  <Eye className="h-5 w-5" />
+                  <Eye className="h-4 w-4" />
                 </button>
               )}
               {(downloadUrl || mediaUrl) ? (
@@ -548,20 +548,20 @@ function MessageBubble({
                   href={downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : "#")}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
-                  title="Ver e baixar"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
+                  title="Baixar"
                 >
-                  <Download className="h-5 w-5" />
+                  <Download className="h-4 w-4" />
                 </a>
               ) : needsDownloadForDocument ? (
                 <button
                   type="button"
                   onClick={handleDownloadClick}
                   disabled={downloadLoading}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors disabled:opacity-50"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors disabled:opacity-50"
                   title="Baixar"
                 >
-                  {downloadLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Download className="h-5 w-5" />}
+                  {downloadLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 </button>
               ) : null}
             </div>
@@ -738,7 +738,10 @@ export default function ConversaThreadPage({
   const [contactDetailsError, setContactDetailsError] = useState<string | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
   const [recordingVideo, setRecordingVideo] = useState(false);
+  const [recordedVideoBlob, setRecordedVideoBlob] = useState<{ blob: Blob; mimeType: string } | null>(null);
+  const [recordedVideoPreviewUrl, setRecordedVideoPreviewUrl] = useState<string | null>(null);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteOptions, setDeleteOptions] = useState({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
@@ -1173,37 +1176,11 @@ export default function ConversaThreadPage({
       const recorder = new MediaRecorder(stream);
       const chunks: BlobPart[] = [];
       recorder.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
-      recorder.onstop = async () => {
+      recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunks, { type: "audio/ogg; codecs=opus" });
-        const base64 = await new Promise<string>((res, rej) => {
-          const r = new FileReader();
-          r.onload = () => res((r.result as string).split(",")[1] || "");
-          r.onerror = rej;
-          r.readAsDataURL(blob);
-        });
-        if (base64 && resolved?.id) {
-          setSending(true);
-          try {
-            const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json", ...apiHeaders },
-              body: JSON.stringify({ type: "ptt", file: base64 }),
-            });
-            if (res.ok) {
-              // Scroll imediato após enviar áudio
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-                });
-              });
-              await refetchConversation();
-            } else setError("Falha ao enviar áudio");
-          } finally {
-            setSending(false);
-          }
-        }
+        setRecordedAudioBlob(blob);
+        setRecording(false);
       };
       recorder.start();
       mediaRecorderRef.current = recorder;
@@ -1217,8 +1194,44 @@ export default function ConversaThreadPage({
     if (mediaRecorderRef.current && recording) {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current = null;
-      setRecording(false);
     }
+  }
+
+  async function sendRecordedAudio() {
+    if (!recordedAudioBlob || !resolved?.id || !apiHeaders) return;
+    setSending(true);
+    setError(null);
+    try {
+      const base64 = await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res((r.result as string).split(",")[1] || "");
+        r.onerror = rej;
+        r.readAsDataURL(recordedAudioBlob);
+      });
+      const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ type: "ptt", file: base64 }),
+      });
+      if (res.ok) {
+        setRecordedAudioBlob(null);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+          });
+        });
+        await refetchConversation();
+      } else setError("Falha ao enviar áudio");
+    } catch {
+      setError("Falha ao enviar áudio");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function discardRecordedAudio() {
+    setRecordedAudioBlob(null);
   }
 
   async function startRecordingVideo() {
@@ -1242,38 +1255,12 @@ export default function ConversaThreadPage({
       const recorder = new MediaRecorder(stream, { mimeType });
       videoChunksRef.current = [];
       recorder.ondataavailable = (ev) => ev.data.size && videoChunksRef.current.push(ev.data);
-      recorder.onstop = async () => {
+      recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         videoStreamRef.current = null;
         if (videoEl) videoEl.srcObject = null;
         const blob = new Blob(videoChunksRef.current, { type: mimeType });
-        const base64 = await new Promise<string>((res, rej) => {
-          const r = new FileReader();
-          r.onload = () => res((r.result as string).split(",")[1] || "");
-          r.onerror = rej;
-          r.readAsDataURL(blob);
-        });
-        if (base64 && resolved?.id) {
-          setSending(true);
-          try {
-            const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json", ...apiHeaders },
-              body: JSON.stringify({ type: "video", file: base64, mimetype: mimeType }),
-            });
-            if (res.ok) {
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-                });
-              });
-              await refetchConversation();
-            } else setError("Falha ao enviar vídeo");
-          } finally {
-            setSending(false);
-          }
-        }
+        setRecordedVideoBlob({ blob, mimeType });
         setRecordingVideo(false);
       };
       recorder.start(1000);
@@ -1290,6 +1277,44 @@ export default function ConversaThreadPage({
       videoRecorderRef.current.stop();
       videoRecorderRef.current = null;
     }
+  }
+
+  async function sendRecordedVideo() {
+    const rec = recordedVideoBlob;
+    if (!rec || !resolved?.id || !apiHeaders) return;
+    setSending(true);
+    setError(null);
+    try {
+      const base64 = await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res((r.result as string).split(",")[1] || "");
+        r.onerror = rej;
+        r.readAsDataURL(rec.blob);
+      });
+      const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ type: "video", file: base64, mimetype: rec.mimeType }),
+      });
+      if (res.ok) {
+        setRecordedVideoBlob(null);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+          });
+        });
+        await refetchConversation();
+      } else setError("Falha ao enviar vídeo");
+    } catch {
+      setError("Falha ao enviar vídeo");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function discardRecordedVideo() {
+    setRecordedVideoBlob(null);
   }
 
   async function handleReaction(messageId: string, emoji: string) {
@@ -1343,6 +1368,21 @@ export default function ConversaThreadPage({
       }
     };
   }, [recording]);
+
+  useEffect(() => {
+    if (!recordedVideoBlob) {
+      setRecordedVideoPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      return;
+    }
+    const url = URL.createObjectURL(recordedVideoBlob.blob);
+    setRecordedVideoPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [recordedVideoBlob]);
 
   const base = slug ? `/${slug}` : "";
 
@@ -1690,12 +1730,32 @@ export default function ConversaThreadPage({
                 <Square className="h-4 w-4" />
                 Parar
               </button>
+            ) : recordedAudioBlob ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-[#64748B]">Áudio gravado</span>
+                <button
+                  type="button"
+                  onClick={sendRecordedAudio}
+                  disabled={sending}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
+                >
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  Enviar
+                </button>
+                <button
+                  type="button"
+                  onClick={discardRecordedAudio}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+                >
+                  Descartar
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
                 onClick={startRecording}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
-                aria-label="Enviar áudio"
+                aria-label="Gravar áudio"
               >
                 <Mic className="h-4 w-4" />
               </button>
@@ -1712,28 +1772,60 @@ export default function ConversaThreadPage({
         </div>
       </div>
 
-      {/* Modal gravação de vídeo pela câmera */}
-      {recordingVideo && (
+      {/* Modal gravação de vídeo pela câmera: Parar → depois Enviar ou Descartar */}
+      {(recordingVideo || recordedVideoBlob) && (
         <div className="fixed inset-0 z-[110] flex flex-col items-center justify-center bg-black/70 p-4">
           <div className="relative rounded-xl overflow-hidden bg-[#0F172A] max-w-lg w-full aspect-video shadow-xl">
-            <video
-              ref={videoPreviewRef}
-              autoPlay
-              muted
-              playsInline
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={stopRecordingVideo}
-                className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
-              >
-                <Square className="h-4 w-4" /> Parar e enviar
-              </button>
+            {recordedVideoBlob ? (
+              <video
+                src={recordedVideoPreviewUrl ?? ""}
+                controls
+                playsInline
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <video
+                ref={videoPreviewRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            )}
+            <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-center gap-2 flex-wrap">
+              {recordedVideoBlob ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={sendRecordedVideo}
+                    disabled={sending}
+                    className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
+                  >
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Enviar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={discardRecordedVideo}
+                    className="inline-flex items-center gap-2 rounded-lg border border-white/60 px-4 py-2 text-sm font-medium text-white hover:bg-white/10"
+                  >
+                    Descartar
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopRecordingVideo}
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
+                >
+                  <Square className="h-4 w-4" /> Parar
+                </button>
+              )}
             </div>
           </div>
-          <p className="mt-2 text-sm text-white/90">Grave seu vídeo e clique em Parar e enviar.</p>
+          <p className="mt-2 text-sm text-white/90">
+            {recordedVideoBlob ? "Revise o vídeo e clique em Enviar ou Descartar." : "Grave seu vídeo e clique em Parar para revisar."}
+          </p>
         </div>
       )}
 

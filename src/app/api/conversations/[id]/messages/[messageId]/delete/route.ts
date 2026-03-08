@@ -2,6 +2,7 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { deleteMessage as uazapiDeleteMessage } from "@/lib/uazapi/client";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { invalidateConversationDetail } from "@/lib/redis/inbox-state";
@@ -77,7 +78,8 @@ export async function POST(
     }
   }
 
-  const { error: deleteError } = await supabase
+  const admin = createServiceRoleClient();
+  const { error: deleteError } = await admin
     .from("messages")
     .delete()
     .eq("id", messageId)
@@ -90,8 +92,7 @@ export async function POST(
     );
   }
 
-  // Atualizar messages_snapshot na conversa para remover a mensagem (GET usa o snapshot).
-  const { data: convRow } = await supabase
+  const { data: convRow } = await admin
     .from("conversations")
     .select("messages_snapshot")
     .eq("id", conversationId)
@@ -101,11 +102,17 @@ export async function POST(
   const snapshot = (convRow as { messages_snapshot?: unknown[] } | null)?.messages_snapshot;
   if (Array.isArray(snapshot) && snapshot.length > 0) {
     const filtered = snapshot.filter((msg: unknown) => String((msg as { id?: string })?.id) !== String(messageId));
-    await supabase
+    const { error: updateErr } = await admin
       .from("conversations")
       .update({ messages_snapshot: filtered, updated_at: new Date().toISOString() })
       .eq("id", conversationId)
       .eq("company_id", companyId);
+    if (updateErr) {
+      return NextResponse.json(
+        { error: "Falha ao atualizar conversa", details: updateErr.message },
+        { status: 500 }
+      );
+    }
   }
 
   await invalidateConversationDetail(conversationId);

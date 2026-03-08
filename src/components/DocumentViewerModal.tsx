@@ -20,9 +20,9 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 
 /**
- * Modal de visualização de documento (PDF, etc.) no tom da aplicação.
+ * Modal de visualização de documento (somente documentos: PDF, etc.).
  * Barra superior: zoom, download, abrir em nova aba, fechar.
- * Sem painel de IA — apenas visualizador e ações.
+ * PDF é exibido no iframe; outros tipos apenas com opção de baixar/abrir em nova aba.
  */
 export function DocumentViewerModal({
   open,
@@ -112,7 +112,7 @@ export function DocumentViewerModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Visualizador de documento"
+        aria-label="Visualizador de documento (somente documentos)"
         className="fixed inset-4 z-[101] flex flex-col rounded-xl bg-white shadow-xl border border-[#E2E8F0] overflow-hidden md:inset-8"
       >
         {/* Toolbar */}
