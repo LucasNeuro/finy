@@ -624,17 +624,27 @@ async function processOneMessage(
         conversationId = inserted.id;
       }
 
-      await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        direction: fromMe ? "out" : "in",
-        content: finalContent,
-        message_type: finalMessageType,
-        ...(finalMediaUrl && { media_url: finalMediaUrl }),
-        ...(finalCaption && { caption: finalCaption }),
-        ...(finalFileName && { file_name: finalFileName }),
-        external_id: messageExternalId,
-        sent_at: sentAt,
-      });
+      const { data: insertedGroupMsg, error: groupMsgErr } = await supabase
+        .from("messages")
+        .insert({
+          conversation_id: conversationId,
+          direction: fromMe ? "out" : "in",
+          content: finalContent,
+          message_type: finalMessageType,
+          ...(finalMediaUrl && { media_url: finalMediaUrl }),
+          ...(finalCaption && { caption: finalCaption }),
+          ...(finalFileName && { file_name: finalFileName }),
+          external_id: messageExternalId,
+          sent_at: sentAt,
+        })
+        .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
+        .single();
+      if (!groupMsgErr && insertedGroupMsg) {
+        const { data: gConv } = await supabase.from("conversations").select("messages_snapshot").eq("id", conversationId).single();
+        const gPrev = Array.isArray((gConv as { messages_snapshot?: unknown } | null)?.messages_snapshot) ? (gConv as { messages_snapshot: unknown[] }).messages_snapshot : [];
+        const gNew = [...gPrev, insertedGroupMsg].slice(-1000);
+        await supabase.from("conversations").update({ messages_snapshot: gNew, updated_at: new Date().toISOString() }).eq("id", conversationId);
+      }
       await Promise.all([
         invalidateConversationList(companyId),
         invalidateConversationDetail(conversationId),
@@ -803,22 +813,41 @@ async function processOneMessage(
       console.log("[WEBHOOK] Contato criado/atualizado:", { jid: canonicalExternalId, phone: displayPhone, name: customerName });
     }
 
-    const { error: msgError } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      direction: fromMe ? "out" : "in",
-      content: finalContent,
-      message_type: finalMessageType,
-      ...(finalMediaUrl && { media_url: finalMediaUrl }),
-      ...(finalCaption && { caption: finalCaption }),
-      ...(finalFileName && { file_name: finalFileName }),
-      external_id: messageExternalId,
-      sent_at: sentAt,
-    });
+    const { data: insertedMsg, error: msgError } = await supabase
+      .from("messages")
+      .insert({
+        conversation_id: conversationId,
+        direction: fromMe ? "out" : "in",
+        content: finalContent,
+        message_type: finalMessageType,
+        ...(finalMediaUrl && { media_url: finalMediaUrl }),
+        ...(finalCaption && { caption: finalCaption }),
+        ...(finalFileName && { file_name: finalFileName }),
+        external_id: messageExternalId,
+        sent_at: sentAt,
+      })
+      .select("id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name")
+      .single();
 
-    if (msgError) {
+    if (msgError || !insertedMsg) {
       console.error("[WEBHOOK] Erro ao inserir mensagem:", msgError);
       return false;
     }
+
+    const SNAPSHOT_MAX = 1000;
+    const { data: convRow } = await supabase
+      .from("conversations")
+      .select("messages_snapshot")
+      .eq("id", conversationId)
+      .single();
+    const prevSnapshot = Array.isArray((convRow as { messages_snapshot?: unknown } | null)?.messages_snapshot)
+      ? ((convRow as { messages_snapshot: unknown[] }).messages_snapshot)
+      : [];
+    const newSnapshot = [...prevSnapshot, insertedMsg].slice(-SNAPSHOT_MAX);
+    await supabase
+      .from("conversations")
+      .update({ messages_snapshot: newSnapshot, updated_at: new Date().toISOString() })
+      .eq("id", conversationId);
 
     console.log("[WEBHOOK] Mensagem inserida com sucesso:", { conversationId, direction: fromMe ? "out" : "in" });
 

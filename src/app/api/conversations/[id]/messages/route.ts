@@ -239,14 +239,32 @@ export async function POST(
     if (docName) insertPayload.file_name = docName;
   }
 
-  const { error: insertErr } = await supabase.from("messages").insert(insertPayload);
+  const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
+  const { data: newMsg, error: insertErr } = await supabase
+    .from("messages")
+    .insert(insertPayload)
+    .select(MESSAGES_SELECT)
+    .single();
   if (insertErr) {
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
   }
-  await supabase
-    .from("conversations")
-    .update({ last_message_at: sentAt, updated_at: sentAt })
-    .eq("id", conversationId);
+  if (newMsg) {
+    const SNAPSHOT_MAX = 1000;
+    const { data: convRow } = await supabase.from("conversations").select("messages_snapshot").eq("id", conversationId).eq("company_id", companyId).single();
+    const prev = Array.isArray((convRow as { messages_snapshot?: unknown } | null)?.messages_snapshot) ? (convRow as { messages_snapshot: unknown[] }).messages_snapshot : [];
+    const newSnapshot = [...prev, newMsg].slice(-SNAPSHOT_MAX);
+    await supabase
+      .from("conversations")
+      .update({ messages_snapshot: newSnapshot, last_message_at: sentAt, updated_at: sentAt })
+      .eq("id", conversationId)
+      .eq("company_id", companyId);
+  } else {
+    await supabase
+      .from("conversations")
+      .update({ last_message_at: sentAt, updated_at: sentAt })
+      .eq("id", conversationId)
+      .eq("company_id", companyId);
+  }
 
   await Promise.all([
     invalidateConversationDetail(conversationId),

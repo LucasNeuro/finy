@@ -319,7 +319,12 @@ export async function GET(request: Request) {
     const list = (contactsRes.data ?? []) as { channel_id: string; jid: string; contact_name: string | null; first_name: string | null; avatar_url: string | null }[];
     for (const row of list) {
       const key = `${row.channel_id}|${row.jid}`;
-      contactByKey[key] = { contact_name: row.contact_name, first_name: row.first_name, avatar_url: row.avatar_url ?? null };
+      const val = { contact_name: row.contact_name, first_name: row.first_name, avatar_url: row.avatar_url ?? null };
+      contactByKey[key] = val;
+      const digitsOnly = row.jid.replace(/@.*$/, "").replace(/\D/g, "").trim() || row.jid;
+      if (digitsOnly !== row.jid) contactByKey[`${row.channel_id}|${digitsOnly}`] = val;
+      const withSuffix = row.jid.includes("@") ? row.jid : `${digitsOnly}@s.whatsapp.net`;
+      if (withSuffix !== row.jid) contactByKey[`${row.channel_id}|${withSuffix}`] = val;
     }
     const groupList = (groupsRes.data ?? []) as { channel_id: string; jid: string; name: string | null; avatar_url: string | null }[];
     for (const g of groupList) {
@@ -333,10 +338,12 @@ export async function GET(request: Request) {
     const jidNorm = normalizeJid(jid);
     const key1 = `${c.channel_id}|${jid}`;
     const key2 = jid !== jidNorm ? `${c.channel_id}|${jidNorm}` : "";
+    const jidDigits = jid.replace(/\D/g, "").replace(/@.*$/, "").trim();
+    const key3 = jidDigits ? `${c.channel_id}|${jidDigits}` : "";
     const isGroup = c.is_group === true;
     const groupInfo = isGroup ? (groupByKey[key1] ?? groupByKey[key2] ?? { name: null, avatar_url: null }) : null;
     const groupName = groupInfo?.name ?? null;
-    const cc = contactByKey[key1] || (key2 ? contactByKey[key2] : null);
+    const cc = contactByKey[key1] || (key2 ? contactByKey[key2] : null) || (key3 ? contactByKey[key3] : null);
     const fromDb = cc?.contact_name?.trim() || cc?.first_name?.trim() || null;
     const customer_name = isGroup ? (groupName ?? c.customer_name ?? formatGroupJidForDisplay(jid)) : (fromDb ?? c.customer_name);
     const avatar_url = isGroup ? (groupInfo?.avatar_url ?? null) : (cc?.avatar_url?.trim() || null);

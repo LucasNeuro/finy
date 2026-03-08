@@ -99,7 +99,7 @@ export async function GET(
   const jidNorm = jid && !jid.includes("@") ? `${jid.replace(/\D/g, "")}@s.whatsapp.net` : jid;
   const canonicalDigits = toCanonicalDigits(conversation.customer_phone || jid);
   const canonicalJid = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : null;
-  const jids = [...new Set([jid, jidNorm, canonicalJid].filter(Boolean))] as string[];
+  const jids = [...new Set([jid, jidNorm, canonicalJid, canonicalDigits].filter(Boolean))] as string[];
   let contact_avatar_url: string | null = null;
   let contact_name_from_cc: string | null = null;
   let contact_phone_from_cc: string | null = null;
@@ -156,6 +156,11 @@ export async function GET(
         return NextResponse.json({ error: res.error.message }, { status: 500 });
       }
       messages = Array.isArray(res.data) ? res.data : [];
+    }
+    if (messages.length > 0) {
+      const SNAPSHOT_MAX = 1000;
+      const toStore = messages.slice(-SNAPSHOT_MAX);
+      await supabase.from("conversations").update({ messages_snapshot: toStore, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
     }
   }
 
