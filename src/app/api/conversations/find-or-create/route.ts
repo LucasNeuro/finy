@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { toCanonicalDigits, normalizeWhatsAppJid } from "@/lib/phone-canonical";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -38,13 +39,25 @@ export async function GET(request: Request) {
 
   const supabase = await createClient();
 
+  // Contato (ticket): normalizar JID/customer_phone para formato canônico antes de buscar/inserir (evita duplicatas)
+  const jidNorm = normalizeWhatsAppJid(jid);
+  const isTicket = !jidNorm.endsWith("@g.us");
+  const canonicalJid = isTicket
+    ? (toCanonicalDigits(jidNorm.replace(/@.*$/, "").replace(/\D/g, ""))
+        ? `${toCanonicalDigits(jidNorm.replace(/@.*$/, "").replace(/\D/g, ""))!}@s.whatsapp.net`
+        : jidNorm)
+    : jidNorm;
+  const canonicalPhone = isTicket
+    ? (toCanonicalDigits(customerPhone || jidNorm.replace(/@.*$/, "").replace(/\D/g, "")) ?? (customerPhone || jidNorm.replace(/@.*$/, "").trim() || "—"))
+    : null;
+
   if (isGroup) {
     const { data: existing } = await supabase
       .from("conversations")
       .select("id")
       .eq("company_id", companyId)
       .eq("channel_id", channelId)
-      .eq("external_id", jid)
+      .eq("external_id", canonicalJid)
       .eq("kind", "group")
       .maybeSingle();
 
@@ -82,25 +95,25 @@ export async function GET(request: Request) {
       .from("channel_groups")
       .select("name, topic")
       .eq("channel_id", channelId)
-      .eq("jid", jid)
+      .eq("jid", canonicalJid)
       .maybeSingle();
 
     const displayName =
       customerName ||
       (channelGroup as { name?: string; topic?: string } | null)?.name ||
       (channelGroup as { name?: string; topic?: string } | null)?.topic ||
-      jid;
+      canonicalJid;
 
     const { data: inserted, error: insertErr } = await supabase
       .from("conversations")
       .insert({
         company_id: companyId,
         channel_id: channelId,
-        external_id: jid,
-        wa_chat_jid: jid,
+        external_id: canonicalJid,
+        wa_chat_jid: canonicalJid,
         kind: "group",
         is_group: true,
-        customer_phone: jid,
+        customer_phone: canonicalJid,
         customer_name: displayName,
         queue_id: groupQueueId,
         assigned_to: null,
@@ -124,7 +137,7 @@ export async function GET(request: Request) {
     .select("id")
     .eq("company_id", companyId)
     .eq("channel_id", channelId)
-    .eq("external_id", jid)
+    .eq("external_id", canonicalJid)
     .eq("kind", "ticket")
     .maybeSingle();
 
@@ -159,11 +172,11 @@ export async function GET(request: Request) {
     .insert({
       company_id: companyId,
       channel_id: channelId,
-      external_id: jid,
-      wa_chat_jid: jid,
+      external_id: canonicalJid,
+      wa_chat_jid: canonicalJid,
       kind: "ticket",
       is_group: false,
-      customer_phone: customerPhone || jid.replace(/@.*$/, "").trim() || "—",
+      customer_phone: canonicalPhone ?? "—",
       customer_name: customerName,
       queue_id: queueId,
       assigned_to: null,

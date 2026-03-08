@@ -5,6 +5,7 @@ import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
+import { toCanonicalJid } from "@/lib/phone-canonical";
 import { findChats, findMessages, type UazapiChat, type UazapiMessage } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
@@ -89,6 +90,7 @@ export async function POST(
     if (!waChatid) continue;
 
     const isGroup = chat.wa_isGroup === true || waChatid.endsWith("@g.us");
+    const canonicalChatId = toCanonicalJid(waChatid, isGroup) || waChatid;
 
     const { data: channelRow } = await supabase
       .from("channels")
@@ -143,7 +145,7 @@ export async function POST(
       .from("conversations")
       .select("id")
       .eq("channel_id", channelId)
-      .eq("external_id", waChatid)
+      .eq("external_id", canonicalChatId)
       .eq("kind", isGroup ? "group" : "ticket")
       .single();
 

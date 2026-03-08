@@ -5,51 +5,8 @@ import { invalidateConversationDetail, invalidateConversationList } from "@/lib/
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
+import { normalizePhoneForSend } from "@/lib/phone-canonical";
 import { NextResponse } from "next/server";
-
-/** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). Também 12 dígitos 55+DDD+8 (6/7/8) → 55+DDD+9+8. */
-function fixBrazilMobileZero(d: string): string {
-  if (d.length === 11 && !d.startsWith("55")) {
-    const ddd = d.slice(0, 2);
-    const rest = d.slice(2);
-    if (/^\d{2}$/.test(ddd) && rest.length >= 9 && rest[0] === "0") return ddd + "9" + rest.slice(1, 9);
-  }
-  if (d.length === 13 && d.startsWith("55")) {
-    const after55 = d.slice(2);
-    if (after55.length >= 9 && after55[2] === "0") {
-      const ddd = after55.slice(0, 2);
-      const rest = after55.slice(2, 11);
-      if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
-    }
-    // Celular sem o 9: 55+95+69022386 (11 dígitos após 55) → 55+95+9+69022386
-    if (after55.length === 11 && /^[678]/.test(after55[2]!)) {
-      const ddd = after55.slice(0, 2);
-      const rest = after55.slice(2, 11); // 8 dígitos (não dropar nenhum)
-      if (/^\d{2}$/.test(ddd) && rest.length === 8) return "55" + ddd + "9" + rest;
-    }
-  }
-  // 12 dígitos 55+DDD+8 (primeiro da parte local 6/7/8) = celular sem o 9 → inserir 9
-  if (d.length === 12 && d.startsWith("55")) {
-    const after55 = d.slice(2); // 10 dígitos: DDD(2) + 8
-    if (/^\d{2}[678]\d{7}$/.test(after55)) return "55" + after55.slice(0, 2) + "9" + after55.slice(2);
-  }
-  return d;
-}
-/** Normaliza número Brasil para envio UAZAPI: 55 + DDD + 9 dígitos. Corrige 0 após DDD → 9. */
-function normalizePhoneForSend(raw: string | null | undefined, isGroup: boolean): string {
-  if (isGroup || !raw) return (raw ?? "").trim();
-  let d = (raw ?? "").replace(/\D/g, "");
-  if (!d) return raw.trim();
-  d = fixBrazilMobileZero(d);
-  if (d.length === 10 || d.length === 11) return "55" + d;
-  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
-  if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
-    const ddd = d.slice(0, 2);
-    const mobile = d.slice(2, 11);
-    if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
-  }
-  return d;
-}
 
 const MEDIA_TYPES = ["image", "video", "audio", "ptt", "myaudio", "ptv", "document", "sticker"] as const;
 const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";

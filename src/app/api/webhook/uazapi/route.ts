@@ -1,59 +1,14 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
+import {
+  normalizeWhatsAppJid,
+  phoneDigitsOnly,
+  toCanonicalPhone,
+  toCanonicalJid,
+} from "@/lib/phone-canonical";
 import { getRedisClient } from "@/lib/redis/client";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { NextResponse } from "next/server";
-
-/** Normaliza JID: @lid -> @s.whatsapp.net; garante sufixo @s.whatsapp.net para contato. */
-function normalizeWhatsAppJid(raw: string): string {
-  const s = (raw ?? "").trim();
-  if (!s) return "";
-  if (s.endsWith("@g.us")) return s.toLowerCase();
-  const normalized = s.replace(/@lid$/i, "@s.whatsapp.net");
-  if (normalized.includes("@")) return normalized.toLowerCase();
-  const digits = normalized.replace(/\D/g, "");
-  return digits ? `${digits}@s.whatsapp.net` : s;
-}
-
-/** Extrai só os dígitos do número/JID para channel_contacts.phone. */
-function phoneDigitsOnly(raw: string): string {
-  return (raw ?? "").replace(/\D/g, "");
-}
-
-
-/** Corrige número Brasil malformado: DDD + 0 + 8 dígitos → DDD + 9 + 8 dígitos (celular). */
-function fixBrazilMobileZero(d: string): string {
-  if (d.length === 11 && d.startsWith("55") === false) {
-    const ddd = d.slice(0, 2);
-    const rest = d.slice(2);
-    if (/^\d{2}$/.test(ddd) && rest.length >= 9 && rest[0] === "0") {
-      return ddd + "9" + rest.slice(1, 9);
-    }
-  }
-  if (d.length === 13 && d.startsWith("55")) {
-    const after55 = d.slice(2);
-    if (after55.length >= 9 && after55[2] === "0") {
-      const ddd = after55.slice(0, 2);
-      const rest = after55.slice(2, 11);
-      if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
-    }
-  }
-  return d;
-}
-
-function toCanonicalPhone(digits: string, isGroup: boolean): string {
-  if (isGroup || !digits) return digits;
-  let d = (digits ?? "").replace(/\D/g, "");
-  d = fixBrazilMobileZero(d);
-  if (d.length === 10 || d.length === 11) return "55" + d;
-  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
-  if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
-    const ddd = d.slice(0, 2);
-    const mobile = d.slice(2, 11);
-    if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
-  }
-  return d;
-}
 
 /**
  * Remove contatos duplicados do mesmo número (JID em outro formato).
@@ -396,6 +351,12 @@ async function processOneMessage(
   let customerPhone = (data.from ?? data.number ?? data.wa_id ?? "") as string;
   externalId = normalizeWhatsAppJid(externalId);
   customerPhone = normalizeWhatsAppJid(customerPhone);
+  // Para ticket: preferir sender_pn (PN resolvido) para evitar duplicata LID vs PN (ex.: mesmo contato 554184727733 vs 104570038571120@lid)
+  const senderPn = (data as { sender_pn?: string }).sender_pn?.trim();
+  if (senderPn && senderPn.endsWith("@s.whatsapp.net")) {
+    externalId = senderPn;
+    customerPhone = senderPn;
+  }
   if (!externalId && customerPhone) externalId = customerPhone;
   if (!customerPhone && externalId) customerPhone = externalId;
   const invalidExternalIds = ["updated", "undefined", ""];
@@ -713,8 +674,8 @@ async function processOneMessage(
     }
 
     const digitsForCanonical = phoneDigitsOnly(externalId) || phoneDigitsOnly(customerPhone);
-    const canonicalDigits = toCanonicalPhone(digitsForCanonical, isGroup);
-    const canonicalExternalId = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : externalId;
+    const canonicalExternalId = toCanonicalJid(externalId, isGroup) || externalId;
+    const canonicalDigits = toCanonicalPhone(digitsForCanonical, isGroup) || phoneDigitsOnly(canonicalExternalId);
 
     let existingTicket: { id: string; status?: string } | null = null;
     const { data: byExternal } = await supabase

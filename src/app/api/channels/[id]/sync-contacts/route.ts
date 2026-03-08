@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { listContacts, listGroups, getChatDetails, getGroupInfo } from "@/lib/uazapi/client";
@@ -24,7 +25,7 @@ function normalizeGroupJid(jid: string): string {
   return lower;
 }
 
-/** Normaliza JID de contato para formato único: número em dígitos + @s.whatsapp.net (lowercase) */
+/** Normaliza JID de contato para formato canônico: dígitos Brasil 55+DDD+9 + @s.whatsapp.net */
 function normalizeContactJid(jid: string): string {
   const s = (jid ?? "").trim();
   const digits = s.replace(/\D/g, "").replace(/@.*$/, "").trim();
@@ -33,20 +34,8 @@ function normalizeContactJid(jid: string): string {
     if (lower.endsWith("@s.whatsapp.net")) return lower;
     return s || jid;
   }
-  const canonical = toCanonicalContactDigits(digits);
-  return `${canonical}@s.whatsapp.net`;
-}
-
-/** Mesmo critério do webhook: 55 + DDD + número para evitar duplicata sync vs webhook */
-function toCanonicalContactDigits(d: string): string {
-  if (!d) return d;
-  let s = d;
-  if (s.length === 11 && s[2] === "0") {
-    s = s.slice(0, 2) + "9" + s.slice(3, 11);
-  }
-  if (s.length === 10 || s.length === 11) return "55" + s;
-  if ((s.length === 12 || s.length === 13) && s.startsWith("55")) return s;
-  return s;
+  const canonical = toCanonicalDigits(digits);
+  return canonical ? `${canonical}@s.whatsapp.net` : `${digits}@s.whatsapp.net`;
 }
 
 type ProgressCallback = (progress: number, data?: { contacts_synced?: number; groups_synced?: number; avatars_synced?: number; error?: string }) => void;
@@ -161,7 +150,7 @@ async function runSync(
         const jid = normalizeContactJid(rawJid);
         if (!jid || seen.has(jid)) return null;
         seen.add(jid);
-        const phone = jid.replace(/@.*$/, "").replace(/\D/g, "") || null;
+        const phone = toCanonicalDigits(jid.replace(/@.*$/, "").replace(/\D/g, "")) ?? (jid.replace(/@.*$/, "").replace(/\D/g, "") || null);
         return {
           channel_id: channelId,
           company_id: companyId,

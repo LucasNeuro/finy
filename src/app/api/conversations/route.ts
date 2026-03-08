@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getProfileForCompany, requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { withMetricsHeaders } from "@/lib/api/metrics";
 import { getCachedConversationList, setCachedConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
@@ -12,36 +13,10 @@ function formatGroupJidForDisplay(jid: string): string {
   return raw ? `Grupo ${raw}` : "Grupo";
 }
 
-/** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). */
-function fixBrazilMobileZero(d: string): string {
-  if (d.length === 11 && !d.startsWith("55")) {
-    const ddd = d.slice(0, 2);
-    const rest = d.slice(2);
-    if (/^\d{2}$/.test(ddd) && rest.length >= 9 && rest[0] === "0") return ddd + "9" + rest.slice(1, 9);
-  }
-  if (d.length === 13 && d.startsWith("55")) {
-    const after55 = d.slice(2);
-    if (after55.length >= 9 && after55[2] === "0") {
-      const ddd = after55.slice(0, 2);
-      const rest = after55.slice(2, 11);
-      if (/^\d{2}$/.test(ddd) && rest[0] === "0") return "55" + ddd + "9" + rest.slice(1);
-    }
-  }
-  return d;
-}
-/** Normaliza customer_phone para exibição (Brasil): corrige números malformados (ex.: 0 após DDD → 9). */
+/** Normaliza customer_phone para exibição (Brasil): formato canônico 55+DDD+9 dígitos */
 function normalizePhoneForDisplay(raw: string | null | undefined): string | null {
   if (raw == null || raw === "") return null;
-  let d = (raw ?? "").replace(/\D/g, "");
-  d = fixBrazilMobileZero(d);
-  if (d.length === 10 || d.length === 11) return "55" + d;
-  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
-  if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
-    const ddd = d.slice(0, 2);
-    const mobile = d.slice(2, 11);
-    if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
-  }
-  return d || raw;
+  return toCanonicalDigits(raw) ?? raw;
 }
 
 /** Chamados novos = não atribuídos e status open. Ordenação estilo Zendesk/Intercom: novos no topo, depois por última mensagem. */
