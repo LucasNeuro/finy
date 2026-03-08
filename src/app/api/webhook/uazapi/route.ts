@@ -409,7 +409,7 @@ async function processOneMessage(
 
   const mediaTypeMap: Record<string, string> = {
     image: "image", video: "video", audio: "audio", myaudio: "audio", ptt: "ptt", ptv: "video",
-    document: "document", sticker: "sticker",
+    document: "document", sticker: "sticker", media: "document",
   };
   const effectiveType = inferredType || rawType;
   const messageType = effectiveType ? (mediaTypeMap[String(effectiveType).toLowerCase()] ?? "text") : "text";

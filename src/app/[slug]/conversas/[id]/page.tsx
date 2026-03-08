@@ -238,6 +238,7 @@ function inferDisplayType(messageType: string | undefined, content: string): str
 }
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+const MORE_REACTIONS = ["🔥", "👏", "😊", "🥺", "🙌", "😎", "🤔", "👀"] as const;
 
 function MessageBubble({
   m,
@@ -271,6 +272,7 @@ function MessageBubble({
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const [moreEmojisOpen, setMoreEmojisOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   const canFetchDownload = Boolean(
@@ -299,7 +301,10 @@ function MessageBubble({
   useEffect(() => {
     if (!reactionPickerOpen) return;
     const close = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setReactionPickerOpen(false);
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setReactionPickerOpen(false);
+        setMoreEmojisOpen(false);
+      }
     };
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
@@ -406,25 +411,29 @@ function MessageBubble({
           {caption && caption !== "[audio]" && caption !== "[ptt]" && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
         </div>
       )}
-      {type === "document" && (
+      {displayType === "document" && (
         <div className="space-y-1">
-          {mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? (
-            <a href={mediaUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-clicvend-orange hover:underline">
+          {(downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")))) ? (
+            <a href={downloadUrl || mediaUrl || "#"} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-clicvend-orange hover:underline">
               📎 {m.file_name || "Documento"}
             </a>
+          ) : needsDownloadForDocument && downloadLoading ? (
+            <div className="flex items-center gap-2 py-2 text-sm text-[#64748B]">
+              <Loader2 className="h-4 w-4 animate-spin shrink-0" /> Carregando documento…
+            </div>
           ) : (
             <span className="text-sm">📎 {m.file_name || caption || "Documento"}</span>
           )}
-          {needsDownloadForDocument && (
+          {needsDownloadForDocument && !downloadUrl && (
             <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1.5 text-sm text-clicvend-orange hover:underline disabled:opacity-50">
               {downloadLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
               Baixar arquivo
             </button>
           )}
-          {caption && caption !== "[document]" && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+          {caption && caption !== "[document]" && caption !== "[media]" && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {type === "sticker" && (mediaUrl || downloadUrl) && (
+      {displayType === "sticker" && (mediaUrl || downloadUrl) && (
         <div>
           <div className="rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm inline-block">
             <img src={mediaUrl || downloadUrl || ""} alt="" className="max-h-32 w-auto block" />
@@ -437,37 +446,91 @@ function MessageBubble({
           )}
         </div>
       )}
-      {(type === "text" || (!mediaUrl && !downloadUrl && type !== "document")) && (
+      {displayType === "text" && (
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
-      <div className="mt-1 flex items-center justify-end gap-1 flex-wrap">
-        {m.reaction && (
-          <span className="text-sm mr-1" title="Reação">
-            {m.reaction}
+      <footer className="mt-2 pt-1.5 border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-xs text-[#64748B]">
+            {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
           </span>
-        )}
-        <span className="text-xs text-[#64748B]">
-          {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-        </span>
-        {m.direction === "out" && (
-          <CheckCheck className="h-3.5 w-3.5 text-[#64748B]" aria-hidden />
-        )}
-        {conversationId && apiHeaders && m.external_id && onReaction && (
-          <div className="flex items-center gap-0.5 ml-1 opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity">
-            {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((emoji) => (
+          {m.reaction && (
+            <span className="text-sm" title="Reação">
+              {m.reaction}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5">
+          {m.direction === "out" && (
+            <CheckCheck className="h-3.5 w-3.5 text-[#64748B] shrink-0" aria-hidden />
+          )}
+          {conversationId && apiHeaders && m.external_id && onReaction && (
+            <div className="relative" ref={pickerRef}>
               <button
-                key={emoji}
                 type="button"
-                className="p-0.5 rounded hover:bg-black/10 text-base leading-none disabled:opacity-50"
-                onClick={() => onReaction(m.id, m.reaction === emoji ? "" : emoji)}
-                title={m.reaction === emoji ? "Remover reação" : `Reagir ${emoji}`}
+                onClick={(e) => { e.stopPropagation(); setReactionPickerOpen((v) => !v); }}
+                className="p-1 rounded hover:bg-black/10 text-[#64748B] hover:text-[#1E293B] transition-colors"
+                title="Reagir"
+                aria-label="Reagir"
               >
-                {emoji}
+                <Smile className="h-4 w-4" />
               </button>
-            ))}
-          </div>
-        )}
-      </div>
+              {reactionPickerOpen && (
+                <div
+                  className="absolute bottom-full right-0 mb-1 rounded-xl bg-white border border-[#E2E8F0] shadow-lg px-2 py-1.5 z-50"
+                  role="dialog"
+                  aria-label="Escolher reação"
+                >
+                  <div className="flex items-center gap-0.5">
+                    {QUICK_REACTIONS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        className="p-1.5 rounded-lg hover:bg-black/10 text-lg leading-none transition-colors"
+                        onClick={() => {
+                          onReaction(m.id, m.reaction === emoji ? "" : emoji);
+                          setReactionPickerOpen(false);
+                        }}
+                        title={m.reaction === emoji ? "Remover reação" : `Reagir ${emoji}`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="p-1.5 rounded-lg hover:bg-black/10 text-[#64748B] font-bold text-sm leading-none transition-colors"
+                      title="Mais emojis"
+                      aria-label="Mais emojis"
+                      onClick={(e) => { e.stopPropagation(); setMoreEmojisOpen((v) => !v); }}
+                    >
+                      +
+                    </button>
+                  </div>
+                  {moreEmojisOpen && (
+                    <div className="flex items-center gap-0.5 flex-wrap mt-1 pt-1 border-t border-[#E2E8F0]">
+                      {MORE_REACTIONS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          className="p-1.5 rounded-lg hover:bg-black/10 text-lg leading-none transition-colors"
+                          onClick={() => {
+                            onReaction(m.id, m.reaction === emoji ? "" : emoji);
+                            setReactionPickerOpen(false);
+                            setMoreEmojisOpen(false);
+                          }}
+                          title={m.reaction === emoji ? "Remover reação" : `Reagir ${emoji}`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </footer>
     </div>
   );
 }
