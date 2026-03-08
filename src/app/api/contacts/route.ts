@@ -2,6 +2,20 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
+/** Normaliza telefone Brasil para exibição (corrige malformados). */
+function normalizePhoneForDisplay(raw: string | null | undefined): string | null {
+  if (raw == null || raw === "") return null;
+  const d = (raw ?? "").replace(/\D/g, "");
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
+  if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
+    const ddd = d.slice(0, 2);
+    const mobile = d.slice(2, 11);
+    if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
+  }
+  return d || raw;
+}
+
 /**
  * GET /api/contacts?channel_id=xxx (opcional)
  * Lista contatos da empresa, opcionalmente filtrados por canal.
@@ -41,7 +55,12 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
       const chunk = data ?? [];
-      allRows.push(...chunk);
+      const normalized = chunk.map((row: Record<string, unknown>) => {
+        const phone = row.phone;
+        const normalizedPhone = normalizePhoneForDisplay(phone as string) ?? phone;
+        return { ...row, phone: normalizedPhone };
+      });
+      allRows.push(...normalized);
       hasMore = chunk.length === pageSize;
       offset += pageSize;
     }

@@ -20,17 +20,18 @@ function phoneDigitsOnly(raw: string): string {
   return (raw ?? "").replace(/\D/g, "");
 }
 
-/**
- * Normaliza número para uma forma canônica (Brasil): um número = um contato/conversa.
- * - 10 ou 11 dígitos (DDD + número sem 55) → adiciona 55 na frente
- * - 12 ou 13 dígitos começando com 55 → mantém
- * - Grupos não são normalizados (retorna null para não aplicar).
- */
+
 function toCanonicalPhone(digits: string, isGroup: boolean): string {
   if (isGroup || !digits) return digits;
-  const d = digits.replace(/\D/g, "");
+  const d = (digits ?? "").replace(/\D/g, "");
   if (d.length === 10 || d.length === 11) return "55" + d;
   if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
+  if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
+    const ddd = d.slice(0, 2);
+    const rest = d.slice(2);
+    const mobile = rest.slice(0, 9);
+    if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
+  }
   return d;
 }
 
@@ -167,8 +168,10 @@ export async function POST(request: Request) {
         "";
       const chatId = chatIdRaw || (from || (fromRaw ? `${phoneDigitsOnly(fromRaw)}@s.whatsapp.net` : ""));
       const pushName = (bodyMessage as { pushName?: string }).pushName ?? (bodyChat as { name?: string }).name ?? (bodyChat as { wa_contactName?: string }).wa_contactName ?? "";
+      const msgObj = bodyMessage as Record<string, unknown>;
+      const inferredMsgType = msgObj.audio ? "audio" : msgObj.ptt ? "ptt" : msgObj.image ? "image" : msgObj.video ? "video" : msgObj.document ? "document" : msgObj.sticker ? "sticker" : "";
       data = {
-        ...(bodyMessage as Record<string, unknown>),
+        ...msgObj,
         chatId: chatId || from,
         chatid: chatId || from,
         from: from || (bodyMessage as { sender?: string }).sender,
@@ -179,7 +182,7 @@ export async function POST(request: Request) {
         fromMe: (bodyMessage as { fromMe?: boolean }).fromMe === true,
         isGroup: (bodyChat as { wa_isGroup?: boolean })?.wa_isGroup === true || (typeof chatId === "string" && chatId.endsWith("@g.us")),
         timestamp: (bodyMessage as { timestamp?: number }).timestamp ?? (bodyMessage as { sent_at?: number }).sent_at,
-        type: (bodyMessage as { type?: string }).type,
+        type: (bodyMessage as { type?: string }).type ?? inferredMsgType,
         chatImagePreview: (bodyChat as { imagePreview?: string }).imagePreview ?? (bodyChat as { image?: string }).image ?? "",
         chatImage: (bodyChat as { image?: string }).image ?? (bodyChat as { imagePreview?: string }).imagePreview ?? "",
       } as WebhookPayload["data"];
@@ -277,7 +280,12 @@ export async function POST(request: Request) {
     const hasMessageLikeData =
       (data?.chatId || data?.chatid) &&
       (data?.text != null || data?.body != null || data?.content != null || data?.caption != null ||
-       data?.mediaUrl != null || data?.file != null || (data?.type && data?.type !== "conversation"));
+       data?.mediaUrl != null || data?.file != null || (data?.type && data?.type !== "conversation") ||
+       (data && typeof (data as Record<string, unknown>).audio === "object") ||
+       (data && typeof (data as Record<string, unknown>).ptt === "object") ||
+       (data && typeof (data as Record<string, unknown>).image === "object") ||
+       (data && typeof (data as Record<string, unknown>).video === "object") ||
+       (data && typeof (data as Record<string, unknown>).document === "object"));
     const treatAsMessage = isMessageEvent || isHistory || (!eventName && hasMessageLikeData);
 
     if (!treatAsMessage) {
@@ -351,12 +359,25 @@ async function processOneMessage(
     return true;
   }
   const rawType = (data.type ?? data.mediaType ?? data.messageType ?? "") as string;
+  const dataObj = data as Record<string, unknown>;
+  const nestedMedia =
+    (typeof dataObj.audio === "object" && dataObj.audio && ((dataObj.audio as { url?: string }).url ?? (dataObj.audio as { base64?: string }).base64)) ||
+    (typeof dataObj.ptt === "object" && dataObj.ptt && ((dataObj.ptt as { url?: string }).url ?? (dataObj.ptt as { base64?: string }).base64)) ||
+    (typeof dataObj.image === "object" && dataObj.image && ((dataObj.image as { url?: string }).url ?? (dataObj.image as { base64?: string }).base64)) ||
+    (typeof dataObj.video === "object" && dataObj.video && ((dataObj.video as { url?: string }).url ?? (dataObj.video as { base64?: string }).base64)) ||
+    (typeof dataObj.document === "object" && dataObj.document && ((dataObj.document as { url?: string }).url ?? (dataObj.document as { base64?: string }).base64)) ||
+    (typeof dataObj.sticker === "object" && dataObj.sticker && ((dataObj.sticker as { url?: string }).url ?? (dataObj.sticker as { base64?: string }).base64));
   const mediaUrl = (
-    data.mediaUrl ?? data.file ?? data.url ?? data.image ?? data.base64 ?? (data as { media?: { url?: string } }).media?.url ?? ""
+    data.mediaUrl ?? data.file ?? data.url ?? data.image ?? data.base64 ??
+    (typeof nestedMedia === "string" ? nestedMedia : null) ??
+    (data as { media?: { url?: string } }).media?.url ?? ""
   ) as string;
+  const inferredType = !rawType && nestedMedia
+    ? (dataObj.audio ? "audio" : dataObj.ptt ? "ptt" : dataObj.image ? "image" : dataObj.video ? "video" : dataObj.document ? "document" : dataObj.sticker ? "sticker" : "")
+    : rawType;
   const caption = (data.caption ?? data.text ?? data.body ?? data.content ?? "") as string;
   const textContent = (data.text ?? data.body ?? data.content ?? "") as string;
-  const content = textContent || caption || (rawType && mediaUrl ? `[${rawType}]` : "");
+  const content = textContent || caption || (inferredType && mediaUrl ? `[${inferredType}]` : "") || (inferredType ? `[${inferredType}]` : "");
   const rawTs = data.timestamp ?? data.sent_at;
   const sentAt =
     rawTs != null && (typeof rawTs === "number" || typeof rawTs === "string")
@@ -381,8 +402,9 @@ async function processOneMessage(
     image: "image", video: "video", audio: "audio", myaudio: "audio", ptt: "ptt", ptv: "video",
     document: "document", sticker: "sticker",
   };
-  const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
-  const isMedia = messageType !== "text" && (mediaUrl || content === `[${rawType}]`);
+  const effectiveType = inferredType || rawType;
+  const messageType = effectiveType ? (mediaTypeMap[String(effectiveType).toLowerCase()] ?? "text") : "text";
+  const isMedia = messageType !== "text" && (mediaUrl || content === `[${effectiveType}]`);
   const finalContent = isMedia ? (caption || textContent || `[${messageType}]`).slice(0, 10000) : content.slice(0, 10000);
   const finalMessageType = isMedia ? messageType : "text";
   const finalMediaUrl = isMedia && mediaUrl ? String(mediaUrl).trim() : null;

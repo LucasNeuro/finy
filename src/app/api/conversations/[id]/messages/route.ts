@@ -7,6 +7,21 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
+/** Normaliza número Brasil para envio UAZAPI: 55 + DDD + 9 dígitos. Corrige números malformados (ex.: 211840940413040 → 5521184094041). */
+function normalizePhoneForSend(raw: string | null | undefined, isGroup: boolean): string {
+  if (isGroup || !raw) return (raw ?? "").trim();
+  const d = (raw ?? "").replace(/\D/g, "");
+  if (!d) return raw.trim();
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
+  if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
+    const ddd = d.slice(0, 2);
+    const mobile = d.slice(2, 11);
+    if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
+  }
+  return d;
+}
+
 const MEDIA_TYPES = ["image", "video", "audio", "ptt", "myaudio", "ptv", "document", "sticker"] as const;
 const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name";
 const MESSAGES_PAGE_LIMIT = 1000;
@@ -116,7 +131,7 @@ export async function POST(
   const supabase = await createClient();
   const { data: conversation, error: convError } = await supabase
     .from("conversations")
-    .select("id, company_id, channel_id, customer_phone, wa_chat_jid, is_group")
+    .select("id, company_id, channel_id, customer_phone, wa_chat_jid, is_group, assigned_to")
     .eq("id", conversationId)
     .eq("company_id", companyId)
     .single();
@@ -124,6 +139,16 @@ export async function POST(
     console.error("[messages POST] Conversation not found", { conversationId, companyId, convError: convError?.message });
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  const assignedTo = conversation.assigned_to ?? null;
+  if (assignedTo !== (user?.id ?? null)) {
+    return NextResponse.json(
+      { error: "Atribua esta conversa a você para enviar mensagens." },
+      { status: 403 }
+    );
+  }
+
   if (!conversation.channel_id) {
     console.error("[messages POST] Conversation without channel", { conversationId });
     return NextResponse.json(
@@ -147,10 +172,11 @@ export async function POST(
   }
 
   const token = channel.uazapi_token_encrypted;
+  const isGroup = !!conversation.is_group;
   const number =
-    conversation.is_group && conversation.wa_chat_jid
+    isGroup && conversation.wa_chat_jid
       ? conversation.wa_chat_jid
-      : conversation.customer_phone;
+      : normalizePhoneForSend(conversation.customer_phone, isGroup);
 
   let result: { ok: boolean; error?: string };
   if (isMedia) {

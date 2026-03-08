@@ -12,6 +12,20 @@ function formatGroupJidForDisplay(jid: string): string {
   return raw ? `Grupo ${raw}` : "Grupo";
 }
 
+/** Normaliza customer_phone para exibição (Brasil): corrige números malformados (ex.: 211840940413040 → 5521184094041). */
+function normalizePhoneForDisplay(raw: string | null | undefined): string | null {
+  if (raw == null || raw === "") return null;
+  const d = (raw ?? "").replace(/\D/g, "");
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
+  if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
+    const ddd = d.slice(0, 2);
+    const mobile = d.slice(2, 11);
+    if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
+  }
+  return d || raw;
+}
+
 /** Chamados novos = não atribuídos e status open. Ordenação estilo Zendesk/Intercom: novos no topo, depois por última mensagem. */
 function sortQueuesListNewFirst<T extends { assigned_to?: string | null; status?: string; last_message_at: string }>(
   list: T[]
@@ -308,7 +322,8 @@ export async function GET(request: Request) {
     const fromDb = cc?.contact_name?.trim() || cc?.first_name?.trim() || null;
     const customer_name = isGroup ? (groupName ?? c.customer_name ?? formatGroupJidForDisplay(jid)) : (fromDb ?? c.customer_name);
     const avatar_url = isGroup ? (groupInfo?.avatar_url ?? null) : (cc?.avatar_url?.trim() || null);
-    return { ...c, customer_name, avatar_url };
+    const customer_phone = isGroup ? c.customer_phone : (normalizePhoneForDisplay(c.customer_phone) ?? c.customer_phone);
+    return { ...c, customer_name, avatar_url, customer_phone };
   });
 
   listWithPreview = listWithPreview.map((c) => ({

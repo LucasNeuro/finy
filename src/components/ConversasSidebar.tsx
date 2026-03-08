@@ -83,34 +83,17 @@ type SidebarGroup = {
   left_at: string | null;
 };
 
-/** Cores por fila (card acompanha a fila). Hash estável de queue_id para índice. */
-const QUEUE_CARD_COLORS = [
-  { border: "border-l-sky-400", bg: "from-sky-50/95 to-white", dot: "bg-sky-500", dotRing: "ring-sky-100" },
-  { border: "border-l-violet-400", bg: "from-violet-50/95 to-white", dot: "bg-violet-500", dotRing: "ring-violet-100" },
-  { border: "border-l-amber-400", bg: "from-amber-50/95 to-white", dot: "bg-amber-500", dotRing: "ring-amber-100" },
-  { border: "border-l-emerald-400", bg: "from-emerald-50/95 to-white", dot: "bg-emerald-500", dotRing: "ring-emerald-100" },
-  { border: "border-l-indigo-400", bg: "from-indigo-50/95 to-white", dot: "bg-indigo-500", dotRing: "ring-indigo-100" },
-] as const;
-const STYLE_NEUTRAL = "border-l-4 border-l-slate-200 bg-gradient-to-r from-slate-50/60 to-white";
+/** Cards em degradê cinza; só os botões mantêm cor (ex.: verde do Atribuir). */
+const STYLE_CARD_GRAY = "border-l-4 border-l-slate-200 bg-gradient-to-r from-slate-50/80 to-white shadow-sm";
 
-function hashQueueIdToIndex(queueId: string | null | undefined): number {
-  if (!queueId || typeof queueId !== "string") return -1;
-  let h = 0;
-  for (let i = 0; i < queueId.length; i++) h = (h * 31 + queueId.charCodeAt(i)) >>> 0;
-  return h % QUEUE_CARD_COLORS.length;
+function getTabRowStyle(activeTab: TabId, showQueueColors: boolean): string {
+  if (!showQueueColors) return "";
+  return STYLE_CARD_GRAY;
 }
 
-/** Na aba Filas/Novos: cor do card conforme a fila (azul, roxo, etc.). Sem fila ou sem showQueueColors = neutro. */
-function getQueueRowStyle(
-  showQueueColors: boolean,
-  queueId: string | null | undefined,
-  isNew: boolean
-): string {
-  if (!showQueueColors) return "";
-  const idx = hashQueueIdToIndex(queueId);
-  if (idx < 0) return STYLE_NEUTRAL;
-  const q = QUEUE_CARD_COLORS[idx];
-  return `border-l-4 ${q.border} bg-gradient-to-r ${q.bg} shadow-sm`;
+/** Bolinha "novo" em cinza para combinar com o card. */
+function getTabDotStyle(_activeTab: TabId): { dot: string; dotRing: string } {
+  return { dot: "bg-slate-500", dotRing: "ring-slate-100" };
 }
 
 const ConversationListItem = memo(function ConversationListItem({
@@ -121,6 +104,7 @@ const ConversationListItem = memo(function ConversationListItem({
   canClaim,
   onClaim,
   showQueueColors = false,
+  activeTab = "queues",
 }: {
   conversation: Conversation;
   base: string;
@@ -128,8 +112,9 @@ const ConversationListItem = memo(function ConversationListItem({
   onHover?: (id: string) => void;
   canClaim?: boolean;
   onClaim?: (conversationId: string) => void;
-  /** Na aba Filas: aplicar amarelo (novo) / cinza (resto). */
+  /** Cards em degradê cinza; botões mantêm cores (ex.: verde Atribuir). */
   showQueueColors?: boolean;
+  activeTab?: TabId;
 }) {
   const href = `${base}/conversas/${c.id}`;
   const displayName = (c.customer_name ?? formatPhoneBrazil(c.customer_phone)) ?? "?";
@@ -139,9 +124,8 @@ const ConversationListItem = memo(function ConversationListItem({
   const [claiming, setClaiming] = useState(false);
   const [imgError, setImgError] = useState(false);
   const isNew = (c.assigned_to == null || c.assigned_to === "") && (c.status === "open" || c.status === "in_queue");
-  const rowStyle = getQueueRowStyle(showQueueColors, c.queue_id, isNew);
-  const queueColorIdx = showQueueColors ? hashQueueIdToIndex(c.queue_id) : -1;
-  const queueDot = queueColorIdx >= 0 ? QUEUE_CARD_COLORS[queueColorIdx] : null;
+  const rowStyle = getTabRowStyle(activeTab, showQueueColors);
+  const tabDot = getTabDotStyle(activeTab);
   const avatarSrc =
     c.avatar_url && !imgError
       ? c.avatar_url.startsWith("http://") || c.avatar_url.startsWith("https://")
@@ -190,7 +174,7 @@ const ConversationListItem = memo(function ConversationListItem({
               <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-[#1E293B]">
                 {isNew && (
                   <span
-                    className={`h-2.5 w-2.5 shrink-0 rounded-full shadow-sm ring-2 ${queueDot ? `${queueDot.dot} ${queueDot.dotRing}` : "bg-amber-500 ring-amber-100"}`}
+                    className={`h-2.5 w-2.5 shrink-0 rounded-full shadow-sm ring-2 ${showQueueColors ? `${tabDot.dot} ${tabDot.dotRing}` : "bg-amber-500 ring-amber-100"}`}
                     title="Nova conversa (não atribuída)"
                     aria-hidden
                   />
@@ -863,7 +847,8 @@ export function ConversasSidebar() {
                         }).then((r) => r.json()),
                     });
                   } : undefined}
-                  showQueueColors={activeTab === "queues" || activeTab === "novos"}
+                  showQueueColors={activeTab === "queues" || activeTab === "novos" || activeTab === "mine"}
+                  activeTab={activeTab}
                 />
               ))}
             </ul>

@@ -63,9 +63,25 @@ export async function GET(
   const queue_name = (queueRes.data as { name?: string } | null)?.name ?? null;
   const assigned_to_name = (assigneeRes.data as { full_name?: string } | null)?.full_name ?? null;
 
+  /** Normaliza número Brasil para lookup (canonical digits). */
+  function toCanonicalDigits(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    const d = (raw ?? "").replace(/\D/g, "");
+    if (d.length === 10 || d.length === 11) return "55" + d;
+    if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
+    if ((d.length === 14 || d.length === 15) && !d.startsWith("55")) {
+      const ddd = d.slice(0, 2);
+      const mobile = d.slice(2, 11);
+      if (/^\d{2}$/.test(ddd) && /^\d{9}$/.test(mobile)) return "55" + ddd + mobile;
+    }
+    return d || null;
+  }
+
   const jid = conversation.wa_chat_jid || conversation.external_id || conversation.customer_phone || "";
   const jidNorm = jid && !jid.includes("@") ? `${jid.replace(/\D/g, "")}@s.whatsapp.net` : jid;
-  const jids = jid && jidNorm && jid !== jidNorm ? [jid, jidNorm] : jid ? [jid] : [];
+  const canonicalDigits = toCanonicalDigits(conversation.customer_phone || jid);
+  const canonicalJid = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : null;
+  const jids = [...new Set([jid, jidNorm, canonicalJid].filter(Boolean))] as string[];
   let contact_avatar_url: string | null = null;
   let contact_name_from_cc: string | null = null;
   let contact_phone_from_cc: string | null = null;
@@ -126,10 +142,12 @@ export async function GET(
   }
 
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
+  const displayPhone = contact_phone_from_cc ?? conversation.customer_phone;
+  const canonicalPhone = toCanonicalDigits(displayPhone || conversation.customer_phone) ?? displayPhone ?? conversation.customer_phone;
   const payload = {
     ...convRest,
     customer_name: (conversation.customer_name && conversation.customer_name.trim()) ? conversation.customer_name : (contact_name_from_cc ?? conversation.customer_name),
-    customer_phone: contact_phone_from_cc ?? conversation.customer_phone,
+    customer_phone: canonicalPhone ?? conversation.customer_phone,
     channel_name,
     queue_name,
     assigned_to_name,

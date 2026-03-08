@@ -12,18 +12,18 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
-    return NextResponse.json({ permissions: [], inbox_see_all: false, company_id: null });
+    return NextResponse.json({ permissions: [], inbox_see_all: false, company_id: null, user_id: null });
   }
   const profile = await getProfileForCompany(companyId);
   if (!profile) {
-    return NextResponse.json({ permissions: [], inbox_see_all: false, company_id: null });
+    return NextResponse.json({ permissions: [], inbox_see_all: false, company_id: null, user_id: null });
   }
   const isOwnerOrAdmin = profile.is_owner || (profile.role === "admin" && !profile.role_id);
   if (isOwnerOrAdmin) {
-    return NextResponse.json({ permissions: getAllPermissionKeys(), inbox_see_all: true, company_id: companyId });
+    return NextResponse.json({ permissions: getAllPermissionKeys(), inbox_see_all: true, company_id: companyId, user_id: profile.user_id });
   }
   const perms = profile.roles?.permissions ?? [];
   const list = Array.isArray(perms) ? perms : [];
   const inboxSeeAll = list.includes("inbox.see_all") || list.includes("inbox.manage_tickets");
-  return NextResponse.json({ permissions: list, inbox_see_all: inboxSeeAll, company_id: companyId });
+  return NextResponse.json({ permissions: list, inbox_see_all: inboxSeeAll, company_id: companyId, user_id: profile.user_id });
 }

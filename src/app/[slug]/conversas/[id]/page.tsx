@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Plus } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
@@ -602,6 +602,10 @@ export default function ConversaThreadPage({
 
   const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
   const canClaim = perms.includes("inbox.claim");
+  const currentUserId = (permissionsData as { user_id?: string } | undefined)?.user_id ?? null;
+  const canSendMessages = Boolean(conv && currentUserId && conv.assigned_to === currentUserId);
+  const isUnassigned = conv && (conv.assigned_to == null || conv.assigned_to === "");
+  const isAssignedToOther = conv && currentUserId && conv.assigned_to !== null && conv.assigned_to !== "" && conv.assigned_to !== currentUserId;
   const canChangeStatus = perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets");
   const canClose = perms.includes("inbox.close");
 
@@ -913,7 +917,11 @@ export default function ConversaThreadPage({
   const displayPhone = formatPhoneBrazil(rawPhone);
   const telDigits = rawPhone.replace(/\D/g, "") || "";
   const telHref = telDigits ? (telDigits.startsWith("55") ? `tel:+${telDigits}` : `tel:+55${telDigits}`) : undefined;
-  const imageUrl = (conv?.contact_avatar_url && conv.contact_avatar_url.trim()) ? conv.contact_avatar_url : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
+  const imageUrl = (conv?.contact_avatar_url && conv.contact_avatar_url.trim())
+    ? (conv.contact_avatar_url.startsWith("http://") || conv.contact_avatar_url.startsWith("https://")
+        ? `/api/contacts/avatar?url=${encodeURIComponent(conv.contact_avatar_url)}`
+        : conv.contact_avatar_url)
+    : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F1F5F9]">
@@ -1124,7 +1132,29 @@ export default function ConversaThreadPage({
         <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-2">
 
           {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
-          <form onSubmit={(e) => handleSend(e)} className="flex gap-2">
+          {!loading && conv && !canSendMessages && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+              {isUnassigned && canClaim ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>Atribua esta conversa a você para enviar mensagens.</span>
+                  <button
+                    type="button"
+                    onClick={handleClaim}
+                    disabled={!!chatActionLoading}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-green px-3 py-1.5 text-sm font-medium text-white hover:bg-[#008f7a] disabled:opacity-60"
+                  >
+                    {chatActionLoading === "claim" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    Atribuir a mim
+                  </button>
+                </div>
+              ) : isAssignedToOther ? (
+                <p>Esta conversa está com outro atendente. Só ele pode enviar mensagens.</p>
+              ) : (
+                <p>Atribua esta conversa para enviar mensagens.</p>
+              )}
+            </div>
+          )}
+          <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
             <input
               type="file"
               ref={fileInputRef}
