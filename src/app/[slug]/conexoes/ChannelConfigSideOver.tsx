@@ -748,55 +748,8 @@ export function ChannelConfigSideOver({
                       })()}
                     </p>
                   )}
-                  <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens. Novas mensagens e grupos entram automaticamente nas filas. Ao abrir esta tela, as conversas antigas deste número são sincronizadas em segundo plano.</p>
+                  <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens. Novas mensagens e grupos entram automaticamente nas filas.</p>
                 </div>
-                <p className="text-xs text-[#64748B]">Para forçar de novo o histórico antigo, use o botão abaixo. Pode levar até 2 minutos.</p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setLoading(true);
-                    setError("");
-                    const ctrl = new AbortController();
-                    const timeoutId = setTimeout(() => ctrl.abort(), 120_000);
-                    try {
-                      const base = companySlug ? `/${companySlug}` : "";
-                      const r = await fetch(`/api/channels/${channelId}/sync-history`, {
-                        method: "POST",
-                        credentials: "include",
-                        headers: base ? { "X-Company-Slug": companySlug } : undefined,
-                        signal: ctrl.signal,
-                      });
-                      clearTimeout(timeoutId);
-                      const j = await r.json().catch(() => ({}));
-                      if (!r.ok) {
-                        setError(j?.error ?? "Falha ao sincronizar histórico");
-                        return;
-                      }
-                      onSaved?.();
-                    } catch (e) {
-                      clearTimeout(timeoutId);
-                      if ((e as Error)?.name === "AbortError") {
-                        setError("Demorou mais que 2 min. Novas mensagens já entram sozinhas pelo WhatsApp.");
-                      } else {
-                        setError("Falha ao sincronizar histórico");
-                      }
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                  disabled={loading}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Sincronizando…
-                    </>
-                  ) : (
-                    "Sincronizar histórico de mensagens"
-                  )}
-                </button>
-                {error && <p className="text-sm text-red-600">{error}</p>}
               </div>
             ) : connectStatus === "connecting" || qrcode || paircode ? (
               <>
