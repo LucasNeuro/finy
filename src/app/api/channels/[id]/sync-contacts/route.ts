@@ -126,6 +126,11 @@ async function runSync(
   let contactsCount = 0;
   let syncedJids: string[] = [];
 
+  if (!contactsRes.ok || !Array.isArray(contactsRes.data) || contactsRes.data.length === 0) {
+    if (process.env.NODE_ENV !== "test") {
+      console.log("[sync-contacts] Nenhum contato retornado pela UAZAPI:", contactsRes.ok ? "lista vazia" : contactsRes.error);
+    }
+  }
   if (contactsRes.ok && Array.isArray(contactsRes.data) && contactsRes.data.length > 0) {
     const seen = new Set<string>();
     const rows = contactsRes.data

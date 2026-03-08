@@ -162,19 +162,20 @@ export function ChannelConfigSideOver({
     fetchPrivacy();
   }, [open, channelId, fetchConnectStatus]);
 
-  // Sincronizar conversas antigas em segundo plano ao abrir o sidebar (não bloqueia a UI)
-  useEffect(() => {
-    if (!open || !channelId || connectStatus !== "connected" || hasAutoSyncedRef.current) return;
-    hasAutoSyncedRef.current = true;
-    const base = companySlug ? `/${companySlug}` : "";
-    fetch(`/api/channels/${channelId}/sync-history`, {
-      method: "POST",
-      credentials: "include",
-      headers: base ? { "X-Company-Slug": companySlug } : undefined,
-    })
-      .then(() => onSavedRef.current?.())
-      .catch(() => {});
-  }, [open, channelId, connectStatus, companySlug]);
+  // Não disparar sync de histórico ao abrir o sidebar (fluxo é só fila por chamado;
+  // histórico só quando o usuário clicar em "Sincronizar histórico" no painel).
+  // useEffect(() => {
+  //   if (!open || !channelId || connectStatus !== "connected" || hasAutoSyncedRef.current) return;
+  //   hasAutoSyncedRef.current = true;
+  //   const base = companySlug ? `/${companySlug}` : "";
+  //   fetch(`/api/channels/${channelId}/sync-history`, {
+  //     method: "POST",
+  //     credentials: "include",
+  //     headers: base ? { "X-Company-Slug": companySlug } : undefined,
+  //   })
+  //     .then(() => onSavedRef.current?.())
+  //     .catch(() => {});
+  // }, [open, channelId, connectStatus, companySlug]);
 
   useEffect(() => {
     if (!open || activeTab !== "chatbot" || !channelId) return;

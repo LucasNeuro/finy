@@ -10,10 +10,10 @@ import { NextResponse } from "next/server";
 
 /**
  * POST /api/channels/[id]/sync-history
- * Sincroniza histórico de chats e mensagens da UAZAPI para conversations e messages.
- * Pode ser chamado:
- * - Pelo usuário (auth + permission channels.manage)
- * - Internamente pelo webhook ao receber "connection" (header X-Internal-Sync-Secret = INTERNAL_SYNC_SECRET).
+ * Sincroniza histórico de mensagens apenas para conversas que já existem (criadas pelo webhook).
+ * Não cria conversas novas: assim Novos/Filas só recebem chamados de mensagens novas.
+ * Atualiza channel_groups com nome de grupos; mensagens antigas são inseridas só em conversas existentes.
+ * Pode ser chamado pelo usuário (auth + permission) ou internamente (X-Internal-Sync-Secret).
  */
 export async function POST(
   request: Request,
@@ -150,6 +150,8 @@ export async function POST(
     if (existing) {
       conversationId = existing.id;
     } else {
+      // Não criar conversas novas no sync: só preencher histórico em conversas já existentes
+      // (criadas pelo webhook quando chega mensagem nova). Assim Novos/Filas só recebem chamados novos.
       if (isGroup) {
         await supabase.from("channel_groups").upsert(
           {
@@ -162,48 +164,7 @@ export async function POST(
           { onConflict: "channel_id,jid" }
         );
       }
-      let assignedTo: string | null = null;
-      if (!isGroup && queueId) {
-        const { data: assignments } = await supabase
-          .from("queue_assignments")
-          .select("user_id")
-          .eq("queue_id", queueId)
-          .eq("company_id", companyId)
-          .order("last_assigned_at", { ascending: true, nullsFirst: true })
-          .limit(1);
-        const first = (assignments ?? []) as { user_id: string }[];
-        if (first.length > 0) {
-          assignedTo = first[0].user_id;
-          await supabase
-            .from("queue_assignments")
-            .update({ last_assigned_at: new Date().toISOString() })
-            .eq("queue_id", queueId)
-            .eq("user_id", assignedTo)
-            .eq("company_id", companyId);
-        }
-      }
-      const { data: inserted, error: insErr } = await supabase
-        .from("conversations")
-        .insert({
-          company_id: companyId,
-          channel_id: channelId,
-          external_id: waChatid,
-          wa_chat_jid: waChatid,
-          kind: isGroup ? "group" : "ticket",
-          is_group: isGroup,
-          customer_phone: (chat.wa_chatid ?? "").toString().replace(/@.*$/, "") || waChatid,
-          customer_name: (chat.wa_contactName ?? chat.wa_name ?? null) ?? null,
-          queue_id: queueId,
-          assigned_to: assignedTo,
-          status: "open",
-          last_message_at: new Date().toISOString(),
-        })
-        .select("id")
-        .single();
-      if (!insErr && inserted) {
-        conversationId = inserted.id;
-        conversationsCreated++;
-      }
+      continue; // pula este chat: não criar conversa nem buscar mensagens
     }
 
     if (!conversationId) continue;
