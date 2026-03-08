@@ -105,7 +105,7 @@ export function GroupDetailSideOver({
   const displayName = info?.Name ?? group?.name ?? "—";
   const topic = info?.Topic ?? group?.topic ?? null;
   const inviteLink = info?.InviteLink ?? group?.invite_link ?? null;
-  const avatarUrl = (info?.PictureURL ?? (info as { image?: string }).image ?? group?.avatar_url)?.trim() || null;
+  const avatarUrl = (info?.PictureURL ?? (info != null ? (info as { image?: string }).image : undefined) ?? group?.avatar_url)?.trim() || null;
   const participants = info?.Participants ?? [];
   const fromDb = Boolean(info?.fromDb);
   const hasAnyInfo = !loading && (info || group);
