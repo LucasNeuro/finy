@@ -137,6 +137,7 @@ export async function POST(request: Request) {
         "";
       const chatId = chatIdRaw || (from ? (from.includes("@") ? from : `${from.replace(/\D/g, "")}@s.whatsapp.net`) : "");
       data = {
+        ...(bodyMessage as Record<string, unknown>),
         chatId: chatId || (from && !from.includes("@") ? `${from.replace(/\D/g, "")}@s.whatsapp.net` : from),
         chatid: chatId || (from && !from.includes("@") ? `${from.replace(/\D/g, "")}@s.whatsapp.net` : from),
         from: from || (bodyMessage as { sender?: string }).sender,
@@ -147,7 +148,6 @@ export async function POST(request: Request) {
         isGroup: (bodyChat as { wa_isGroup?: boolean })?.wa_isGroup === true || (typeof chatId === "string" && chatId.endsWith("@g.us")),
         timestamp: (bodyMessage as { timestamp?: number }).timestamp ?? (bodyMessage as { sent_at?: number }).sent_at,
         type: (bodyMessage as { type?: string }).type,
-        ...(bodyMessage as Record<string, unknown>),
       } as WebhookPayload["data"];
     }
 
@@ -368,15 +368,16 @@ async function processOneMessage(
     }
 
     if (!channel) {
-      const { data: chData, error } = await supabase
+      const { data: chList, error } = await supabase
         .from("channels")
         .select("id, company_id, queue_id")
         .eq("uazapi_instance_id", instanceId)
         .eq("is_active", true)
-        .single();
+        .limit(1);
 
+      const chData = Array.isArray(chList) ? chList[0] : chList;
       if (error || !chData) {
-        console.error("[WEBHOOK] Canal não encontrado:", { instanceId, error: error?.message, chData });
+        console.error("[WEBHOOK] Canal não encontrado:", { instanceId, error: error?.message, chData: chList });
         return true;
       }
 
