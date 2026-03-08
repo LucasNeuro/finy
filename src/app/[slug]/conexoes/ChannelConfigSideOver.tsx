@@ -103,6 +103,8 @@ export function ChannelConfigSideOver({
   const [qrcode, setQrcode] = useState<string | null>(null);
   const [paircode, setPaircode] = useState<string | null>(null);
   const [connectLoading, setConnectLoading] = useState(false);
+  const [connectMode, setConnectMode] = useState<"qrcode" | "phone">("qrcode");
+  const [connectPhone, setConnectPhone] = useState("");
 
   const [queueId, setQueueId] = useState<string>(channelQueueId ?? "");
   const [queueSaving, setQueueSaving] = useState(false);
@@ -419,10 +421,15 @@ export function ChannelConfigSideOver({
     setConnectLoading(true);
     setError("");
     try {
+      const body: { channel_id: string; phone?: string } = { channel_id: channelId };
+      const digits = connectPhone.replace(/\D/g, "");
+      if (connectMode === "phone" && digits.length >= 10) {
+        body.phone = digits.length >= 12 && digits.startsWith("55") ? digits : `55${digits}`;
+      }
       const r = await fetch("/api/uazapi/instance/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ channel_id: channelId }),
+        body: JSON.stringify(body),
         credentials: "include",
       });
       const data = await r.json();
@@ -792,23 +799,58 @@ export function ChannelConfigSideOver({
             ) : (
               <>
                 <p className="text-sm text-[#64748B]">
-                  Conecte este número ao WhatsApp escaneando o QR Code. O número aparecerá na tabela assim que a conexão for estabelecida.
+                  Conecte este número ao WhatsApp. Escolha entre escanear o <strong>QR Code</strong> ou usar o <strong>número de telefone</strong> para receber um código de pareamento no celular.
                 </p>
+                <div className="flex gap-4 border-b border-[#E2E8F0] pb-3">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="connectMode"
+                      checked={connectMode === "qrcode"}
+                      onChange={() => { setConnectMode("qrcode"); setConnectPhone(""); }}
+                      className="border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                    />
+                    <span className="text-sm font-medium text-[#1E293B]">QR Code</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="radio"
+                      name="connectMode"
+                      checked={connectMode === "phone"}
+                      onChange={() => setConnectMode("phone")}
+                      className="border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                    />
+                    <span className="text-sm font-medium text-[#1E293B]">Número de telefone</span>
+                  </label>
+                </div>
+                {connectMode === "phone" && (
+                  <div>
+                    <label className="block text-sm font-medium text-[#334155] mb-1">Número do WhatsApp (com DDD)</label>
+                    <input
+                      type="tel"
+                      value={connectPhone}
+                      onChange={(e) => setConnectPhone(e.target.value)}
+                      placeholder="Ex: 11 99999-9999 ou 5511999999999"
+                      className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    />
+                    <p className="mt-1 text-xs text-[#64748B]">Informe o número do celular que tem o WhatsApp. Será gerado um código de pareamento (até 5 min de validade). No WhatsApp, vá em Aparelhos conectados → Conectar um aparelho → Vincular com número de telefone e digite o código.</p>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={handleConnect}
-                  disabled={connectLoading}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-clicvend-orange px-4 py-3 font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                  disabled={connectLoading || (connectMode === "phone" && connectPhone.replace(/\D/g, "").length < 10)}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-clicvend-orange px-4 py-3 font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {connectLoading ? (
                     <>
                       <Loader2 className="h-5 w-5 animate-spin" />
-                      Gerando QR Code…
+                      {connectMode === "phone" ? "Gerando código…" : "Gerando QR Code…"}
                     </>
                   ) : (
                     <>
                       <Link2 className="h-5 w-5" />
-                      Conectar WhatsApp
+                      {connectMode === "phone" ? "Gerar código de pareamento" : "Conectar WhatsApp (QR Code)"}
                     </>
                   )}
                 </button>
