@@ -1,4 +1,4 @@
-import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
+import { getCompanyIdFromCookie, getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requireAdmin } from "@/lib/auth/get-profile";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { getWebhook, setWebhook } from "@/lib/uazapi/client";
@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
  * Retorna webhooks configurados na instância.
  */
 export async function GET(request: Request) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
  * Body: { channel_id, url, events?: string[], excludeMessages?: string[] }
  */
 export async function POST(request: Request) {
-  const companyId = await getCompanyIdFromCookie();
+  const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -47,6 +47,8 @@ export default function ConexoesPage() {
   const [channelStats, setChannelStats] = useState<Record<string, { conversations_count: number; messages_count: number; open_conversations: number }>>({});
 
   const [deleteConfirmChannel, setDeleteConfirmChannel] = useState<Channel | null>(null);
+  const [selectedChannelIds, setSelectedChannelIds] = useState<Set<string>>(new Set());
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const canAddChannel = channels.length < MAX_CHANNELS_PER_COMPANY;
 
   const fetchChannels = useCallback(() => {
@@ -341,9 +343,150 @@ export default function ConexoesPage() {
 
           {/* Tabela */}
           <div className="overflow-x-auto">
+            {selectedChannelIds.size > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-clicvend-orange/10 border-b border-[#E2E8F0]">
+                <span className="text-sm font-medium text-[#1E293B]">
+                  {selectedChannelIds.size} conexão(ões) selecionada(s)
+                </span>
+                <div className="inline-flex flex-wrap rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
+                  <button
+                    type="button"
+                    disabled={bulkActionLoading || !channels.some((c) => selectedChannelIds.has(c.id) && (channelStatuses[c.id] === "disconnected" || channelStatuses[c.id] === "error"))}
+                    onClick={async () => {
+                      const ids = Array.from(selectedChannelIds);
+                      const toConnect = ids.filter((id) => {
+                        const ch = channels.find((c) => c.id === id);
+                        const status = ch ? (channelStatuses[ch.id] ?? null) : null;
+                        return status === "disconnected" || status === "error";
+                      });
+                      if (toConnect.length === 0) return;
+                      setBulkActionLoading(true);
+                      try {
+                        await Promise.all(
+                          toConnect.map((id) => {
+                            const ch = channels.find((c) => c.id === id);
+                            if (!ch) return Promise.resolve();
+                            return fetch("/api/uazapi/instance/connect", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
+                              body: JSON.stringify({ channel_id: ch.id }),
+                              credentials: "include",
+                            });
+                          })
+                        );
+                        setSelectedChannelIds(new Set());
+                        toConnect.forEach((id) => setChannelStatuses((prev) => ({ ...prev, [id]: "connecting" })));
+                        toConnect.forEach((id) => fetchStatus(id));
+                      } finally {
+                        setBulkActionLoading(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60 last:border-r-0"
+                    title="Conectar ao WhatsApp as conexões selecionadas (apenas as desconectadas)."
+                  >
+                    {bulkActionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                    Conectar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkActionLoading || !channels.some((c) => selectedChannelIds.has(c.id) && channelStatuses[c.id] === "connected")}
+                    onClick={async () => {
+                      const ids = Array.from(selectedChannelIds);
+                      const toDisconnect = ids.filter((id) => channelStatuses[id] === "connected");
+                      if (toDisconnect.length === 0) return;
+                      if (!window.confirm(`Desconectar ${toDisconnect.length} conexão(ões) do WhatsApp? Será necessário escanear o QR Code novamente para reconectar.`)) return;
+                      setBulkActionLoading(true);
+                      try {
+                        await Promise.all(
+                          toDisconnect.map((id) => {
+                            const ch = channels.find((c) => c.id === id);
+                            if (!ch) return Promise.resolve();
+                            return fetch("/api/uazapi/instance/disconnect", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
+                              body: JSON.stringify({ channel_id: ch.id }),
+                              credentials: "include",
+                            });
+                          })
+                        );
+                        setSelectedChannelIds(new Set());
+                        toDisconnect.forEach((id) => setChannelStatuses((prev) => ({ ...prev, [id]: "disconnected" })));
+                        fetchChannels();
+                      } finally {
+                        setBulkActionLoading(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60 last:border-r-0"
+                    title="Desconectar do WhatsApp as conexões selecionadas (apenas as conectadas)."
+                  >
+                    {bulkActionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <WifiOff className="h-4 w-4" />}
+                    Desconectar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={bulkActionLoading}
+                    onClick={async () => {
+                      const ids = Array.from(selectedChannelIds);
+                      if (ids.length === 0) return;
+                      if (!window.confirm(`Excluir ${ids.length} conexão(ões)? Esta ação não pode ser desfeita.`)) return;
+                      setBulkActionLoading(true);
+                      try {
+                        await Promise.all(
+                          ids.map((id) =>
+                            fetch(`/api/uazapi/instance/delete?channel_id=${encodeURIComponent(id)}`, {
+                              method: "DELETE",
+                              credentials: "include",
+                              headers: slug ? { "X-Company-Slug": slug } : undefined,
+                            })
+                          )
+                        );
+                        setChannels((prev) => prev.filter((c) => !ids.includes(c.id)));
+                        setChannelStatuses((prev) => {
+                          const next = { ...prev };
+                          ids.forEach((id) => delete next[id]);
+                          return next;
+                        });
+                        setSelectedChannelIds(new Set());
+                      } finally {
+                        setBulkActionLoading(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60 last:border-r-0"
+                    title="Excluir permanentemente as conexões selecionadas."
+                  >
+                    {bulkActionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    Excluir
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedChannelIds(new Set())}
+                    disabled={bulkActionLoading}
+                    className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-60 last:border-r-0"
+                    title="Desmarcar todas as conexões selecionadas."
+                  >
+                    Limpar seleção
+                  </button>
+                </div>
+              </div>
+            )}
             <table className="w-full min-w-[640px]">
               <thead>
                 <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                  <th className="px-4 py-3 w-10 text-left">
+                    <input
+                      type="checkbox"
+                      checked={channels.length > 0 && channels.every((c) => selectedChannelIds.has(c.id))}
+                      onChange={() => {
+                        if (channels.every((c) => selectedChannelIds.has(c.id))) {
+                          setSelectedChannelIds(new Set());
+                        } else {
+                          setSelectedChannelIds(new Set(channels.map((c) => c.id)));
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                      aria-label="Selecionar todas"
+                    />
+                  </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Nome</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Caixa de entrada</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Status</th>
@@ -366,6 +509,22 @@ export default function ConexoesPage() {
                       key={ch.id}
                       className="border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC]"
                     >
+                      <td className="px-4 py-3 w-10">
+                        <input
+                          type="checkbox"
+                          checked={selectedChannelIds.has(ch.id)}
+                          onChange={() => {
+                            setSelectedChannelIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(ch.id)) next.delete(ch.id);
+                              else next.add(ch.id);
+                              return next;
+                            });
+                          }}
+                          className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                          aria-label={`Selecionar ${ch.name}`}
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div>
                           <p className="font-semibold text-[#1E293B]">{ch.name}</p>
