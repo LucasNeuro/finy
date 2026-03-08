@@ -57,6 +57,26 @@ type ChatDetails = {
   [key: string]: unknown;
 };
 
+/** Formata número para exibição Brasil: (DDD) 9 00000-0000. Usa sempre o número salvo na conversa/contato. */
+function formatPhoneBrazil(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim().replace(/\D/g, "");
+  if (!s) return "—";
+  const withCountry = s.length >= 12 && s.startsWith("55");
+  const digits = withCountry ? s.slice(2) : s;
+  if (digits.length >= 10) {
+    const ddd = digits.slice(0, 2);
+    const rest = digits.slice(2);
+    if (rest.length >= 9 && rest[0] === "9") {
+      return `(${ddd}) ${rest.slice(0, 1)} ${rest.slice(1, 6)}-${rest.slice(6, 10)}`;
+    }
+    if (rest.length >= 8) {
+      return `(${ddd}) ${rest.slice(0, 4)}-${rest.slice(4, 8)}`;
+    }
+  }
+  if (s.length <= 14) return s;
+  return s.slice(0, 14) + "…";
+}
+
 function MessageBubble({ m, name }: { m: Message; name: string }) {
   const type = m.message_type ?? "text";
   const rawMediaUrl = m.media_url;
@@ -645,7 +665,11 @@ export default function ConversaThreadPage({
 
   const name = conv?.customer_name || conv?.customer_phone || "";
   const displayName = contactDetails?.name ?? contactDetails?.wa_name ?? contactDetails?.wa_contactName ?? name;
-  const displayPhone = contactDetails?.phone ?? conv?.customer_phone;
+  /** Preferir sempre o número salvo na conversa/contato (canonical); UAZAPI pode retornar formato errado */
+  const rawPhone = conv?.customer_phone ?? contactDetails?.phone ?? "";
+  const displayPhone = formatPhoneBrazil(rawPhone);
+  const telDigits = rawPhone.replace(/\D/g, "") || "";
+  const telHref = telDigits ? (telDigits.startsWith("55") ? `tel:+${telDigits}` : `tel:+55${telDigits}`) : undefined;
   const imageUrl = (conv?.contact_avatar_url && conv.contact_avatar_url.trim()) ? conv.contact_avatar_url : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
 
   return (
@@ -969,7 +993,7 @@ export default function ConversaThreadPage({
                   <div className="text-center">
                     <p className="font-semibold text-[#1E293B]">{displayName}</p>
                     <a
-                      href={`tel:${displayPhone}`}
+                      href={telHref}
                       className="mt-1 flex items-center justify-center gap-2 text-sm text-[#64748B] hover:text-clicvend-orange"
                     >
                       <Phone className="h-3.5 w-3.5" />

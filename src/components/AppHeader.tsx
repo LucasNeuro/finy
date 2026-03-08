@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { Settings, ChevronDown } from "lucide-react";
+import { Settings, ChevronDown, Bell } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
 
@@ -17,6 +17,8 @@ export function AppHeader() {
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
   const [canViewProfile, setCanViewProfile] = useState(false);
+  const [canShowNewNotifications, setCanShowNewNotifications] = useState(false);
+  const [unassignedCount, setUnassignedCount] = useState<number>(0);
 
   useEffect(() => {
     createClient()
@@ -27,13 +29,41 @@ export function AppHeader() {
   useEffect(() => {
     if (!slug) {
       setCanViewProfile(false);
+      setCanShowNewNotifications(false);
       return;
     }
-    fetch("/api/auth/permissions", { credentials: "include", headers: { "X-Company-Slug": slug } })
+    const apiHeaders = { "X-Company-Slug": slug };
+    fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders })
       .then((r) => r.json())
-      .then((data) => setCanViewProfile(Array.isArray(data?.permissions) && data.permissions.includes("profile.view")))
-      .catch(() => setCanViewProfile(false));
+      .then((data) => {
+        const perms = Array.isArray(data?.permissions) ? data.permissions : [];
+        setCanViewProfile(perms.includes("profile.view"));
+        setCanShowNewNotifications(perms.includes("inbox.show_new_notifications"));
+      })
+      .catch(() => {
+        setCanViewProfile(false);
+        setCanShowNewNotifications(false);
+      });
   }, [slug]);
+
+  useEffect(() => {
+    if (!slug || !canShowNewNotifications) {
+      setUnassignedCount(0);
+      return;
+    }
+    const apiHeaders = { "X-Company-Slug": slug };
+    const fetchCounts = () =>
+      fetch("/api/conversations/counts", { credentials: "include", headers: apiHeaders, cache: "no-store" })
+        .then((r) => r.json())
+        .then((data) => {
+          const n = typeof data?.unassigned === "number" ? data.unassigned : 0;
+          setUnassignedCount(n);
+        })
+        .catch(() => {});
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 60_000);
+    return () => clearInterval(interval);
+  }, [slug, canShowNewNotifications]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -54,7 +84,21 @@ export function AppHeader() {
       <Link href={base} className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-90">
         <ClicVendLogo size="sm" className="h-7 w-auto" />
       </Link>
-      <div className="relative flex items-center" ref={dropdownRef}>
+      <div className="relative flex items-center gap-2" ref={dropdownRef}>
+        {canShowNewNotifications && (
+          <Link
+            href={`${base}/conversas`}
+            className="relative flex items-center justify-center rounded-lg p-2 text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B] transition-colors focus:outline-none focus:ring-2 focus:ring-clicvend-green/30"
+            aria-label={unassignedCount > 0 ? `${unassignedCount} novos chamados` : "Notificações"}
+          >
+            <Bell className="h-5 w-5" />
+            {unassignedCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+                {unassignedCount > 99 ? "99+" : unassignedCount}
+              </span>
+            )}
+          </Link>
+        )}
         <button
           type="button"
           onClick={() => setDropdownOpen((o) => !o)}

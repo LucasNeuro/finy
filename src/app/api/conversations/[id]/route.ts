@@ -68,19 +68,21 @@ export async function GET(
   const jids = jid && jidNorm && jid !== jidNorm ? [jid, jidNorm] : jid ? [jid] : [];
   let contact_avatar_url: string | null = null;
   let contact_name_from_cc: string | null = null;
+  let contact_phone_from_cc: string | null = null;
   if (conversation.channel_id && jids.length > 0) {
     const { data: ccList } = await supabase
       .from("channel_contacts")
-      .select("avatar_url, contact_name, first_name")
+      .select("avatar_url, contact_name, first_name, phone")
       .eq("channel_id", conversation.channel_id)
       .eq("company_id", companyId)
       .in("jid", jids)
       .limit(1);
     const cc = Array.isArray(ccList) ? ccList[0] : null;
-    const row = cc as { avatar_url?: string; contact_name?: string; first_name?: string } | null;
+    const row = cc as { avatar_url?: string; contact_name?: string; first_name?: string; phone?: string } | null;
     contact_avatar_url = row?.avatar_url?.trim() ?? null;
     const name = row?.contact_name?.trim() || row?.first_name?.trim() || null;
     if (name) contact_name_from_cc = name;
+    if (row?.phone?.trim()) contact_phone_from_cc = row.phone.trim();
   }
 
   const MESSAGES_LIMIT = 5000;
@@ -127,6 +129,7 @@ export async function GET(
   const payload = {
     ...convRest,
     customer_name: (conversation.customer_name && conversation.customer_name.trim()) ? conversation.customer_name : (contact_name_from_cc ?? conversation.customer_name),
+    customer_phone: contact_phone_from_cc ?? conversation.customer_phone,
     channel_name,
     queue_name,
     assigned_to_name,
