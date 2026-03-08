@@ -38,7 +38,10 @@ export function AppHeader() {
       .then((data) => {
         const perms = Array.isArray(data?.permissions) ? data.permissions : [];
         setCanViewProfile(perms.includes("profile.view"));
-        setCanShowNewNotifications(perms.includes("inbox.show_new_notifications"));
+        const hasRead = perms.includes("inbox.read");
+        const hideBell = perms.includes("inbox.hide_new_notifications");
+        const showBell = perms.includes("inbox.show_new_notifications");
+        setCanShowNewNotifications(hasRead && (showBell || !hideBell));
       })
       .catch(() => {
         setCanViewProfile(false);
@@ -88,12 +91,13 @@ export function AppHeader() {
         {canShowNewNotifications && (
           <Link
             href={`${base}/conversas`}
-            className="relative flex items-center justify-center rounded-lg p-2 text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B] transition-colors focus:outline-none focus:ring-2 focus:ring-clicvend-green/30"
-            aria-label={unassignedCount > 0 ? `${unassignedCount} novos chamados` : "Notificações"}
+            className="relative flex items-center justify-center rounded-lg p-2.5 text-[#64748B] hover:bg-amber-50 hover:text-amber-700 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-200"
+            aria-label={unassignedCount > 0 ? `${unassignedCount} novos chamados — clicar para abrir` : "Conversas — ver novos chamados"}
+            title={unassignedCount > 0 ? `${unassignedCount} novo(s) chamado(s) não atribuído(s)` : "Conversas"}
           >
-            <Bell className="h-5 w-5" />
+            <Bell className="h-5 w-5 shrink-0" />
             {unassignedCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white shadow-sm">
                 {unassignedCount > 99 ? "99+" : unassignedCount}
               </span>
             )}

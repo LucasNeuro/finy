@@ -16,6 +16,8 @@ export const PERMISSIONS = {
     export: "inbox.export",
     /** Ver contagem de "Novos" (não atribuídos) no sino do header; pode ser desativado por cargo */
     show_new_notifications: "inbox.show_new_notifications",
+    /** Ocultar sino de notificações de novos no header (quando marcado, o sino não aparece) */
+    hide_new_notifications: "inbox.hide_new_notifications",
     /** Ações no módulo Tickets: ver todos, reatribuir, mudar status (visão Kanban gerencial) */
     manage_tickets: "inbox.manage_tickets",
   },
@@ -62,6 +64,7 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.inbox.see_all,
   PERMISSIONS.inbox.export,
   PERMISSIONS.inbox.show_new_notifications,
+  PERMISSIONS.inbox.hide_new_notifications,
   PERMISSIONS.inbox.manage_tickets,
   PERMISSIONS.tickets.view,
   PERMISSIONS.channels.view,
@@ -100,6 +103,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       PERMISSIONS.inbox.see_all,
       PERMISSIONS.inbox.export,
       PERMISSIONS.inbox.show_new_notifications,
+      PERMISSIONS.inbox.hide_new_notifications,
     ],
   },
   {
@@ -151,6 +155,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.inbox.see_all]: "Ação: ver todas as conversas (todas as caixas)",
   [PERMISSIONS.inbox.export]: "Ação: exportar conversas",
   [PERMISSIONS.inbox.show_new_notifications]: "Ver notificações de novos (sino no header)",
+  [PERMISSIONS.inbox.hide_new_notifications]: "Ocultar notificações de novos (sino no header)",
   [PERMISSIONS.inbox.manage_tickets]: "Ações no Tickets: ver todos os tickets, reatribuir, mudar status (arrastar, modal)",
   [PERMISSIONS.tickets.view]: "Acesso: ver módulo Tickets (quadro Kanban por status)",
   [PERMISSIONS.channels.view]: "Acesso: ver Conexões",

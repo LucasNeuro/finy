@@ -114,8 +114,15 @@ const ConversationListItem = memo(function ConversationListItem({
   const isGroup = c.is_group === true;
   const showClaim = canClaim && (c.assigned_to == null || c.assigned_to === "");
   const [claiming, setClaiming] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const isNew = (c.assigned_to == null || c.assigned_to === "") && (c.status === "open" || c.status === "in_queue");
   const rowStyle = getQueueRowStyle(isNew, showQueueColors);
+  const avatarSrc =
+    c.avatar_url && !imgError
+      ? c.avatar_url.startsWith("http://") || c.avatar_url.startsWith("https://")
+        ? `/api/contacts/avatar?url=${encodeURIComponent(c.avatar_url)}`
+        : c.avatar_url
+      : null;
 
   const handleClaimClick = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -138,13 +145,19 @@ const ConversationListItem = memo(function ConversationListItem({
           href={href}
           className="flex min-w-0 flex-1 items-center gap-3.5 p-3.5 hover:bg-[#F8FAFC] rounded-lg transition-colors duration-150"
         >
-          <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
-            {c.avatar_url ? (
-              <img src={c.avatar_url} alt="" className="h-full w-full object-cover" />
+          <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-base font-semibold text-[#475569] shadow-sm ring-1 ring-white/50">
+            {avatarSrc ? (
+              <img
+                src={avatarSrc}
+                alt=""
+                className="h-full w-full object-cover"
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+              />
             ) : isGroup ? (
-              <Users className="h-5 w-5" />
+              <Users className="h-5 w-5 text-[#64748B]" />
             ) : (
-              initial
+              <span aria-hidden>{initial}</span>
             )}
           </span>
           <div className="min-w-0 flex-1">
