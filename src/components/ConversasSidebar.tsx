@@ -22,6 +22,8 @@ type Conversation = {
   is_group?: boolean;
   assigned_to?: string | null;
   assigned_to_name?: string | null;
+  queue_id?: string | null;
+  queue_name?: string | null;
 };
 
 function formatLastMessageTime(iso: string): string {
@@ -81,13 +83,34 @@ type SidebarGroup = {
   left_at: string | null;
 };
 
-/** Na aba Filas: amarelo = chamado novo (não atribuído); cinza = padrão para o resto. */
-const STYLE_NEW = "border-l-4 border-l-amber-400 bg-gradient-to-r from-amber-50/95 to-white shadow-sm";
-const STYLE_DEFAULT = "border-l-4 border-l-slate-200 bg-gradient-to-r from-slate-50/60 to-white";
+/** Cores por fila (card acompanha a fila). Hash estável de queue_id para índice. */
+const QUEUE_CARD_COLORS = [
+  { border: "border-l-sky-400", bg: "from-sky-50/95 to-white", dot: "bg-sky-500", dotRing: "ring-sky-100" },
+  { border: "border-l-violet-400", bg: "from-violet-50/95 to-white", dot: "bg-violet-500", dotRing: "ring-violet-100" },
+  { border: "border-l-amber-400", bg: "from-amber-50/95 to-white", dot: "bg-amber-500", dotRing: "ring-amber-100" },
+  { border: "border-l-emerald-400", bg: "from-emerald-50/95 to-white", dot: "bg-emerald-500", dotRing: "ring-emerald-100" },
+  { border: "border-l-indigo-400", bg: "from-indigo-50/95 to-white", dot: "bg-indigo-500", dotRing: "ring-indigo-100" },
+] as const;
+const STYLE_NEUTRAL = "border-l-4 border-l-slate-200 bg-gradient-to-r from-slate-50/60 to-white";
 
-function getQueueRowStyle(isNew: boolean, showQueueColors: boolean): string {
+function hashQueueIdToIndex(queueId: string | null | undefined): number {
+  if (!queueId || typeof queueId !== "string") return -1;
+  let h = 0;
+  for (let i = 0; i < queueId.length; i++) h = (h * 31 + queueId.charCodeAt(i)) >>> 0;
+  return h % QUEUE_CARD_COLORS.length;
+}
+
+/** Na aba Filas/Novos: cor do card conforme a fila (azul, roxo, etc.). Sem fila ou sem showQueueColors = neutro. */
+function getQueueRowStyle(
+  showQueueColors: boolean,
+  queueId: string | null | undefined,
+  isNew: boolean
+): string {
   if (!showQueueColors) return "";
-  return isNew ? STYLE_NEW : STYLE_DEFAULT;
+  const idx = hashQueueIdToIndex(queueId);
+  if (idx < 0) return STYLE_NEUTRAL;
+  const q = QUEUE_CARD_COLORS[idx];
+  return `border-l-4 ${q.border} bg-gradient-to-r ${q.bg} shadow-sm`;
 }
 
 const ConversationListItem = memo(function ConversationListItem({
@@ -116,7 +139,9 @@ const ConversationListItem = memo(function ConversationListItem({
   const [claiming, setClaiming] = useState(false);
   const [imgError, setImgError] = useState(false);
   const isNew = (c.assigned_to == null || c.assigned_to === "") && (c.status === "open" || c.status === "in_queue");
-  const rowStyle = getQueueRowStyle(isNew, showQueueColors);
+  const rowStyle = getQueueRowStyle(showQueueColors, c.queue_id, isNew);
+  const queueColorIdx = showQueueColors ? hashQueueIdToIndex(c.queue_id) : -1;
+  const queueDot = queueColorIdx >= 0 ? QUEUE_CARD_COLORS[queueColorIdx] : null;
   const avatarSrc =
     c.avatar_url && !imgError
       ? c.avatar_url.startsWith("http://") || c.avatar_url.startsWith("https://")
@@ -164,7 +189,11 @@ const ConversationListItem = memo(function ConversationListItem({
             <div className="flex items-center justify-between gap-2">
               <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-[#1E293B]">
                 {isNew && (
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500 shadow-sm ring-2 ring-amber-100" title="Nova conversa (não atribuída)" aria-hidden />
+                  <span
+                    className={`h-2.5 w-2.5 shrink-0 rounded-full shadow-sm ring-2 ${queueDot ? `${queueDot.dot} ${queueDot.dotRing}` : "bg-amber-500 ring-amber-100"}`}
+                    title="Nova conversa (não atribuída)"
+                    aria-hidden
+                  />
                 )}
                 <span className="truncate">{c.customer_name || formatPhoneBrazil(c.customer_phone)}</span>
               </p>
