@@ -270,7 +270,7 @@ export async function GET(request: Request) {
     );
   }
   let contactByKey: Record<string, { contact_name: string | null; first_name: string | null; avatar_url: string | null }> = {};
-  let groupByKey: Record<string, string | null> = {};
+  let groupByKey: Record<string, { name: string | null; avatar_url: string | null }> = {};
   if (channelIds.length > 0) {
     const [contactsRes, groupsRes] = await Promise.all([
       supabase
@@ -280,7 +280,7 @@ export async function GET(request: Request) {
         .eq("company_id", companyId),
       supabase
         .from("channel_groups")
-        .select("channel_id, jid, name")
+        .select("channel_id, jid, name, avatar_url")
         .in("channel_id", channelIds)
         .eq("company_id", companyId),
     ]);
@@ -289,9 +289,10 @@ export async function GET(request: Request) {
       const key = `${row.channel_id}|${row.jid}`;
       contactByKey[key] = { contact_name: row.contact_name, first_name: row.first_name, avatar_url: row.avatar_url ?? null };
     }
-    const groupList = (groupsRes.data ?? []) as { channel_id: string; jid: string; name: string | null }[];
+    const groupList = (groupsRes.data ?? []) as { channel_id: string; jid: string; name: string | null; avatar_url: string | null }[];
     for (const g of groupList) {
-      groupByKey[`${g.channel_id}|${g.jid}`] = g.name?.trim() || null;
+      const key = `${g.channel_id}|${g.jid}`;
+      groupByKey[key] = { name: g.name?.trim() || null, avatar_url: g.avatar_url?.trim() || null };
     }
   }
   const normalizeJid = (v: string) => (v && !v.includes("@") ? `${v.replace(/\D/g, "")}@s.whatsapp.net` : v);
@@ -301,11 +302,12 @@ export async function GET(request: Request) {
     const key1 = `${c.channel_id}|${jid}`;
     const key2 = jid !== jidNorm ? `${c.channel_id}|${jidNorm}` : "";
     const isGroup = c.is_group === true;
-    const groupName = isGroup ? (groupByKey[key1] ?? groupByKey[key2] ?? null) : null;
+    const groupInfo = isGroup ? (groupByKey[key1] ?? groupByKey[key2] ?? { name: null, avatar_url: null }) : null;
+    const groupName = groupInfo?.name ?? null;
     const cc = contactByKey[key1] || (key2 ? contactByKey[key2] : null);
     const fromDb = cc?.contact_name?.trim() || cc?.first_name?.trim() || null;
     const customer_name = isGroup ? (groupName ?? c.customer_name ?? formatGroupJidForDisplay(jid)) : (fromDb ?? c.customer_name);
-    const avatar_url = isGroup ? null : (cc?.avatar_url?.trim() || null);
+    const avatar_url = isGroup ? (groupInfo?.avatar_url ?? null) : (cc?.avatar_url?.trim() || null);
     return { ...c, customer_name, avatar_url };
   });
 

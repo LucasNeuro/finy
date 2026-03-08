@@ -525,6 +525,19 @@ async function processOneMessage(
         return true;
       }
 
+      if (existing && messageExternalId) {
+        const { data: existingMsg } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", existing.id)
+          .eq("external_id", messageExternalId)
+          .limit(1)
+          .maybeSingle();
+        if (existingMsg) {
+          return true;
+        }
+      }
+
       await supabase.from("channel_groups").upsert(
         {
           channel_id: channelId,
@@ -658,6 +671,18 @@ async function processOneMessage(
     let conversationId: string;
     if (existingTicket) {
       conversationId = existingTicket.id;
+      if (messageExternalId) {
+        const { data: existingMsg } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", conversationId)
+          .eq("external_id", messageExternalId)
+          .limit(1)
+          .maybeSingle();
+        if (existingMsg) {
+          return true;
+        }
+      }
       await supabase
         .from("conversations")
         .update({

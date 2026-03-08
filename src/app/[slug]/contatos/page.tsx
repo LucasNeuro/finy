@@ -1468,7 +1468,7 @@ export default function ContatosPage() {
                 onClick={() => handleSync(ch.id)}
                 disabled={syncing !== null}
                 className="relative shrink-0 max-w-[120px] overflow-hidden rounded-md bg-clicvend-orange px-2 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
-                title={syncing === ch.id ? "Sincronizando contatos e grupos…" : `Sincronizar: ${ch.name}`}
+                title={syncing === ch.id ? "Sincronizando contatos, grupos e comunidades…" : `Sincronizar contatos, grupos e comunidades: ${ch.name}`}
               >
                 <span className="relative z-10 flex items-center justify-center gap-1 truncate">
                   {syncing === ch.id ? (
@@ -1492,7 +1492,7 @@ export default function ContatosPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (!window.confirm("Limpar contatos e grupos desta conexão e sincronizar de novo com o WhatsApp? Isso remove duplicatas e atualiza a lista.")) return;
+                  if (!window.confirm("Limpar contatos, grupos e comunidades desta conexão e sincronizar de novo com o WhatsApp? Isso remove duplicatas e atualiza a lista.")) return;
                   handleSync(filterChannelId, true);
                 }}
                 disabled={syncing !== null}
@@ -1508,7 +1508,7 @@ export default function ContatosPage() {
               href={slug ? `/${slug}/conexoes` : "/conexoes"}
               className="text-sm font-medium text-clicvend-orange hover:underline"
             >
-              Conectar um número em Conexões para sincronizar contatos e grupos
+              Conectar um número em Conexões para sincronizar contatos, grupos e comunidades
             </Link>
           )}
         </div>
