@@ -456,7 +456,7 @@ function MessageBubble({
           {caption && caption !== "[image]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {displayType === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
+      {displayType === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia || canFetchDownload) && (
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
@@ -501,7 +501,7 @@ function MessageBubble({
           {caption && caption !== "[video]" && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || (canFetchDownload && (needsDownloadForPlay || needsDownloadForMedia))) && (
+      {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
         <div className="space-y-1">
           <ChatAudioPlayer
             src={audioSrc}
@@ -755,6 +755,7 @@ export default function ConversaThreadPage({
     fileName?: string | null;
     initialFileUrl?: string | null;
   } | null>(null);
+  const [pendingOutgoingMessage, setPendingOutgoingMessage] = useState<{ content: string; message_type: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -762,6 +763,7 @@ export default function ConversaThreadPage({
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunksRef = useRef<Blob[]>([]);
+  const discardVideoOnStopRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -1079,6 +1081,8 @@ export default function ConversaThreadPage({
     if (!isMedia && !text) return;
     setSending(true);
     setError(null);
+    const contentToShow = isMedia ? (payload!.caption || `[${payload!.type}]`) : text;
+    setPendingOutgoingMessage({ content: contentToShow, message_type: payload?.type || "text" });
     try {
       const body = isMedia
         ? { type: payload!.type, file: payload!.file, caption: payload!.caption || "", docName: payload!.docName || "" }
@@ -1092,45 +1096,24 @@ export default function ConversaThreadPage({
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError(err?.error ?? "Falha ao enviar");
+        setPendingOutgoingMessage(null);
         return;
       }
       if (!isMedia) setSendValue("");
-      
-      // Otimização: atualizar cache imediatamente com mensagem otimista
-      const sentMessage: Message = {
-        id: `temp-${Date.now()}`,
-        direction: "out",
-        content: isMedia ? (payload!.caption || "") : text,
-        sent_at: new Date().toISOString(),
-        message_type: payload?.type || "text",
-        media_url: payload?.file || null,
-        caption: payload?.caption || null,
-        file_name: payload?.docName || null,
-      };
-      
-      queryClient.setQueryData<ConversationDetail>(
-        queryKeys.conversation(resolved.id),
-        (oldData) => {
-          if (!oldData) return oldData;
-          return {
-            ...oldData,
-            messages: [...(oldData.messages || []), sentMessage],
-          };
-        }
-      );
-      
-      // Scroll imediato para a nova mensagem
+
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
         });
       });
-      
-      // Refetch para obter mensagem real do servidor (substitui a otimista)
-      await refetchConversation();
+
+      refetchConversation().then(() => {
+        setPendingOutgoingMessage(null);
+      });
       queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
     } catch {
       setError("Falha ao enviar");
+      setPendingOutgoingMessage(null);
     } finally {
       setSending(false);
     }
@@ -1247,11 +1230,13 @@ export default function ConversaThreadPage({
       if (videoEl) {
         videoEl.srcObject = stream;
       }
-      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-        ? "video/webm;codecs=vp9"
-        : MediaRecorder.isTypeSupported("video/webm")
-          ? "video/webm"
-          : "video/mp4";
+      const mimeType = MediaRecorder.isTypeSupported("video/mp4")
+        ? "video/mp4"
+        : MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+          ? "video/webm;codecs=vp9"
+          : MediaRecorder.isTypeSupported("video/webm")
+            ? "video/webm"
+            : "video/mp4";
       const recorder = new MediaRecorder(stream, { mimeType });
       videoChunksRef.current = [];
       recorder.ondataavailable = (ev) => ev.data.size && videoChunksRef.current.push(ev.data);
@@ -1259,6 +1244,11 @@ export default function ConversaThreadPage({
         stream.getTracks().forEach((t) => t.stop());
         videoStreamRef.current = null;
         if (videoEl) videoEl.srcObject = null;
+        if (discardVideoOnStopRef.current) {
+          discardVideoOnStopRef.current = false;
+          setRecordingVideo(false);
+          return;
+        }
         const blob = new Blob(videoChunksRef.current, { type: mimeType });
         setRecordedVideoBlob({ blob, mimeType });
         setRecordingVideo(false);
@@ -1305,7 +1295,10 @@ export default function ConversaThreadPage({
           });
         });
         await refetchConversation();
-      } else setError("Falha ao enviar vídeo");
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(typeof data?.error === "string" ? data.error : "Falha ao enviar vídeo");
+      }
     } catch {
       setError("Falha ao enviar vídeo");
     } finally {
@@ -1634,6 +1627,17 @@ export default function ConversaThreadPage({
                     />
                   </div>
                 ))}
+                {pendingOutgoingMessage && (
+                  <div className="flex justify-end">
+                    <div className="max-w-[90%] rounded-lg px-3 py-2 bg-[#F1F5F9] border border-[#E2E8F0] text-[#1E293B]">
+                      <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-clicvend-orange" aria-hidden />
+                        Você
+                      </p>
+                      <p className="whitespace-pre-wrap text-sm">{pendingOutgoingMessage.content || "…"}</p>
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} data-messages-end />
               </>
             )}
@@ -1772,16 +1776,27 @@ export default function ConversaThreadPage({
         </div>
       </div>
 
-      {/* Modal gravação de vídeo pela câmera: Parar → depois Enviar ou Descartar */}
-      {(recordingVideo || recordedVideoBlob) && (
-        <div className="fixed inset-0 z-[110] flex flex-col items-center justify-center bg-black/70 p-4">
-          <div className="relative rounded-xl overflow-hidden bg-[#0F172A] max-w-lg w-full aspect-video shadow-xl">
+      {/* Gravação de vídeo pela câmera: SideOver largo — Parar → depois Enviar ou Descartar */}
+      <SideOver
+        open={!!(recordingVideo || recordedVideoBlob)}
+        onClose={() => {
+          if (recordedVideoBlob) discardRecordedVideo();
+          else if (recordingVideo) {
+            discardVideoOnStopRef.current = true;
+            stopRecordingVideo();
+          }
+        }}
+        title={recordedVideoBlob ? "Revisar vídeo" : "Gravar vídeo"}
+        width={640}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="rounded-xl overflow-hidden bg-[#0F172A] w-full aspect-video min-h-[280px] shadow-inner">
             {recordedVideoBlob ? (
               <video
                 src={recordedVideoPreviewUrl ?? ""}
                 controls
                 playsInline
-                className="w-full h-full object-contain"
+                className="w-full h-full min-h-[280px] object-contain"
               />
             ) : (
               <video
@@ -1789,45 +1804,57 @@ export default function ConversaThreadPage({
                 autoPlay
                 muted
                 playsInline
-                className="w-full h-full object-cover"
+                className="w-full h-full min-h-[280px] object-cover"
               />
             )}
-            <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent flex items-center justify-center gap-2 flex-wrap">
-              {recordedVideoBlob ? (
-                <>
+          </div>
+          <div className="flex flex-col gap-2">
+            {recordedVideoBlob ? (
+              <>
+                {error && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                    {error}
+                  </div>
+                )}
+                <p className="text-sm text-gray-600">
+                  Revise o vídeo e clique em Enviar ou Descartar.
+                </p>
+                <div className="flex items-center gap-3 flex-wrap">
                   <button
                     type="button"
                     onClick={sendRecordedVideo}
                     disabled={sending}
-                    className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-xl bg-clicvend-orange px-5 py-3 text-base font-semibold text-white hover:bg-clicvend-orange-dark disabled:opacity-50 shadow-md hover:shadow-lg transition-all"
                   >
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    Enviar
+                    {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+                    Enviar vídeo
                   </button>
                   <button
                     type="button"
                     onClick={discardRecordedVideo}
-                    className="inline-flex items-center gap-2 rounded-lg border border-white/60 px-4 py-2 text-sm font-medium text-white hover:bg-white/10"
+                    className="inline-flex items-center gap-2 rounded-xl border-2 border-gray-300 px-5 py-3 text-base font-medium text-gray-700 hover:bg-gray-100"
                   >
                     Descartar
                   </button>
-                </>
-              ) : (
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-600">
+                  Grave seu vídeo e clique em Parar para revisar.
+                </p>
                 <button
                   type="button"
                   onClick={stopRecordingVideo}
-                  className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-3 text-base font-semibold text-white hover:bg-red-600 shadow-md"
                 >
-                  <Square className="h-4 w-4" /> Parar
+                  <Square className="h-5 w-5" /> Parar gravação
                 </button>
-              )}
-            </div>
+              </>
+            )}
           </div>
-          <p className="mt-2 text-sm text-white/90">
-            {recordedVideoBlob ? "Revise o vídeo e clique em Enviar ou Descartar." : "Grave seu vídeo e clique em Parar para revisar."}
-          </p>
         </div>
-      )}
+      </SideOver>
 
       {/* Modal de visualização de documento (PDF, etc.) — zoom, baixar, nova aba, sem IA */}
       <DocumentViewerModal

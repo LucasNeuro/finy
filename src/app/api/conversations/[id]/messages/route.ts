@@ -193,8 +193,12 @@ export async function POST(
       number: number.slice(0, 20) + (number.length > 20 ? "…" : ""),
       error: result.error,
     });
+    const isVideoFormatError = type === "video" && typeof result.error === "string" && /mp4|video format|invalid.*format/i.test(result.error);
+    const message = isVideoFormatError
+      ? "O WhatsApp aceita apenas vídeos em MP4. Use a opção Vídeo no anexo para enviar um arquivo MP4."
+      : "Falha ao enviar. Tente novamente.";
     return NextResponse.json(
-      { error: "Falha ao enviar. Tente novamente." },
+      { error: message },
       { status: 502 }
     );
   }
