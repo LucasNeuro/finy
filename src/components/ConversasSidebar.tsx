@@ -719,7 +719,7 @@ export function ConversasSidebar() {
             onClick={() => handleTabChange("mine_closed")}
             className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "mine_closed"
-                ? "bg-slate-100 text-slate-800 shadow-md shadow-slate-200/50 border border-slate-200/70"
+                ? "bg-red-50 text-red-800 shadow-md shadow-red-200/50 border border-red-200/70"
                 : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
             title="Meus encerrados"
@@ -728,7 +728,7 @@ export function ConversasSidebar() {
             <Archive className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Encerrados</span>
             {counts.mine_closed > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-slate-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
                 {counts.mine_closed > 99 ? "99+" : counts.mine_closed}
               </span>
             )}

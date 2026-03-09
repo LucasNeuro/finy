@@ -156,8 +156,22 @@ async function runSync(
           company_id: companyId,
           jid,
           phone: phone || null,
-          contact_name: (c.contactName ?? (c as { contact_name?: string }).contact_name ?? "").trim() || null,
-          first_name: ((c as { contact_FirstName?: string }).contact_FirstName ?? "").trim() || null,
+          contact_name: (
+            (c as { contactName?: string }).contactName
+            ?? (c as { contact_name?: string }).contact_name
+            ?? (c as { name?: string }).name
+            ?? (c as { pushName?: string }).pushName
+            ?? (c as { shortName?: string }).shortName
+            ?? (c as { wa_contactName?: string }).wa_contactName
+            ?? ""
+          ).trim() || null,
+          first_name: (
+            (c as { contact_FirstName?: string }).contact_FirstName
+            ?? (c as { contactName?: string }).contactName
+            ?? (c as { name?: string }).name
+            ?? (c as { pushName?: string }).pushName
+            ?? ""
+          ).trim() || null,
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
@@ -184,14 +198,26 @@ async function runSync(
       try {
         const detail = await getChatDetails(token, jid, { preview: true });
         const imageUrl = detail.data?.imagePreview ?? detail.data?.image;
+        const nameFromDetail =
+          (detail.data?.wa_contactName ?? detail.data?.wa_name ?? detail.data?.name)?.trim() || null;
+        const updates: Record<string, unknown> = {
+          synced_at: new Date().toISOString(),
+        };
         if (imageUrl && typeof imageUrl === "string" && imageUrl.trim()) {
+          updates.avatar_url = imageUrl.trim();
+        }
+        if (nameFromDetail) {
+          updates.contact_name = nameFromDetail;
+          updates.first_name = nameFromDetail;
+        }
+        if (Object.keys(updates).length > 1) {
           await supabase
             .from("channel_contacts")
-            .update({ avatar_url: imageUrl.trim(), synced_at: new Date().toISOString() })
+            .update(updates)
             .eq("channel_id", channelId)
             .eq("company_id", companyId)
             .eq("jid", jid);
-          avatars_synced += 1;
+          if (updates.avatar_url) avatars_synced += 1;
         }
       } catch {
         // ignore
