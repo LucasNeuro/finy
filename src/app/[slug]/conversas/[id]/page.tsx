@@ -9,6 +9,7 @@ import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
 import { RealtimeMessages } from "@/components/RealtimeMessages";
+import { EmojiReactionPicker } from "@/components/EmojiReactionPicker";
 
 type Message = {
   id: string;
@@ -238,6 +239,64 @@ function ChatAudioPlayer({
   );
 }
 
+/** Player de vídeo com fallback em caso de erro de carregamento (ex.: CORS, URL inválida). */
+function VideoPlayerWithFallback({
+  src,
+  canFetchDownload,
+  downloadLoading,
+  onDownloadClick,
+}: {
+  src: string;
+  canFetchDownload?: boolean;
+  downloadLoading?: boolean;
+  onDownloadClick?: () => void;
+}) {
+  const [error, setError] = useState(false);
+  const url = src || "";
+
+  useEffect(() => {
+    setError(false);
+  }, [url]);
+
+  return (
+    <>
+      {!error ? (
+        <video
+          src={url}
+          controls
+          preload="auto"
+          className="w-full max-h-[360px] min-h-[200px] object-contain rounded-xl"
+          playsInline
+          onError={() => setError(true)}
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center gap-2 py-8 px-4 rounded-xl bg-[#0F172A]/80 text-white/90 text-center">
+          <p className="text-sm font-medium">Não foi possível carregar o vídeo</p>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-clicvend-orange hover:underline"
+          >
+            Abrir em nova aba
+          </a>
+        </div>
+      )}
+      {canFetchDownload && !error && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-clicvend-orange transition-colors"
+          title="Baixar vídeo"
+        >
+          <Download className="h-4 w-4" />
+        </a>
+      )}
+    </>
+  );
+}
+
 /** Retorna se a URL é utilizável diretamente no front (reproduzir/abrir). */
 function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
   if (!url?.trim()) return false;
@@ -309,9 +368,6 @@ function mediaTypeLabel(type: string): string {
   }
 }
 
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
-const MORE_REACTIONS = ["🔥", "👏", "😊", "🥺", "🙌", "😎", "🤔", "👀"] as const;
-
 function MessageBubble({
   m,
   name,
@@ -351,7 +407,6 @@ function MessageBubble({
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
-  const [moreEmojisOpen, setMoreEmojisOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const deleteMenuRef = useRef<HTMLDivElement>(null);
@@ -379,14 +434,13 @@ function MessageBubble({
   }, [needsDownloadForPlay, needsDownloadForMedia, needsDownloadForDocument, conversationId, apiHeaders, m.id]);
 
   const resolvedDisplayType = (() => {
-    let base = displayType;
+    const base = displayType;
     const url = (downloadUrl || mediaUrl || "").toString().toLowerCase();
-    if (base === "document" && url) {
-      const videoExt2 = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
-      const audioExt2 = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
-      if (audioExt2.test(url) || url.startsWith("data:audio/")) return "audio";
-      if (videoExt2.test(url) || url.startsWith("data:video/")) return "video";
-    }
+    if (!url) return base;
+    const videoExt2 = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
+    const audioExt2 = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+    if (audioExt2.test(url) || url.startsWith("data:audio/")) return "audio";
+    if (videoExt2.test(url) || url.startsWith("data:video/")) return "video";
     return base;
   })();
 
@@ -397,7 +451,6 @@ function MessageBubble({
     const close = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
         setReactionPickerOpen(false);
-        setMoreEmojisOpen(false);
       }
     };
     document.addEventListener("click", close, true);
@@ -450,7 +503,7 @@ function MessageBubble({
           <span className="text-[#64748B] font-normal animate-pulse">Enviando…</span>
         )}
       </p>
-      {displayType === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
+      {resolvedDisplayType === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
         <div className="w-full space-y-0.5">
           {(mediaUrl || downloadUrl) ? (
             <>
@@ -481,7 +534,7 @@ function MessageBubble({
           {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {displayType === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia || canFetchDownload) && (
+      {resolvedDisplayType === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia || canFetchDownload) && (
         <div className="w-full space-y-0.5">
           {(mediaUrl || downloadUrl) ? (
             <>
@@ -489,25 +542,12 @@ function MessageBubble({
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
-                <video
+                <VideoPlayerWithFallback
                   src={downloadUrl || mediaUrl || ""}
-                  controls
-                  preload="auto"
-                  crossOrigin={(downloadUrl || mediaUrl || "").toString().startsWith("http") ? "anonymous" : undefined}
-                  className="w-full max-h-[360px] min-h-[200px] object-contain rounded-xl"
-                  playsInline
+                  canFetchDownload={canFetchDownload}
+                  downloadLoading={!downloadUrl && downloadLoading}
+                  onDownloadClick={handleDownloadClick}
                 />
-                {canFetchDownload && (
-                  <a
-                    href={downloadUrl || mediaUrl || "#"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white hover:bg-clicvend-orange transition-colors"
-                    title="Baixar vídeo"
-                  >
-                    <Download className="h-4 w-4" />
-                  </a>
-                )}
               </div>
               {canFetchDownload && !downloadUrl && downloadLoading && (
                 <button type="button" disabled className="inline-flex items-center gap-1.5 text-xs text-[#64748B]">
@@ -687,54 +727,19 @@ function MessageBubble({
               </button>
               {reactionPickerOpen && (
                 <div
-                  className="absolute bottom-full right-0 mb-1 rounded-xl bg-white border border-[#E2E8F0] shadow-lg px-2 py-1.5 z-50"
+                  className="absolute top-full right-0 mt-1 rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden z-50"
                   role="dialog"
                   aria-label="Escolher reação"
                 >
-                  <div className="flex items-center gap-0.5">
-                    {QUICK_REACTIONS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        className="p-1.5 rounded-lg hover:bg-black/10 text-lg leading-none transition-colors"
-                        onClick={() => {
-                          onReaction(m.id, m.reaction === emoji ? "" : emoji);
-                          setReactionPickerOpen(false);
-                        }}
-                        title={m.reaction === emoji ? "Remover reação" : `Reagir ${emoji}`}
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="p-1.5 rounded-lg hover:bg-black/10 text-[#64748B] font-bold text-sm leading-none transition-colors"
-                      title="Mais emojis"
-                      aria-label="Mais emojis"
-                      onClick={(e) => { e.stopPropagation(); setMoreEmojisOpen((v) => !v); }}
-                    >
-                      +
-                    </button>
+                  <div className="max-h-[320px] overflow-auto">
+                    <EmojiReactionPicker
+                      onSelect={(emoji) => {
+                        onReaction(m.id, m.reaction === emoji ? "" : emoji);
+                        setReactionPickerOpen(false);
+                      }}
+                      onClose={() => setReactionPickerOpen(false)}
+                    />
                   </div>
-                  {moreEmojisOpen && (
-                    <div className="flex items-center gap-0.5 flex-wrap mt-1 pt-1 border-t border-[#E2E8F0]">
-                      {MORE_REACTIONS.map((emoji) => (
-                        <button
-                          key={emoji}
-                          type="button"
-                          className="p-1.5 rounded-lg hover:bg-black/10 text-lg leading-none transition-colors"
-                          onClick={() => {
-                            onReaction(m.id, m.reaction === emoji ? "" : emoji);
-                            setReactionPickerOpen(false);
-                            setMoreEmojisOpen(false);
-                          }}
-                          title={m.reaction === emoji ? "Remover reação" : `Reagir ${emoji}`}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -774,6 +779,7 @@ export default function ConversaThreadPage({
   const [canTransfer, setCanTransfer] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [hasMoreOlderMessages, setHasMoreOlderMessages] = useState(true);
+  const [inputEmojiPickerOpen, setInputEmojiPickerOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -787,6 +793,7 @@ export default function ConversaThreadPage({
   const audioInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const inputEmojiPickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const p = Promise.resolve(params);
@@ -1424,6 +1431,17 @@ export default function ConversaThreadPage({
   }, [recording]);
 
   useEffect(() => {
+    if (!inputEmojiPickerOpen) return;
+    const close = (e: MouseEvent) => {
+      if (inputEmojiPickerRef.current && !inputEmojiPickerRef.current.contains(e.target as Node)) {
+        setInputEmojiPickerOpen(false);
+      }
+    };
+    document.addEventListener("click", close, true);
+    return () => document.removeEventListener("click", close, true);
+  }, [inputEmojiPickerOpen]);
+
+  useEffect(() => {
     if (!recordedVideoBlob) {
       setRecordedVideoPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -1709,7 +1727,7 @@ export default function ConversaThreadPage({
         <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-2">
 
           {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
-          <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
+          <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 items-center ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
             <input
               type="file"
               ref={fileInputRef}
@@ -1756,6 +1774,29 @@ export default function ConversaThreadPage({
                   </button>
                   <button type="button" onClick={() => { audioInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Áudio</button>
                   <button type="button" onClick={() => { docInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Documento</button>
+                </div>
+              )}
+            </div>
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setInputEmojiPickerOpen((v) => !v)}
+                className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#E2E8F0] bg-white text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B]"
+                aria-label="Inserir emoji"
+              >
+                <Smile className="h-5 w-5" />
+              </button>
+              {inputEmojiPickerOpen && (
+                <div
+                  ref={inputEmojiPickerRef}
+                  className="absolute bottom-full left-0 mb-2 rounded-xl bg-white border border-[#E2E8F0] shadow-lg z-50"
+                >
+                  <EmojiReactionPicker
+                    onSelect={(emoji) => {
+                      setSendValue((prev) => prev + emoji);
+                    }}
+                    onClose={() => setInputEmojiPickerOpen(false)}
+                  />
                 </div>
               )}
             </div>
