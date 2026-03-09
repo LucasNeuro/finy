@@ -276,12 +276,16 @@ function inferDisplayType(messageType: string | undefined, content: string, m?: 
   const t = (messageType ?? "").trim().toLowerCase();
   if (t && t !== "text") return t;
   const c = (content ?? "").trim();
-  const match = c.match(/^\[(image|video|audio|document|ptt|media|sticker)\]$/i);
+  const match = c.match(/^\[(image|video|audio|document|ptt|media|sticker|vídeo|áudio|imagem)\]$/i);
   if (match) {
     const k = match[1].toLowerCase();
-    return k === "media" ? "document" : k;
+    if (k === "media") return "document";
+    if (k === "vídeo") return "video";
+    if (k === "áudio") return "audio";
+    if (k === "imagem") return "image";
+    return k;
   }
-  // Mensagens antigas: conteúdo "Documento" sem colchetes ou só file_name
+  // Mensagens antigas recebidas: conteúdo sem colchetes ou só file_name
   if (m?.file_name || /^documento$/i.test(c) || c === "[Documento]") return "document";
   if (/^áudio$|^audio$/i.test(c) || c === "[Áudio]") return "audio";
   if (/^vídeo$|^video$/i.test(c) || c === "[Vídeo]") return "video";
@@ -354,8 +358,9 @@ function MessageBubble({
   const pickerRef = useRef<HTMLDivElement>(null);
   const deleteMenuRef = useRef<HTMLDivElement>(null);
 
+  // Permite buscar mídia por message id mesmo sem external_id no snapshot (mensagens recebidas antigas)
   const canFetchDownload = Boolean(
-    conversationId && apiHeaders && m.external_id &&
+    conversationId && apiHeaders && m.id && !String(m.id).startsWith("temp-") &&
     ["audio", "ptt", "document", "image", "video"].includes(displayType)
   );
   const needsDownloadForPlay = (displayType === "audio" || displayType === "ptt") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
