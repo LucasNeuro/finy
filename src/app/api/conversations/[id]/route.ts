@@ -133,9 +133,10 @@ export async function GET(
     }
   }
 
-  // Remover duplicatas por id e por external_id para evitar balões repetidos
+  // Remover duplicatas por id, por external_id e por (direction + conteúdo + mesmo segundo)
   const seenIds = new Set<string>();
   const seenExternal = new Set<string>();
+  const seenContentKey = new Set<string>();
   messages = (messages as Record<string, unknown>[]).filter((m) => {
     const id = m?.id as string | undefined;
     const ext = m?.external_id as string | undefined;
@@ -146,6 +147,10 @@ export async function GET(
       if (seenExternal.has(key)) return false;
       seenExternal.add(key);
     }
+    const sentAt = String(m?.sent_at ?? "");
+    const contentKey = `${m?.direction}|${String(m?.content ?? m?.caption ?? "").trim().slice(0, 100)}|${sentAt.slice(0, 19)}`;
+    if (seenContentKey.has(contentKey)) return false;
+    seenContentKey.add(contentKey);
     return true;
   });
 

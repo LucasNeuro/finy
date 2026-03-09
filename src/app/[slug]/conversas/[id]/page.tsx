@@ -289,11 +289,24 @@ function inferDisplayType(messageType: string | undefined, content: string, m?: 
     if (k === "imagem") return "image";
     return k;
   }
-  // Mensagens antigas recebidas: conteúdo sem colchetes ou só file_name
-  if (m?.file_name || /^documento$/i.test(c) || c === "[Documento]") return "document";
+  // Inferir por extensão do arquivo (mensagens recebidas que vêm como "Documento" mas são vídeo/áudio)
+  const fileName = (m?.file_name ?? "").toLowerCase();
+  const mediaUrlRaw = (m?.media_url ?? "").toString();
+  const videoExt = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
+  const audioExt = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+  if (fileName && videoExt.test(fileName)) return "video";
+  if (fileName && audioExt.test(fileName)) return "audio";
+  // Se não tem file_name, tentar pela URL ou data URL (ex.: data:video/mp4;base64,...)
+  if (mediaUrlRaw) {
+    if (mediaUrlRaw.length < 2000 && (videoExt.test(mediaUrlRaw) || /data:video\//i.test(mediaUrlRaw))) return "video";
+    if (mediaUrlRaw.length < 2000 && (audioExt.test(mediaUrlRaw) || /data:audio\//i.test(mediaUrlRaw))) return "audio";
+  }
+  // Conteúdo explícito sem colchetes
   if (/^áudio$|^audio$/i.test(c) || c === "[Áudio]") return "audio";
   if (/^vídeo$|^video$/i.test(c) || c === "[Vídeo]") return "video";
   if (/^imagem$|^image$/i.test(c) || c === "[Imagem]") return "image";
+  if (m?.file_name || /^documento$/i.test(c) || c === "[Documento]") return "document";
+  if (/^document$/i.test(c)) return "document";
   if (m?.media_url && !c && !t) return "document"; // mídia sem tipo nem conteúdo → documento genérico
   return "text";
 }
@@ -1116,28 +1129,20 @@ export default function ConversaThreadPage({
       }
       if (!isMedia) setSendValue("");
 
-      // Uma única bolha: coloca a mensagem no cache na hora e remove o "Enviando…" para não duplicar
-      const optimisticMsg: Message = {
-        id: `temp-send-${Date.now()}`,
-        direction: "out",
-        content: contentToShow,
-        sent_at: new Date().toISOString(),
-        message_type: payload?.type || "text",
-      };
-      queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (prev) => {
-        if (!prev?.messages) return prev;
-        return { ...prev, messages: [...prev.messages, optimisticMsg] };
-      });
-      setPendingOutgoingMessage(null);
+      queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
 
+      // Rolar para o fim já (onde está "Enviando…")
       requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      });
+
+      // Não duplicar: esperar o refetch terminar e só então tirar "Enviando…" — uma única bolha
+      refetchConversation().then(() => {
+        setPendingOutgoingMessage(null);
         requestAnimationFrame(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
         });
       });
-
-      refetchConversation();
-      queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
     } catch {
       setError("Falha ao enviar");
       setPendingOutgoingMessage(null);
@@ -1632,20 +1637,9 @@ export default function ConversaThreadPage({
                 )}
                 {(Array.isArray(conv?.messages) ? conv.messages : [])
                   .filter((m, i, arr) => {
-                    const msg = m as Message;
-                    const id = msg.id;
-                    const firstById = arr.findIndex((x) => (x as Message).id === id);
-                    if (firstById !== i) return false;
-                    // Se for mensagem otimista (temp-) e existir outra "out" com mesmo conteúdo (id real), ocultar a temp para não duplicar
-                    if (id?.toString().startsWith("temp-") && msg.direction === "out") {
-                      const sameContent = (x: Message) => (x.content ?? "").trim() === (msg.content ?? "").trim() && x.direction === "out";
-                      const hasRealDuplicate = arr.some((x) => {
-                        const other = x as Message;
-                        return other.id !== id && !other.id?.toString().startsWith("temp-") && sameContent(other);
-                      });
-                      if (hasRealDuplicate) return false;
-                    }
-                    return true;
+                    const id = (m as Message).id;
+                    const first = arr.findIndex((x) => (x as Message).id === id);
+                    return first === i;
                   })
                   .map((m) => (
                   <div
@@ -1665,13 +1659,7 @@ export default function ConversaThreadPage({
                     />
                   </div>
                 ))}
-                {pendingOutgoingMessage && (() => {
-                  // Não mostrar "Enviando…" se já existe no fim da lista a mensagem otimista (evita dois balões)
-                  const list = Array.isArray(conv?.messages) ? conv.messages : [];
-                  const last = list[list.length - 1] as Message | undefined;
-                  const hasMatchingOptimistic = last?.id?.toString().startsWith("temp-") && last.direction === "out" && (last.content ?? "").trim() === (pendingOutgoingMessage.content ?? "").trim();
-                  return !hasMatchingOptimistic;
-                })() && (
+                {pendingOutgoingMessage && (
                   <div className="flex justify-end">
                     <div className="max-w-[90%] rounded-lg px-3 py-2 bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]">
                       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
@@ -1978,7 +1966,7 @@ export default function ConversaThreadPage({
                         <p className="text-sm text-[#64748B]">{mediaList.length} {mediaList.length === 1 ? "arquivo" : "arquivos"}</p>
                         <ul className="space-y-1.5 max-h-48 overflow-y-auto">
                           {mediaList.map((msg) => {
-                            const type = inferDisplayType(msg.message_type, msg.content ?? "");
+                            const type = inferDisplayType(msg.message_type, msg.content ?? "", msg);
                             const label = type === "document" ? (msg.file_name || "Documento") : mediaTypeLabel(type);
                             const Icon = type === "image" ? Image : type === "video" ? Video : type === "document" ? FileText : Music;
                             return (
