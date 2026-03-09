@@ -173,35 +173,35 @@ function ChatAudioPlayer({
 
   if (isLoading || !src) {
     return (
-      <div className="flex items-center gap-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 w-full min-w-[280px] shadow-sm">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
-          <Loader2 className="h-5 w-5 animate-spin text-clicvend-orange" />
+      <div className="flex items-center gap-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-2 w-full min-w-0 shadow-sm">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
+          <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="h-2.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
-          <p className="mt-1.5 text-xs text-[#64748B]">Carregando áudio…</p>
+          <div className="h-2 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
+          <p className="mt-1 text-xs text-[#64748B]">Carregando áudio…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 w-full min-w-[280px] shadow-sm hover:border-[#CBD5E1] transition-colors">
+    <div className="flex items-center gap-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-2 w-full min-w-0 shadow-sm hover:border-[#CBD5E1] transition-colors">
       {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
       <button
         type="button"
         onClick={togglePlay}
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-2"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-2"
         aria-label={playing ? "Pausar" : "Reproduzir"}
       >
-        {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
+        {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
       </button>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[#475569] tabular-nums">
+        <p className="text-xs font-medium text-[#475569] tabular-nums">
           {formatDuration(currentTime)} / {loaded ? formatDuration(duration) : "–:––"}
         </p>
         <div
-          className="h-2.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-1.5"
+          className="h-2 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-1"
           onClick={(e) => {
             const el = audioRef.current;
             if (!el) return;
@@ -227,38 +227,12 @@ function ChatAudioPlayer({
             step={0.05}
             value={volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="w-14 h-2 accent-clicvend-orange cursor-pointer"
+            className="w-12 h-1.5 accent-clicvend-orange cursor-pointer"
             aria-label="Volume"
           />
           <span className="text-[#64748B]" aria-hidden>
             <Volume2 className="h-4 w-4" />
           </span>
-        </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            className="p-1.5 rounded-full text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#1E293B] transition-colors"
-            aria-label="Opções"
-          >
-            <MoreVerticalIcon className="h-4 w-4" />
-          </button>
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
-              <div className="absolute right-0 top-full mt-1 z-20 rounded-lg border border-[#E2E8F0] bg-white shadow-lg py-1 min-w-[120px]">
-                {onDownload && (
-                  <button
-                    type="button"
-                    onClick={() => { onDownload(); setMenuOpen(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange text-left"
-                  >
-                    <Download className="h-4 w-4" /> Baixar
-                  </button>
-                )}
-              </div>
-            </>
-          )}
         </div>
       </div>
     </div>
@@ -452,8 +426,8 @@ function MessageBubble({
           : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       } ${
         ["video", "audio", "ptt", "image"].includes(displayType)
-          ? "max-w-[95%] min-w-0 w-full px-2 py-1"
-          : "max-w-[90%] px-3 py-2"
+          ? "max-w-[73%] min-w-0 w-full px-1 py-0.5"
+          : "max-w-[69%] px-3 py-2"
       }`}
     >
       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
@@ -463,7 +437,7 @@ function MessageBubble({
         )}
       </p>
       {displayType === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
-        <div className="space-y-1 w-full max-w-[min(100%,720px)]">
+        <div className="w-full space-y-0.5">
           {(mediaUrl || downloadUrl) ? (
             <>
               <a
@@ -494,10 +468,10 @@ function MessageBubble({
         </div>
       )}
       {displayType === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia || canFetchDownload) && (
-        <div className="space-y-1">
+        <div className="w-full space-y-0.5">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm w-full max-w-[min(100%,720px)] bg-[#0F172A] group">
+              <div className="relative rounded-lg overflow-hidden border border-[#E2E8F0] shadow-sm w-full bg-[#0F172A] group">
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
@@ -528,7 +502,7 @@ function MessageBubble({
               )}
             </>
           ) : (
-            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 w-full max-w-[min(100%,720px)]">
+            <div className="flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-4 w-full">
               <Loader2 className="h-6 w-6 animate-spin shrink-0 text-clicvend-orange" />
               <div>
                 <p className="text-sm font-medium text-[#475569]">Carregando vídeo…</p>
@@ -540,7 +514,7 @@ function MessageBubble({
         </div>
       )}
       {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
-        <div className="space-y-1 w-full max-w-[min(100%,720px)]">
+        <div className="w-full space-y-0.5">
           <ChatAudioPlayer
             src={audioSrc}
             isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
@@ -550,14 +524,10 @@ function MessageBubble({
         </div>
       )}
       {displayType === "document" && (
-        <div className="space-y-1">
+        <div className="w-full space-y-0.5">
           {/* Miniatura do documento: ícone + nome + Ver (só documentos) + Baixar */}
           <div
-            className={`flex items-center gap-2 rounded-lg border py-2 px-2.5 min-w-0 w-full max-w-[min(100%,720px)] ${
-              m.direction === "out"
-                ? "border-[#CBD5E1] bg-[#E2E8F0]"
-                : "border-[#E2E8F0] bg-[#F8FAFC]"
-            }`}
+            className={`flex items-center gap-2 rounded-lg border border-[#E2E8F0] py-2 px-2.5 min-w-0 w-full ${m.direction === "out" ? "bg-[#E2E8F0]" : "bg-white"}`}
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600">
               <FileText className="h-4 w-4" />
@@ -628,7 +598,7 @@ function MessageBubble({
       {displayType === "text" && (
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
-      <footer className="mt-2 pt-1.5 border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap">
+      <footer className={`${["video", "audio", "ptt", "image", "document"].includes(displayType) ? "mt-1 pt-1" : "mt-2 pt-1.5"} border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap`}>
         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
           <span className="text-xs text-[#64748B]">
             {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
@@ -637,21 +607,6 @@ function MessageBubble({
             <span className="text-sm" title="Reação">
               {m.reaction}
             </span>
-          )}
-          {displayType === "video" && (downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")))) && (
-            <a
-              href={downloadUrl || mediaUrl || "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-clicvend-orange hover:underline"
-            >
-              <Download className="h-3 w-3" /> Baixar vídeo
-            </a>
-          )}
-          {displayType === "video" && canFetchDownload && !downloadUrl && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))) && (
-            <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
-              {downloadLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Baixar vídeo
-            </button>
           )}
         </div>
         <div className="flex items-center gap-0.5">
