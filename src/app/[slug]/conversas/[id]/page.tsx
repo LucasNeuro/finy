@@ -274,7 +274,11 @@ function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
 /** Inferir tipo de mídia para mensagens já na conversa (message_type vazio ou conteúdo em formato antigo). */
 function inferDisplayType(messageType: string | undefined, content: string, m?: { file_name?: string | null; media_url?: string | null }): string {
   const t = (messageType ?? "").trim().toLowerCase();
-  if (t && t !== "text") return t;
+  if (t && t !== "text") {
+    if (t === "ptv") return "video";   // API usa "ptv" para vídeo
+    if (t === "myaudio") return "audio"; // API usa "myaudio" para áudio
+    return t;
+  }
   const c = (content ?? "").trim();
   const match = c.match(/^\[(image|video|audio|document|ptt|media|sticker|vídeo|áudio|imagem)\]$/i);
   if (match) {
@@ -1628,9 +1632,20 @@ export default function ConversaThreadPage({
                 )}
                 {(Array.isArray(conv?.messages) ? conv.messages : [])
                   .filter((m, i, arr) => {
-                    const id = (m as Message).id;
-                    const first = arr.findIndex((x) => (x as Message).id === id);
-                    return first === i;
+                    const msg = m as Message;
+                    const id = msg.id;
+                    const firstById = arr.findIndex((x) => (x as Message).id === id);
+                    if (firstById !== i) return false;
+                    // Se for mensagem otimista (temp-) e existir outra "out" com mesmo conteúdo (id real), ocultar a temp para não duplicar
+                    if (id?.toString().startsWith("temp-") && msg.direction === "out") {
+                      const sameContent = (x: Message) => (x.content ?? "").trim() === (msg.content ?? "").trim() && x.direction === "out";
+                      const hasRealDuplicate = arr.some((x) => {
+                        const other = x as Message;
+                        return other.id !== id && !other.id?.toString().startsWith("temp-") && sameContent(other);
+                      });
+                      if (hasRealDuplicate) return false;
+                    }
+                    return true;
                   })
                   .map((m) => (
                   <div
@@ -1650,7 +1665,13 @@ export default function ConversaThreadPage({
                     />
                   </div>
                 ))}
-                {pendingOutgoingMessage && (
+                {pendingOutgoingMessage && (() => {
+                  // Não mostrar "Enviando…" se já existe no fim da lista a mensagem otimista (evita dois balões)
+                  const list = Array.isArray(conv?.messages) ? conv.messages : [];
+                  const last = list[list.length - 1] as Message | undefined;
+                  const hasMatchingOptimistic = last?.id?.toString().startsWith("temp-") && last.direction === "out" && (last.content ?? "").trim() === (pendingOutgoingMessage.content ?? "").trim();
+                  return !hasMatchingOptimistic;
+                })() && (
                   <div className="flex justify-end">
                     <div className="max-w-[90%] rounded-lg px-3 py-2 bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]">
                       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
