@@ -544,12 +544,19 @@ function MessageBubble({
       )}
       {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
         <div className="space-y-1 w-full max-w-[min(100%,720px)]">
-          <ChatAudioPlayer
+          <div className="relative">
+            <span className={`absolute -top-0.5 left-0 z-10 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${m.direction === "out" ? "bg-[#CBD5E1]/90 text-[#475569]" : "bg-white/25 text-slate-200"}`}>
+              Áudio
+            </span>
+            <div className="pt-5">
+              <ChatAudioPlayer
             src={audioSrc}
             isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
             onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
             variant={m.direction === "in" ? "in" : "out"}
           />
+            </div>
+          </div>
           {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
         </div>
       )}
@@ -1651,28 +1658,55 @@ export default function ConversaThreadPage({
                 )}
                 {(Array.isArray(conv?.messages) ? conv.messages : [])
                   .filter((m, i, arr) => {
-                    const id = (m as Message).id;
-                    const first = arr.findIndex((x) => (x as Message).id === id);
-                    return first === i;
+                    const msg = m as Message;
+                    const id = msg.id;
+                    const firstById = arr.findIndex((x) => (x as Message).id === id);
+                    if (firstById !== i) return false;
+                    const sentAt = String(msg.sent_at ?? "");
+                    const contentKey = `${msg.direction}|${String(msg.content ?? msg.caption ?? "").trim().slice(0, 80)}|${sentAt.slice(0, 19)}`;
+                    const firstByContent = arr.findIndex((x) => {
+                      const o = x as Message;
+                      const k = `${o.direction}|${String(o.content ?? o.caption ?? "").trim().slice(0, 80)}|${String(o.sent_at ?? "").slice(0, 19)}`;
+                      return k === contentKey;
+                    });
+                    return firstByContent === i;
                   })
-                  .map((m) => (
-                  <div
-                    key={(m as Message).id}
-                    className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
-                  >
-                    <MessageBubble
-                      m={m as Message}
-                      name={name}
-                      conversationId={resolved?.id}
-                      apiHeaders={apiHeaders}
-                      onReaction={handleReaction}
-                      onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
-                        setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
-                      }
-                      onDeleteMessage={handleDeleteMessage}
-                    />
-                  </div>
-                ))}
+                  .reduce<React.ReactNode[]>((acc, m, i, arr) => {
+                    const msg = m as Message;
+                    const prev = arr[i - 1] as Message | undefined;
+                    const prevDate = prev?.sent_at ? new Date(prev.sent_at).toDateString() : "";
+                    const currDate = msg.sent_at ? new Date(msg.sent_at).toDateString() : "";
+                    const today = new Date().toDateString();
+                    if (i === 0 || prevDate !== currDate) {
+                      const label = currDate === today ? "Hoje" : currDate === new Date(Date.now() - 864e5).toDateString() ? "Ontem" : new Date(msg.sent_at).toLocaleDateString("pt-BR", { day: "numeric", month: "short", year: "numeric" });
+                      acc.push(
+                        <div key={`sep-${currDate}`} className="flex justify-center py-2">
+                          <span className="rounded-full bg-[#E2E8F0] px-3 py-0.5 text-xs font-medium text-[#64748B]">
+                            {label}
+                          </span>
+                        </div>
+                      );
+                    }
+                    acc.push(
+                      <div
+                        key={msg.id}
+                        className={`flex ${msg.direction === "out" ? "justify-end" : "justify-start"}`}
+                      >
+                        <MessageBubble
+                          m={msg}
+                          name={name}
+                          conversationId={resolved?.id}
+                          apiHeaders={apiHeaders}
+                          onReaction={handleReaction}
+                          onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
+                            setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
+                          }
+                          onDeleteMessage={handleDeleteMessage}
+                        />
+                      </div>
+                    );
+                    return acc;
+                  }, [])}
                 {pendingOutgoingMessage && (
                   <div className="flex justify-end">
                     <div className="max-w-[90%] rounded-2xl px-4 py-3 bg-[#E2E8F0] border border-[#CBD5E1]/60 text-[#1E293B] shadow-sm">
