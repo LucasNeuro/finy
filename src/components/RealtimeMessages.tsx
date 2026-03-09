@@ -130,7 +130,7 @@ export function RealtimeMessages({ conversationId }: { conversationId: string })
               if (!oldData) return oldData;
               const existingMessages = Array.isArray(oldData.messages) ? oldData.messages : [];
               const updatedMessages = existingMessages.map((m) =>
-                m.id === updatedMessage.id ? updatedMessage : m
+                m.id === updatedMessage.id ? { ...m, ...updatedMessage } : m
               );
               return {
                 ...oldData,

@@ -3,13 +3,12 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Eye, Volume2, MoreVertical as MoreVerticalIcon } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
 import { RealtimeMessages } from "@/components/RealtimeMessages";
-import { DocumentViewerModal } from "@/components/DocumentViewerModal";
 
 type Message = {
   id: string;
@@ -247,13 +246,30 @@ function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
 
 /** Inferir tipo de mídia para mensagens já na conversa (message_type vazio ou conteúdo em formato antigo). */
 function inferDisplayType(messageType: string | undefined, content: string, m?: { file_name?: string | null; media_url?: string | null }): string {
-  const t = (messageType ?? "").trim().toLowerCase();
-  if (t && t !== "text") {
-    if (t === "ptv") return "video";   // API usa "ptv" para vídeo
-    if (t === "myaudio") return "audio"; // API usa "myaudio" para áudio
-    return t;
-  }
   const c = (content ?? "").trim();
+  const fileName = (m?.file_name ?? "").toLowerCase();
+  const mediaUrlRaw = (m?.media_url ?? "").toString();
+  const t = (messageType ?? "").trim().toLowerCase();
+
+  // Prioridade: file_name e media_url indicam o tipo real (evita vídeo exibir player de áudio)
+  const videoExt = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
+  const audioExt = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+  if (fileName && videoExt.test(fileName)) return "video";
+  if (fileName && audioExt.test(fileName)) return "audio";
+  if (mediaUrlRaw) {
+    if (mediaUrlRaw.length < 2000 && (videoExt.test(mediaUrlRaw) || /data:video\//i.test(mediaUrlRaw))) return "video";
+    if (mediaUrlRaw.length < 2000 && (audioExt.test(mediaUrlRaw) || /data:audio\//i.test(mediaUrlRaw))) return "audio";
+    const prefix = mediaUrlRaw.slice(0, 80);
+    if (/data:video\//i.test(prefix)) return "video";
+    if (/data:audio\//i.test(prefix)) return "audio";
+  }
+
+  // Tipos explícitos de mídia vindos da API
+  if (t && t !== "text" && t !== "document" && t !== "media") {
+    if (t === "ptv" || t === "video") return "video";   // API usa "ptv" para vídeo
+    if (t === "myaudio") return "audio";                // API usa "myaudio" para áudio
+    return t; // audio, ptt, image, sticker, etc.
+  }
   const match = c.match(/^\[(image|video|audio|document|ptt|media|sticker|vídeo|áudio|imagem)\]$/i);
   if (match) {
     const k = match[1].toLowerCase();
@@ -262,18 +278,6 @@ function inferDisplayType(messageType: string | undefined, content: string, m?: 
     if (k === "áudio") return "audio";
     if (k === "imagem") return "image";
     return k;
-  }
-  // Inferir por extensão do arquivo (mensagens recebidas que vêm como "Documento" mas são vídeo/áudio)
-  const fileName = (m?.file_name ?? "").toLowerCase();
-  const mediaUrlRaw = (m?.media_url ?? "").toString();
-  const videoExt = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
-  const audioExt = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
-  if (fileName && videoExt.test(fileName)) return "video";
-  if (fileName && audioExt.test(fileName)) return "audio";
-  // Se não tem file_name, tentar pela URL ou data URL (ex.: data:video/mp4;base64,...)
-  if (mediaUrlRaw) {
-    if (mediaUrlRaw.length < 2000 && (videoExt.test(mediaUrlRaw) || /data:video\//i.test(mediaUrlRaw))) return "video";
-    if (mediaUrlRaw.length < 2000 && (audioExt.test(mediaUrlRaw) || /data:audio\//i.test(mediaUrlRaw))) return "audio";
   }
   // Conteúdo explícito sem colchetes
   if (/^áudio$|^audio$/i.test(c) || c === "[Áudio]") return "audio";
@@ -314,7 +318,6 @@ function MessageBubble({
   conversationId,
   apiHeaders,
   onReaction,
-  onOpenDocumentViewer,
   onDeleteMessage,
 }: {
   m: Message;
@@ -322,7 +325,6 @@ function MessageBubble({
   conversationId?: string;
   apiHeaders?: Record<string, string>;
   onReaction?: (messageId: string, emoji: string) => void;
-  onOpenDocumentViewer?: (messageId: string, conversationId: string, fileName?: string | null, fileUrl?: string | null) => void;
   onDeleteMessage?: (messageId: string, forEveryone: boolean) => void;
 }) {
   const type = m.message_type ?? "text";
@@ -525,7 +527,7 @@ function MessageBubble({
       )}
       {displayType === "document" && (
         <div className="w-full space-y-0.5">
-          {/* Miniatura do documento: ícone + nome + Ver (só documentos) + Baixar */}
+          {/* Documento estilo WhatsApp Web: nome + Abrir + Salvar como */}
           <div
             className={`flex items-center gap-2 rounded-lg border border-[#E2E8F0] py-2 px-2.5 min-w-0 w-full ${m.direction === "out" ? "bg-[#E2E8F0]" : "bg-white"}`}
           >
@@ -536,48 +538,64 @@ function MessageBubble({
               <p className="truncate text-sm font-medium text-[#1E293B]">
                 {m.file_name || "Documento"}
               </p>
-              <p className="text-[10px] text-[#64748B]">
-                {downloadUrl ? "Ver · Baixar" : needsDownloadForDocument && downloadLoading ? "Carregando…" : "Baixar"}
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-0.5">
-              {conversationId && onOpenDocumentViewer && (
-                <button
-                  type="button"
-                  onClick={() => onOpenDocumentViewer(m.id, conversationId, m.file_name ?? null, downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : null))}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
-                  title="Visualizar documento"
-                >
-                  <Eye className="h-4 w-4" />
-                </button>
-              )}
-              {(downloadUrl || mediaUrl) ? (
-                <a
-                  href={downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : "#")}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
-                  title="Baixar"
-                >
-                  <Download className="h-4 w-4" />
-                </a>
-              ) : needsDownloadForDocument ? (
-                <button
-                  type="button"
-                  onClick={handleDownloadClick}
-                  disabled={downloadLoading}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors disabled:opacity-50"
-                  title="Baixar"
-                >
-                  {downloadLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                </button>
-              ) : null}
+              <div className="flex items-center gap-3 mt-1">
+                {(downloadUrl || mediaUrl) ? (
+                  (() => {
+                    const docUrl = downloadUrl || (mediaUrl && /^(http|data:)/.test(mediaUrl) ? mediaUrl : null) || "#";
+                    return (
+                      <>
+                        <a
+                          href={docUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-medium text-clicvend-orange hover:underline"
+                        >
+                          Abrir
+                        </a>
+                        <a
+                          href={docUrl}
+                          download={m.file_name || "documento"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-medium text-clicvend-orange hover:underline"
+                        >
+                          Salvar como…
+                        </a>
+                      </>
+                    );
+                  })()
+                ) : needsDownloadForDocument ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleDownloadClick}
+                      disabled={downloadLoading}
+                      className="text-xs font-medium text-clicvend-orange hover:underline disabled:opacity-50"
+                    >
+                      {downloadLoading ? "Carregando…" : "Abrir"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadClick}
+                      disabled={downloadLoading}
+                      className="text-xs font-medium text-clicvend-orange hover:underline disabled:opacity-50"
+                    >
+                      {downloadLoading ? "…" : "Salvar como…"}
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
           </div>
           {needsDownloadForDocument && !downloadUrl && !downloadLoading && (
-            <button type="button" onClick={handleDownloadClick} className="inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline">
-              <Download className="h-3.5 w-3.5" /> Baixar arquivo
-            </button>
+            <div className="flex gap-3 mt-1">
+              <button type="button" onClick={handleDownloadClick} className="text-xs font-medium text-clicvend-orange hover:underline">
+                Abrir
+              </button>
+              <button type="button" onClick={handleDownloadClick} className="text-xs font-medium text-clicvend-orange hover:underline">
+                Salvar como…
+              </button>
+            </div>
           )}
           {caption && caption !== "[document]" && caption !== "[media]" && !isPlaceholderCaption && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
@@ -744,12 +762,6 @@ export default function ConversaThreadPage({
   const [canTransfer, setCanTransfer] = useState(false);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [hasMoreOlderMessages, setHasMoreOlderMessages] = useState(true);
-  const [documentViewer, setDocumentViewer] = useState<{
-    messageId: string;
-    conversationId: string;
-    fileName?: string | null;
-    initialFileUrl?: string | null;
-  } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -1671,9 +1683,6 @@ export default function ConversaThreadPage({
                         conversationId={resolved?.id}
                         apiHeaders={apiHeaders}
                         onReaction={handleReaction}
-                        onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
-                          setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
-                        }
                         onDeleteMessage={handleDeleteMessage}
                       />
                     </div>
@@ -1902,27 +1911,6 @@ export default function ConversaThreadPage({
           </div>
         </div>
       </SideOver>
-
-      {/* Modal de visualização de documento (PDF, etc.) — zoom, baixar, nova aba, sem IA */}
-      <DocumentViewerModal
-        open={!!documentViewer}
-        onClose={() => setDocumentViewer(null)}
-        fileUrl={documentViewer?.initialFileUrl ?? undefined}
-        fetchDownload={
-          documentViewer && !documentViewer.initialFileUrl
-            ? async () => {
-                if (!documentViewer || !apiHeaders) return null;
-                const res = await fetch(
-                  `/api/conversations/${documentViewer.conversationId}/messages/${documentViewer.messageId}/download`,
-                  { credentials: "include", headers: apiHeaders }
-                );
-                const data = await res.json().catch(() => ({}));
-                return data?.fileURL ?? null;
-              }
-            : undefined
-        }
-        fileName={documentViewer?.fileName ?? undefined}
-      />
 
       {/* SideOver de informações do contato — abre só ao clicar no botão (padrão do sistema), com rolagem própria e fotos/infos */}
       <SideOver
