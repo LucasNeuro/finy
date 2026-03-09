@@ -154,6 +154,48 @@ export async function GET(
     return true;
   });
 
+  // Normalizar message_type para mensagens já salvas: se estiver como "document" (ou vazio) mas
+  // file_name/media_url indicarem vídeo ou áudio, corrigir para exibir miniplayers no front
+  const videoExt = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
+  const audioExt = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+  messages = (messages as Record<string, unknown>[]).map((m) => {
+    const msg = { ...m };
+    const currentType = String(msg.message_type ?? "").trim().toLowerCase();
+    if (currentType === "video" || currentType === "audio" || currentType === "ptt" || currentType === "ptv" || currentType === "myaudio") {
+      return msg;
+    }
+    const fileName = String(msg.file_name ?? "").toLowerCase();
+    const mediaUrl = String(msg.media_url ?? "");
+    if (fileName && videoExt.test(fileName)) {
+      msg.message_type = "video";
+      return msg;
+    }
+    if (fileName && audioExt.test(fileName)) {
+      msg.message_type = "audio";
+      return msg;
+    }
+    if (mediaUrl && mediaUrl.length < 2000) {
+      if (videoExt.test(mediaUrl) || /data:video\//i.test(mediaUrl)) {
+        msg.message_type = "video";
+        return msg;
+      }
+      if (audioExt.test(mediaUrl) || /data:audio\//i.test(mediaUrl)) {
+        msg.message_type = "audio";
+        return msg;
+      }
+    }
+    const content = String(msg.content ?? msg.caption ?? "").trim();
+    if (/^\[?(vídeo|video)\]?$/i.test(content)) {
+      msg.message_type = "video";
+      return msg;
+    }
+    if (/^\[?(áudio|audio|ptt)\]?$/i.test(content)) {
+      msg.message_type = "audio";
+      return msg;
+    }
+    return msg;
+  });
+
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
   const displayPhone = contact_phone_from_cc ?? conversation.customer_phone;
   const canonicalPhone = toCanonicalDigits(displayPhone || conversation.customer_phone) ?? displayPhone ?? conversation.customer_phone;
