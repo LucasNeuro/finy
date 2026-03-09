@@ -1838,28 +1838,33 @@ export default function ConversaThreadPage({
                 Parar
               </button>
             ) : recordedAudioBlob ? (
-              <div className="flex flex-col gap-2 min-w-0 flex-1 max-w-[400px]">
-                <ChatAudioPlayer
-                  src={recordedAudioPreviewUrl}
-                  isLoading={!!recordedAudioBlob && !recordedAudioPreviewUrl}
-                  onDownload={undefined}
-                />
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 min-w-0 max-w-[520px]">
+                <div className="flex-1 min-w-0">
+                  <ChatAudioPlayer
+                    src={recordedAudioPreviewUrl}
+                    isLoading={!!recordedAudioBlob && !recordedAudioPreviewUrl}
+                    onDownload={undefined}
+                  />
+                </div>
+                <div className="flex flex-col gap-1 shrink-0">
                   <button
                     type="button"
                     onClick={sendRecordedAudio}
                     disabled={sending}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
+                    className="inline-flex items-center justify-center rounded-full bg-clicvend-green h-9 w-9 text-white hover:bg-clicvend-green/90 disabled:opacity-50"
+                    title="Enviar áudio gravado"
+                    aria-label="Enviar áudio gravado"
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    Enviar
                   </button>
                   <button
                     type="button"
                     onClick={discardRecordedAudio}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+                    className="inline-flex items-center justify-center rounded-full border border-[#E2E8F0] h-9 w-9 text-[#64748B] hover:bg-[#F8FAFC]"
+                    title="Descartar gravação"
+                    aria-label="Descartar gravação"
                   >
-                    Descartar
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               </div>
