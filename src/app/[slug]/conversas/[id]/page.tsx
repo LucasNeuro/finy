@@ -378,7 +378,19 @@ function MessageBubble({
     return () => { cancelled = true; };
   }, [needsDownloadForPlay, needsDownloadForMedia, needsDownloadForDocument, conversationId, apiHeaders, m.id]);
 
-  const audioSrc = (displayType === "audio" || displayType === "ptt") ? (downloadUrl || mediaUrl) : null;
+  const resolvedDisplayType = (() => {
+    let base = displayType;
+    const url = (downloadUrl || mediaUrl || "").toString().toLowerCase();
+    if (base === "document" && url) {
+      const videoExt2 = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
+      const audioExt2 = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+      if (audioExt2.test(url) || url.startsWith("data:audio/")) return "audio";
+      if (videoExt2.test(url) || url.startsWith("data:video/")) return "video";
+    }
+    return base;
+  })();
+
+  const audioSrc = (resolvedDisplayType === "audio" || resolvedDisplayType === "ptt") ? (downloadUrl || mediaUrl) : null;
 
   useEffect(() => {
     if (!reactionPickerOpen) return;
@@ -427,7 +439,7 @@ function MessageBubble({
           ? "bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]"
           : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       } ${
-        ["video", "audio", "ptt", "image"].includes(displayType)
+        ["video", "audio", "ptt", "image"].includes(resolvedDisplayType)
           ? "max-w-[73%] min-w-0 w-full px-1 py-0.5"
           : "max-w-[69%] px-3 py-2"
       }`}
@@ -515,7 +527,7 @@ function MessageBubble({
           {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
+      {(resolvedDisplayType === "audio" || resolvedDisplayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
         <div className="w-full space-y-0.5">
           <ChatAudioPlayer
             src={audioSrc}
@@ -525,7 +537,7 @@ function MessageBubble({
           {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
         </div>
       )}
-      {displayType === "document" && (
+      {resolvedDisplayType === "document" && (
         <div className="w-full space-y-0.5">
           {/* Documento estilo WhatsApp Web: nome + Abrir + Salvar como */}
           <div
@@ -616,7 +628,7 @@ function MessageBubble({
       {displayType === "text" && (
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
-      <footer className={`${["video", "audio", "ptt", "image", "document"].includes(displayType) ? "mt-1 pt-1" : "mt-2 pt-1.5"} border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap`}>
+      <footer className={`${["video", "audio", "ptt", "image", "document"].includes(resolvedDisplayType) ? "mt-1 pt-1" : "mt-2 pt-1.5"} border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap`}>
         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
           <span className="text-xs text-[#64748B]">
             {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
