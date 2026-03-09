@@ -122,26 +122,6 @@ export async function POST(
     );
   }
 
-  // Atualizar messages_snapshot para que o refetch mostre a reação imediatamente
-  const { data: convWithSnapshot } = await supabase
-    .from("conversations")
-    .select("messages_snapshot")
-    .eq("id", conversationId)
-    .eq("company_id", companyId)
-    .single();
-
-  const snapshot = (convWithSnapshot as { messages_snapshot?: unknown } | null)?.messages_snapshot;
-  if (Array.isArray(snapshot) && snapshot.length > 0) {
-    const updated = snapshot.map((msg: Record<string, unknown>) =>
-      String(msg?.id) === messageId ? { ...msg, reaction: emoji || null } : msg
-    );
-    await supabase
-      .from("conversations")
-      .update({ messages_snapshot: updated, updated_at: new Date().toISOString() })
-      .eq("id", conversationId)
-      .eq("company_id", companyId);
-  }
-
   await Promise.all([
     invalidateConversationDetail(conversationId),
     invalidateConversationList(companyId),

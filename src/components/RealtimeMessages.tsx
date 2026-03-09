@@ -62,10 +62,6 @@ export function RealtimeMessages({ conversationId }: { conversationId: string })
           const newMessage = payload?.new as Message | undefined;
           if (!newMessage) return;
 
-          // Mensagens enviadas por nós: não adicionar aqui — o refetch após o POST já traz.
-          // Evita duplicação quando enviamos e o Realtime dispara antes do refetch.
-          if (newMessage.direction === "out") return;
-
           // Atualizar cache da conversa adicionando a nova mensagem
           queryClient.setQueryData<ConversationDetail>(
             queryKeys.conversation(conversationId),

@@ -374,7 +374,6 @@ function MessageBubble({
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadLoading, setDownloadLoading] = useState(false);
-  const [downloadError, setDownloadError] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [moreEmojisOpen, setMoreEmojisOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
@@ -394,31 +393,13 @@ function MessageBubble({
     if (!(needsDownloadForPlay || needsDownloadForMedia || needsDownloadForDocument) || !conversationId || !apiHeaders || !m.id) return;
     let cancelled = false;
     setDownloadLoading(true);
-    setDownloadError(false);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders, signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) {
-          if (!cancelled) setDownloadError(true);
-          return null;
-        }
-        return r.json();
-      })
+    fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders })
+      .then((r) => (r.ok ? r.json() : null))
       .then((data: { fileURL?: string } | null) => {
-        if (!cancelled && data?.fileURL) {
-          setDownloadUrl(data.fileURL);
-          setDownloadError(false);
-        }
+        if (!cancelled && data?.fileURL) setDownloadUrl(data.fileURL);
       })
-      .catch(() => {
-        if (!cancelled) setDownloadError(true);
-      })
-      .finally(() => {
-        clearTimeout(timeout);
-        if (!cancelled) setDownloadLoading(false);
-      });
-    return () => { cancelled = true; controller.abort(); clearTimeout(timeout); };
+      .finally(() => { if (!cancelled) setDownloadLoading(false); });
+    return () => { cancelled = true; };
   }, [needsDownloadForPlay, needsDownloadForMedia, needsDownloadForDocument, conversationId, apiHeaders, m.id]);
 
   const audioSrc = (displayType === "audio" || displayType === "ptt") ? (downloadUrl || mediaUrl) : null;
@@ -451,7 +432,6 @@ function MessageBubble({
     }
     if (!conversationId || !apiHeaders || !m.id) return;
     setDownloadLoading(true);
-    setDownloadError(false);
     try {
       const res = await fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders });
       const data = await res.json().catch(() => ({}));
@@ -466,31 +446,31 @@ function MessageBubble({
 
   return (
     <div
-      className={`rounded-2xl px-4 py-3 shadow-sm transition-shadow hover:shadow-md ${
+      className={`rounded-lg ${
         m.direction === "out"
-          ? "bg-[#E2E8F0] border border-[#CBD5E1]/60 text-[#1E293B]"
-          : "bg-[#F1F5F9] border border-[#E2E8F0] text-[#1E293B]"
+          ? "bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]"
+          : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       } ${
         ["video", "audio", "ptt", "image"].includes(displayType)
-          ? "max-w-[85%] min-w-0 w-full"
-          : "max-w-[85%]"
+          ? "max-w-[95%] min-w-0 w-full px-2 py-1"
+          : "max-w-[90%] px-3 py-2"
       }`}
     >
-      <p className={`text-xs font-medium mb-0.5 flex items-center gap-2 ${m.direction === "out" ? "text-[#64748B]" : "text-[#64748B]"}`}>
+      <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
         {m.direction === "out" ? "Você" : name}
         {typeof m.id === "string" && m.id.startsWith("temp-") && (
           <span className="text-[#64748B] font-normal animate-pulse">Enviando…</span>
         )}
       </p>
       {displayType === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
-        <div className="space-y-1 w-full max-w-[min(100%,300px)]">
+        <div className="space-y-1 w-full max-w-[min(100%,720px)]">
           {(mediaUrl || downloadUrl) ? (
             <>
               <a
                 href={downloadUrl || mediaUrl || "#"}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange/50"
+                className="block rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm hover:shadow-md transition-shadow focus:outline-none focus:ring-2 focus:ring-clicvend-orange/50"
               >
                 <img
                   src={mediaUrl || downloadUrl || ""}
@@ -517,7 +497,7 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm w-full max-w-[min(100%,300px)] bg-[#0F172A] group">
+              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm w-full max-w-[min(100%,720px)] bg-[#0F172A] group">
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
@@ -548,7 +528,7 @@ function MessageBubble({
               )}
             </>
           ) : (
-            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 w-full max-w-[min(100%,300px)]">
+            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 w-full max-w-[min(100%,720px)]">
               <Loader2 className="h-6 w-6 animate-spin shrink-0 text-clicvend-orange" />
               <div>
                 <p className="text-sm font-medium text-[#475569]">Carregando vídeo…</p>
@@ -560,19 +540,12 @@ function MessageBubble({
         </div>
       )}
       {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
-        <div className="space-y-1 w-full max-w-[min(100%,300px)]">
-          <div className="relative">
-            <span className="absolute -top-0.5 left-0 z-10 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-[#E2E8F0] text-[#475569]">
-              Áudio
-            </span>
-            <div className="pt-5">
-              <ChatAudioPlayer
+        <div className="space-y-1 w-full max-w-[min(100%,720px)]">
+          <ChatAudioPlayer
             src={audioSrc}
             isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
             onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
           />
-            </div>
-          </div>
           {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
         </div>
       )}
@@ -580,10 +553,10 @@ function MessageBubble({
         <div className="space-y-1">
           {/* Miniatura do documento: ícone + nome + Ver (só documentos) + Baixar */}
           <div
-            className={`flex items-center gap-2 rounded-lg border py-2 px-2.5 min-w-0 w-full max-w-[min(100%,300px)] ${
+            className={`flex items-center gap-2 rounded-lg border py-2 px-2.5 min-w-0 w-full max-w-[min(100%,720px)] ${
               m.direction === "out"
                 ? "border-[#CBD5E1] bg-[#E2E8F0]"
-                : "border-[#E2E8F0] bg-white"
+                : "border-[#E2E8F0] bg-[#F8FAFC]"
             }`}
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600">
@@ -594,7 +567,7 @@ function MessageBubble({
                 {m.file_name || "Documento"}
               </p>
               <p className="text-[10px] text-[#64748B]">
-                {downloadUrl ? "Ver · Baixar" : needsDownloadForDocument && downloadLoading ? "Carregando…" : downloadError ? "Erro ao carregar" : "Baixar"}
+                {downloadUrl ? "Ver · Baixar" : needsDownloadForDocument && downloadLoading ? "Carregando…" : "Baixar"}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
@@ -602,7 +575,7 @@ function MessageBubble({
                 <button
                   type="button"
                   onClick={() => onOpenDocumentViewer(m.id, conversationId, m.file_name ?? null, downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : null))}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
                   title="Visualizar documento"
                 >
                   <Eye className="h-4 w-4" />
@@ -613,7 +586,7 @@ function MessageBubble({
                   href={downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : "#")}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors"
                   title="Baixar"
                 >
                   <Download className="h-4 w-4" />
@@ -623,7 +596,7 @@ function MessageBubble({
                   type="button"
                   onClick={handleDownloadClick}
                   disabled={downloadLoading}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors disabled:opacity-50"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange transition-colors disabled:opacity-50"
                   title="Baixar"
                 >
                   {downloadLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -655,13 +628,13 @@ function MessageBubble({
       {displayType === "text" && (
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
-      <footer className={`mt-2 pt-1.5 flex items-center justify-between gap-2 flex-wrap ${m.direction === "out" ? "border-t border-[#CBD5E1]/50" : "border-t border-[#E2E8F0]"}`}>
+      <footer className="mt-2 pt-1.5 border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
           <span className="text-xs text-[#64748B]">
             {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
           </span>
           {m.reaction && (
-            <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-md bg-white/80 border border-[#E2E8F0] text-base leading-none" title="Reação">
+            <span className="text-sm" title="Reação">
               {m.reaction}
             </span>
           )}
@@ -690,7 +663,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setDeleteMenuOpen((v) => !v); }}
-                className="p-1 rounded-lg transition-colors text-[#64748B] hover:bg-[#E2E8F0] hover:text-red-600"
+                className="p-1 rounded hover:bg-black/10 text-[#64748B] hover:text-red-600 transition-colors"
                 title="Apagar mensagem"
                 aria-label="Apagar mensagem"
               >
@@ -721,7 +694,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setReactionPickerOpen((v) => !v); }}
-                className="p-1 rounded-lg transition-colors text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#1E293B]"
+                className="p-1 rounded hover:bg-black/10 text-[#64748B] hover:text-[#1E293B] transition-colors"
                 title="Reagir"
                 aria-label="Reagir"
               >
@@ -804,6 +777,7 @@ export default function ConversaThreadPage({
   const [attachOpen, setAttachOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
+  const [recordedAudioPreviewUrl, setRecordedAudioPreviewUrl] = useState<string | null>(null);
   const [recordingVideo, setRecordingVideo] = useState(false);
   const [recordedVideoBlob, setRecordedVideoBlob] = useState<{ blob: Blob; mimeType: string } | null>(null);
   const [recordedVideoPreviewUrl, setRecordedVideoPreviewUrl] = useState<string | null>(null);
@@ -820,7 +794,6 @@ export default function ConversaThreadPage({
     fileName?: string | null;
     initialFileUrl?: string | null;
   } | null>(null);
-  const [pendingOutgoingMessage, setPendingOutgoingMessage] = useState<{ content: string; message_type: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -1146,8 +1119,6 @@ export default function ConversaThreadPage({
     if (!isMedia && !text) return;
     setSending(true);
     setError(null);
-    const contentToShow = isMedia ? (payload!.caption || `[${payload!.type}]`) : text;
-    setPendingOutgoingMessage({ content: contentToShow, message_type: payload?.type || "text" });
     try {
       const body = isMedia
         ? { type: payload!.type, file: payload!.file, caption: payload!.caption || "", docName: payload!.docName || "" }
@@ -1161,29 +1132,24 @@ export default function ConversaThreadPage({
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError(err?.error ?? "Falha ao enviar");
-        setPendingOutgoingMessage(null);
         return;
       }
       if (!isMedia) setSendValue("");
 
-      // Limpar o "Enviando…" imediatamente para não duplicar a bolha
-      setPendingOutgoingMessage(null);
-
       queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
-      queryClient.invalidateQueries({ queryKey: queryKeys.conversation(resolved.id) });
 
-      // Rolar para o fim
       requestAnimationFrame(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
       });
 
-      await refetchConversation();
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      // Aguardar refetch para mostrar a mensagem real — sem bolha otimista (evita duplicação)
+      refetchConversation().then(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        });
       });
     } catch {
       setError("Falha ao enviar");
-      setPendingOutgoingMessage(null);
     } finally {
       setSending(false);
     }
@@ -1287,6 +1253,16 @@ export default function ConversaThreadPage({
     setRecordedAudioBlob(null);
   }
 
+  useEffect(() => {
+    if (!recordedAudioBlob) {
+      setRecordedAudioPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(recordedAudioBlob);
+    setRecordedAudioPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [recordedAudioBlob]);
+
   async function startRecordingVideo() {
     if (!resolved?.id || recordingVideo) return;
     setAttachOpen(false);
@@ -1382,16 +1358,6 @@ export default function ConversaThreadPage({
 
   async function handleReaction(messageId: string, emoji: string) {
     if (!resolved?.id || !apiHeaders) return;
-    // Atualização otimista: mostrar reação imediatamente
-    queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (prev) => {
-      if (!prev?.messages) return prev;
-      return {
-        ...prev,
-        messages: prev.messages.map((msg) =>
-          String(msg.id) === messageId ? { ...msg, reaction: emoji || null } : msg
-        ),
-      };
-    });
     try {
       const res = await fetch(`/api/conversations/${resolved.id}/messages/reaction`, {
         method: "POST",
@@ -1400,12 +1366,8 @@ export default function ConversaThreadPage({
         body: JSON.stringify({ message_id: messageId, emoji }),
       });
       if (res.ok) await refetchConversation();
-      else {
-        // Reverter em caso de erro
-        queryClient.invalidateQueries({ queryKey: queryKeys.conversation(resolved.id) });
-      }
     } catch {
-      queryClient.invalidateQueries({ queryKey: queryKeys.conversation(resolved.id) });
+      // silent fail
     }
   }
 
@@ -1658,8 +1620,8 @@ export default function ConversaThreadPage({
 
       {resolved?.id && typeof window !== "undefined" && <RealtimeMessages conversationId={resolved.id} />}
       <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-        <div ref={messagesScrollRef} data-messages-scroll className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4 bg-[#F8FAFC]/50">
-          <div className="space-y-4">
+        <div ref={messagesScrollRef} data-messages-scroll className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
+          <div className="space-y-3">
             {isLoading ? (
               <>
                 {isInitialLoad && (
@@ -1668,10 +1630,10 @@ export default function ConversaThreadPage({
                     <p className="text-sm font-medium">Abrindo conversa…</p>
                   </div>
                 )}
-                <div className="flex justify-start"><Skeleton className="h-14 w-[75%] max-w-sm rounded-2xl" /></div>
-                <div className="flex justify-end"><Skeleton className="h-10 w-[50%] max-w-xs rounded-2xl" /></div>
-                <div className="flex justify-start"><Skeleton className="h-12 w-[60%] max-w-sm rounded-2xl" /></div>
-                <div className="flex justify-end"><Skeleton className="h-16 w-[70%] max-w-sm rounded-2xl" /></div>
+                <div className="flex justify-start"><Skeleton className="h-14 w-[75%] max-w-sm rounded-lg" /></div>
+                <div className="flex justify-end"><Skeleton className="h-10 w-[50%] max-w-xs rounded-lg" /></div>
+                <div className="flex justify-start"><Skeleton className="h-12 w-[60%] max-w-sm rounded-lg" /></div>
+                <div className="flex justify-end"><Skeleton className="h-16 w-[70%] max-w-sm rounded-lg" /></div>
               </>
             ) : (
               <>
@@ -1689,75 +1651,38 @@ export default function ConversaThreadPage({
                 )}
                 {(Array.isArray(conv?.messages) ? conv.messages : [])
                   .filter((m, i, arr) => {
-                    const msg = m as Message;
-                    const id = msg.id;
-                    const firstById = arr.findIndex((x) => (x as Message).id === id);
-                    if (firstById !== i) return false;
-                    const sentAt = String(msg.sent_at ?? "");
-                    const contentKey = `${msg.direction}|${String(msg.content ?? msg.caption ?? "").trim().slice(0, 80)}|${sentAt.slice(0, 19)}`;
-                    const firstByContent = arr.findIndex((x) => {
-                      const o = x as Message;
-                      const k = `${o.direction}|${String(o.content ?? o.caption ?? "").trim().slice(0, 80)}|${String(o.sent_at ?? "").slice(0, 19)}`;
-                      return k === contentKey;
-                    });
-                    return firstByContent === i;
+                    const id = (m as Message).id;
+                    const first = arr.findIndex((x) => (x as Message).id === id);
+                    return first === i;
                   })
-                  .reduce<React.ReactNode[]>((acc, m, i, arr) => {
-                    const msg = m as Message;
-                    const prev = arr[i - 1] as Message | undefined;
-                    const prevDate = prev?.sent_at ? new Date(prev.sent_at).toDateString() : "";
-                    const currDate = msg.sent_at ? new Date(msg.sent_at).toDateString() : "";
-                    const today = new Date().toDateString();
-                    if (i === 0 || prevDate !== currDate) {
-                      const label = currDate === today ? "Hoje" : currDate === new Date(Date.now() - 864e5).toDateString() ? "Ontem" : new Date(msg.sent_at).toLocaleDateString("pt-BR", { day: "numeric", month: "short", year: "numeric" });
-                      acc.push(
-                        <div key={`sep-${currDate}`} className="flex justify-center py-2">
-                          <span className="rounded-full bg-[#E2E8F0] px-3 py-0.5 text-xs font-medium text-[#64748B]">
-                            {label}
-                          </span>
-                        </div>
-                      );
-                    }
-                    acc.push(
-                      <div
-                        key={msg.id}
-                        className={`flex ${msg.direction === "out" ? "justify-end" : "justify-start"}`}
-                      >
-                        <MessageBubble
-                          m={msg}
-                          name={name}
-                          conversationId={resolved?.id}
-                          apiHeaders={apiHeaders}
-                          onReaction={handleReaction}
-                          onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
-                            setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
-                          }
-                          onDeleteMessage={handleDeleteMessage}
-                        />
-                      </div>
-                    );
-                    return acc;
-                  }, [])}
-                {pendingOutgoingMessage && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[#E2E8F0] border border-[#CBD5E1]/60 text-[#1E293B] shadow-sm">
-                      <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
-                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-clicvend-orange" aria-hidden />
-                        Você
-                      </p>
-                      <p className="whitespace-pre-wrap text-sm">{pendingOutgoingMessage.content || "…"}</p>
-                    </div>
+                  .map((m) => (
+                  <div
+                    key={(m as Message).id}
+                    className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
+                  >
+                    <MessageBubble
+                      m={m as Message}
+                      name={name}
+                      conversationId={resolved?.id}
+                      apiHeaders={apiHeaders}
+                      onReaction={handleReaction}
+                      onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
+                        setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
+                      }
+                      onDeleteMessage={handleDeleteMessage}
+                    />
                   </div>
-                )}
+                ))}
                 <div ref={messagesEndRef} data-messages-end />
               </>
             )}
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-3">
+        <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-2">
+
           {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
-          <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 items-end ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
+          <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
             <input
               type="file"
               ref={fileInputRef}
@@ -1786,7 +1711,7 @@ export default function ConversaThreadPage({
               className="hidden"
               onChange={(e) => onFileChoose("video", e)}
             />
-            <div className="flex shrink-0 items-center gap-0.5 border border-[#E2E8F0] rounded-2xl overflow-hidden bg-white shadow-sm">
+            <div className="flex shrink-0 items-center gap-0.5 border border-[#E2E8F0] rounded-lg overflow-hidden bg-white">
               <button
                 type="button"
                 onClick={() => setAttachOpen(!attachOpen)}
@@ -1832,7 +1757,7 @@ export default function ConversaThreadPage({
                 }
               }}
               placeholder="Digite sua mensagem…"
-              className="flex-1 rounded-2xl border border-[#E2E8F0] px-4 py-2.5 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-2 focus:ring-clicvend-orange/20 transition-all"
+              className="flex-1 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
               disabled={sending || isLoading}
             />
             {recording ? (
@@ -1845,24 +1770,30 @@ export default function ConversaThreadPage({
                 Parar
               </button>
             ) : recordedAudioBlob ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-[#64748B]">Áudio gravado</span>
-                <button
-                  type="button"
-                  onClick={sendRecordedAudio}
-                  disabled={sending}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
-                >
-                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  Enviar
-                </button>
-                <button
-                  type="button"
-                  onClick={discardRecordedAudio}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
-                >
-                  Descartar
-                </button>
+              <div className="flex flex-col gap-2 min-w-0 flex-1 max-w-[400px]">
+                <ChatAudioPlayer
+                  src={recordedAudioPreviewUrl}
+                  isLoading={!!recordedAudioBlob && !recordedAudioPreviewUrl}
+                  onDownload={undefined}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={sendRecordedAudio}
+                    disabled={sending}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
+                  >
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Enviar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={discardRecordedAudio}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+                  >
+                    Descartar
+                  </button>
+                </div>
               </div>
             ) : (
               <button
@@ -1879,8 +1810,8 @@ export default function ConversaThreadPage({
               disabled={!sendValue.trim() || sending || isLoading}
               className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:bg-[#94A3B8] disabled:cursor-not-allowed transition-colors"
             >
-              <Send className="h-4 w-4" />
-              Enviar
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {sending ? "Enviando…" : "Enviar"}
             </button>
           </form>
         </div>
