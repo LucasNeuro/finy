@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
+import { PublicHeader } from "@/components/PublicHeader";
 import { Eye, EyeOff, ChevronLeft, ChevronRight, Check, Copy, CheckCircle2, Plus, Trash2 } from "lucide-react";
 
 const STEPS = [
@@ -106,7 +107,15 @@ export default function OnboardingPage() {
       const res = await fetch(`/api/opencnpj/${digits}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error ?? "CNPJ não encontrado");
+        if (res.status === 403) {
+          setError("Limite de consultas excedido. Tente novamente mais tarde.");
+        } else if (res.status === 429) {
+          setError("Muitas consultas. Aguarde um momento.");
+        } else if (res.status === 404) {
+          setError("CNPJ não encontrado");
+        } else {
+          setError(data.error ?? "Erro ao buscar CNPJ");
+        }
         setLoadingCnpj(false);
         return;
       }
@@ -132,9 +141,9 @@ export default function OnboardingPage() {
       });
       if (!userEmail) setUserEmail(data.email ?? "");
     } catch {
-      setError("Erro ao buscar CNPJ");
+      setError("Erro ao buscar CEP");
     } finally {
-      setLoadingCnpj(false);
+      setLoadingCep(false);
     }
   };
 
@@ -143,10 +152,10 @@ export default function OnboardingPage() {
     if (digits.length !== 8) return;
     setLoadingCep(true);
     try {
-      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+      const res = await fetch(`/api/viacep/${digits}`);
       const data = await res.json().catch(() => ({}));
-      if (data.erro) {
-        setError("CEP não encontrado");
+      if (!res.ok || data.erro) {
+        setError(data.error ?? "CEP não encontrado");
       } else {
         setError(null);
         setCompany((c) => ({
@@ -262,11 +271,13 @@ export default function OnboardingPage() {
 
   if (result) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-[#F8FAFC] p-8">
-        <div className="w-full max-w-md rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-xl">
-          <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
-            <ClicVendLogo size="md" />
-          </Link>
+      <main className="min-h-screen bg-[#F8FAFC] pt-14">
+        <PublicHeader />
+        <div className="flex flex-col items-center justify-center p-8">
+          <div className="w-full max-w-md rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-sm">
+            <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
+              <ClicVendLogo size="md" />
+            </Link>
           <h1 className="mt-6 text-xl font-bold text-[#0F172A]">Empresa criada</h1>
           {result.slug_adjusted && (
             <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -305,17 +316,15 @@ export default function OnboardingPage() {
             Acessar painel
           </a>
         </div>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#F8FAFC] py-10 px-4">
-      <div className="mx-auto max-w-4xl">
-        <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
-          <ClicVendLogo size="lg" />
-        </Link>
-
+    <main className="min-h-screen bg-[#F8FAFC] pt-14">
+      <PublicHeader />
+      <div className="mx-auto max-w-4xl px-4 py-10">
         {/* Step indicator - 5 colunas iguais, círculos e labels centralizados */}
         <div className="mt-10 grid grid-cols-5 gap-0">
           {STEPS.map((s, idx) => (
@@ -352,7 +361,7 @@ export default function OnboardingPage() {
           ))}
         </div>
 
-        <div className="mt-10 rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-xl sm:p-10">
+        <div className="mt-10 rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-sm sm:p-10">
           <h2 className="text-lg font-bold text-[#0F172A]">{STEPS[step - 1].title}</h2>
           <p className="mt-0.5 text-sm text-[#64748B]">Etapa {step} de 5</p>
 

@@ -786,6 +786,7 @@ async function processOneMessage(
           wa_chat_jid: canonicalExternalId,
           external_id: canonicalExternalId,
           customer_phone: (canonicalDigits ?? displayPhone) || undefined,
+          ...(customerName && customerName.trim() && { customer_name: customerName.trim() }),
         })
         .eq("id", conversationId);
       console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId });

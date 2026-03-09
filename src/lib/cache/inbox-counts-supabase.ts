@@ -8,6 +8,7 @@ export type InboxCountsPayload = {
   individual: number;
   groups: number;
   unassigned: number;
+  mine_closed: number;
 };
 
 /**
@@ -25,7 +26,7 @@ export async function getCachedCountsFromSupabase(
     const cutoff = new Date(Date.now() - CACHE_TTL_SECONDS * 1000).toISOString();
     const { data, error } = await supabase
       .from("inbox_counts_cache")
-      .select("mine, queues, individual, groups, unassigned, updated_at")
+      .select("mine, queues, individual, groups, unassigned, mine_closed, updated_at")
       .eq("company_id", companyId)
       .eq("user_id", userId)
       .gte("updated_at", cutoff)
@@ -38,6 +39,7 @@ export async function getCachedCountsFromSupabase(
       individual: typeof data.individual === "number" ? data.individual : 0,
       groups: typeof data.groups === "number" ? data.groups : 0,
       unassigned: typeof (data as { unassigned?: number }).unassigned === "number" ? (data as { unassigned: number }).unassigned : 0,
+      mine_closed: typeof (data as { mine_closed?: number }).mine_closed === "number" ? (data as { mine_closed: number }).mine_closed : 0,
     };
   } catch {
     return null;
@@ -65,6 +67,7 @@ export async function setCachedCountsInSupabase(
         individual: payload.individual,
         groups: payload.groups,
         unassigned: payload.unassigned,
+        mine_closed: payload.mine_closed,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "company_id,user_id" }

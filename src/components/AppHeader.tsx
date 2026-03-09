@@ -3,14 +3,25 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { Settings, ChevronDown, Bell } from "lucide-react";
+import { Settings, ChevronDown, Bell, Loader2, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
+
+type NotificationItem = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  is_read: boolean;
+  created_at: string;
+};
 
 export function AppHeader() {
   const pathname = usePathname();
   const [user, setUser] = useState<{ email?: string } | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const segments = pathname?.split("/").filter(Boolean) ?? [];
@@ -19,6 +30,9 @@ export function AppHeader() {
   const [canViewProfile, setCanViewProfile] = useState(false);
   const [canShowNewNotifications, setCanShowNewNotifications] = useState(false);
   const [unassignedCount, setUnassignedCount] = useState<number>(0);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [notificationsUnread, setNotificationsUnread] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
 
   useEffect(() => {
     createClient()
@@ -52,6 +66,8 @@ export function AppHeader() {
   useEffect(() => {
     if (!slug || !canShowNewNotifications) {
       setUnassignedCount(0);
+      setNotifications([]);
+      setNotificationsUnread(0);
       return;
     }
     const apiHeaders = { "X-Company-Slug": slug };
@@ -63,8 +79,24 @@ export function AppHeader() {
           setUnassignedCount(n);
         })
         .catch(() => {});
+    const fetchNotifications = () =>
+      fetch("/api/notifications?limit=20", { credentials: "include", headers: apiHeaders, cache: "no-store" })
+        .then((r) => r.json())
+        .then((data) => {
+          if (Array.isArray(data?.items)) {
+            const items = data.items as NotificationItem[];
+            setNotifications(items);
+            setNotificationsUnread(typeof data?.unread === "number" ? data.unread : items.filter((n) => !n.is_read).length);
+          }
+        })
+        .catch(() => {});
+
     fetchCounts();
-    const interval = setInterval(fetchCounts, 60_000);
+    fetchNotifications();
+    const interval = setInterval(() => {
+      fetchCounts();
+      fetchNotifications();
+    }, 60_000);
     return () => clearInterval(interval);
   }, [slug, canShowNewNotifications]);
 
@@ -72,6 +104,7 @@ export function AppHeader() {
     function handleClickOutside(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
+        setNotificationsOpen(false);
       }
     }
     document.addEventListener("click", handleClickOutside);
@@ -79,6 +112,38 @@ export function AppHeader() {
   }, []);
 
   const initial = user?.email?.[0]?.toUpperCase() ?? "U";
+
+  function formatRelativeTime(iso: string): string {
+    const d = new Date(iso);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return "agora";
+    if (diffMin < 60) return `${diffMin} min`;
+    const diffH = Math.floor(diffMin / 60);
+    if (diffH < 24) return `${diffH} h`;
+    const diffD = Math.floor(diffH / 24);
+    return `${diffD} d`;
+  }
+
+  async function handleMarkAllNotificationsRead() {
+    if (!slug || notificationsUnread === 0) return;
+    const apiHeaders = { "X-Company-Slug": slug };
+    try {
+      setNotificationsLoading(true);
+      await fetch("/api/notifications/mark-all-read", {
+        method: "POST",
+        credentials: "include",
+        headers: apiHeaders,
+      });
+      setNotifications((items) => items.map((n) => ({ ...n, is_read: true })));
+      setNotificationsUnread(0);
+    } catch {
+      // silencioso
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }
 
   if (!base) return null;
 
@@ -89,19 +154,73 @@ export function AppHeader() {
       </Link>
       <div className="relative flex items-center gap-2" ref={dropdownRef}>
         {canShowNewNotifications && (
-          <Link
-            href={`${base}/conversas`}
-            className="relative flex items-center justify-center rounded-lg p-2.5 text-[#64748B] hover:bg-amber-50 hover:text-amber-700 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-200"
-            aria-label={unassignedCount > 0 ? `${unassignedCount} novos chamados — clicar para abrir` : "Conversas — ver novos chamados"}
-            title={unassignedCount > 0 ? `${unassignedCount} novo(s) chamado(s) não atribuído(s)` : "Conversas"}
-          >
-            <Bell className="h-5 w-5 shrink-0" />
-            {unassignedCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white shadow-sm">
-                {unassignedCount > 99 ? "99+" : unassignedCount}
-              </span>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setNotificationsOpen((o) => !o)}
+              className="flex items-center justify-center rounded-md p-2.5 text-[#64748B] hover:bg-amber-50 hover:text-amber-700 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-200"
+              aria-label="Notificações"
+              title="Notificações"
+            >
+              <Bell className="h-5 w-5 shrink-0" />
+            </button>
+            {notificationsOpen && (
+              <div className="absolute right-[2.75rem] top-[120%] z-50 w-[360px] max-w-[92vw] rounded-lg border border-[#E2E8F0] bg-white shadow-xl">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[#E2E8F0]">
+                  <div className="text-sm font-semibold text-[#0F172A]">Notificações</div>
+                  <button
+                    type="button"
+                    onClick={handleMarkAllNotificationsRead}
+                    disabled={notificationsUnread === 0 || notificationsLoading}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-clicvend-green hover:text-clicvend-green-dark disabled:opacity-40"
+                  >
+                    {notificationsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    Marcar todas como lidas
+                  </button>
+                </div>
+                <div className="max-h-[360px] overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="px-4 py-6 text-sm text-[#64748B]">
+                      Nenhuma notificação por enquanto.
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-[#E2E8F0]/70">
+                      {notifications.map((n) => (
+                        <li
+                          key={n.id}
+                          className={`px-4 py-3 text-sm ${n.is_read ? "bg-white" : "bg-[#F8FAFC]"}`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span
+                              className={`mt-1 h-2.5 w-2.5 rounded-full ${
+                                n.is_read ? "bg-[#E2E8F0]" : "bg-clicvend-green"
+                              }`}
+                              aria-hidden
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="truncate text-[13px] font-semibold text-[#0F172A]">
+                                  {n.title}
+                                </p>
+                                <span className="shrink-0 text-[11px] text-[#94A3B8]">
+                                  {formatRelativeTime(n.created_at)}
+                                </span>
+                              </div>
+                              {n.body && (
+                                <p className="mt-0.5 text-[12px] leading-snug text-[#64748B] line-clamp-3">
+                                  {n.body}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
             )}
-          </Link>
+          </div>
         )}
         <button
           type="button"

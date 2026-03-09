@@ -25,6 +25,12 @@ export async function GET(
       next: { revalidate: 3600 },
     });
 
+    if (res.status === 403) {
+      return NextResponse.json(
+        { error: "Limite de consultas excedido. Tente novamente mais tarde." },
+        { status: 403 }
+      );
+    }
     if (res.status === 404) {
       return NextResponse.json({ error: "CNPJ não encontrado" }, { status: 404 });
     }
@@ -37,7 +43,7 @@ export async function GET(
     if (!res.ok) {
       return NextResponse.json(
         { error: "Erro ao consultar CNPJ" },
-        { status: 502 }
+        { status: res.status }
       );
     }
 

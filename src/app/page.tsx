@@ -41,33 +41,33 @@ const LOGO_MISTRAL = "https://xrzhxzmcleacacitbjqn.supabase.co/storage/v1/object
 
 const FEATURE_CARDS = [
   {
-    title: "Conversas centralizadas",
-    desc: "Veja todas as conversas por fila, atribua atendentes e acompanhe o histórico em um só lugar.",
+    title: "Centralização de Conversas",
+    desc: "Gerencie todas as conversas em um único painel, com histórico completo e atribuição inteligente de atendentes.",
     icon: MessageSquare,
   },
   {
-    title: "Filas e equipes",
-    desc: "Organize por Vendas, Suporte ou setor. Defina filas e distribua as conversas entre a equipe.",
+    title: "Filas Inteligentes",
+    desc: "Organize por departamentos (Vendas, Suporte) com distribuição automática entre sua equipe.",
     icon: Inbox,
   },
   {
-    title: "Respostas rápidas",
-    desc: "Crie modelos de mensagem e responda em um clique para agilizar o atendimento.",
+    title: "Respostas Rápidas",
+    desc: "Biblioteca de modelos prontos para responder em um clique e aumentar a produtividade.",
     icon: Zap,
   },
   {
-    title: "Multi-canais",
-    desc: "Conecte mais de um número WhatsApp por empresa e gerencie tudo no mesmo painel.",
+    title: "Multi-Canais",
+    desc: "Conecte múltiplos números WhatsApp e gerencie tudo de forma unificada e organizada.",
     icon: Plug,
   },
   {
-    title: "Contatos e grupos",
-    desc: "Sincronize contatos do WhatsApp, gerencie grupos e comunidades. Exporte em CSV.",
+    title: "Gestão de Contatos",
+    desc: "Sincronize e organize contatos, grupos e comunidades com exportação completa em CSV.",
     icon: Users,
   },
   {
-    title: "Tickets",
-    desc: "Quadro Kanban por status. Atribua, reatribua e acompanhe o andamento dos atendimentos.",
+    title: "Sistema de Tickets",
+    desc: "Quadro Kanban com status personalizáveis para acompanhamento detalhado de cada atendimento.",
     icon: Ticket,
   },
 ];
@@ -128,51 +128,58 @@ export default function HomePage() {
         <div className="relative mx-auto w-[92%] max-w-6xl px-4 py-20 md:py-28">
           <div className="mx-auto max-w-2xl text-center">
             <motion.h1
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
+              transition={{ duration: 0.4 }}
               className="font-display text-4xl font-bold tracking-tight text-white md:text-5xl lg:text-6xl"
             >
-              Todos os seus números de WhatsApp em um único lugar
+              Centralize todos os seus WhatsApp em um único painel
             </motion.h1>
             <motion.p
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
+              transition={{ duration: 0.4, delay: 0.1 }}
               className="mt-6 font-display text-lg leading-relaxed text-white/90 md:text-xl"
             >
-              Gerenciamento total. Centralize conversas, filas e equipes em um só painel. Atendimento profissional pelo canal que seu cliente já usa.
+              Gerencie múltiplos números, equipes e conversas do WhatsApp em uma plataforma única. Atendimento profissional escalável para sua empresa.
             </motion.p>
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="mt-10"
+              transition={{ duration: 0.4, delay: 0.2 }}
+              className="mt-10 flex flex-col gap-4 sm:flex-row sm:justify-center"
             >
               <Link
                 href="/onboarding"
-                className="inline-flex items-center gap-2 rounded-full bg-white px-8 py-4 text-base font-semibold text-[#1E293B] shadow-lg transition-all hover:bg-white/95 hover:shadow-xl"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#34B097] to-[#2D9B85] px-8 py-4 text-base font-semibold text-white shadow-lg transition-all hover:from-[#2D9B85] hover:to-[#268571] hover:shadow-xl hover:shadow-[#34B097]/25"
               >
-                <span className="font-display">Gerenciamento total</span>
+                <span className="font-display">Começar gratuitamente</span>
                 <ChevronRight className="h-5 w-5 shrink-0" />
               </Link>
+              <button
+                onClick={() => setModal("pedir-acesso")}
+                className="inline-flex items-center justify-center gap-2 rounded-full border-2 border-white px-8 py-4 text-base font-semibold text-white transition-all hover:bg-white/10"
+              >
+                <span className="font-display">Já tenho acesso</span>
+              </button>
             </motion.div>
           </div>
         </div>
       </section>
 
-      {/* Action Chips */}
-      <section className="border-b border-[#E2E8F0] bg-white py-12">
-        <div className="mx-auto w-[92%] max-w-6xl">
-          <div className="flex flex-wrap justify-center gap-3">
+      {/* Action Chips - Melhor responsividade */}
+      <section className="border-b border-[#E2E8F0] bg-white py-8 md:py-12">
+        <div className="mx-auto w-[92%] max-w-6xl px-4">
+          <div className="flex flex-wrap justify-center gap-2 md:gap-3">
             {ACTION_CHIPS.map((chip) => (
               <button
                 key={chip.label}
                 type="button"
-                className="inline-flex items-center gap-2 rounded-full border border-[#C8E6C9] bg-[#E8F5E9] px-4 py-2.5 text-sm font-medium text-[#1E293B] transition-colors hover:border-[#A5D6A7] hover:bg-[#C8E6C9]"
+                aria-label={chip.label}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#C8E6C9] bg-[#E8F5E9] px-3 py-2 text-xs font-medium text-[#1E293B] transition-colors hover:border-[#A5D6A7] hover:bg-[#C8E6C9] md:gap-2 md:px-4 md:py-2.5 md:text-sm"
               >
-                <span>{chip.icon}</span>
-                <span>{chip.label}</span>
+                <span className="text-sm md:text-base" aria-hidden="true">{chip.icon}</span>
+                <span className="truncate">{chip.label}</span>
               </button>
             ))}
           </div>
@@ -183,7 +190,7 @@ export default function HomePage() {
       <section className="bg-white py-20">
         <div className="mx-auto w-[92%] max-w-6xl">
           <h2 className="mb-12 text-center text-3xl font-bold text-[#1E293B] md:text-4xl">
-            O que você pode fazer com ClicVend hoje
+            Recursos poderosos para transformar seu atendimento
           </h2>
           <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURE_CARDS.map(({ title, desc, icon: Icon }) => (
@@ -211,19 +218,29 @@ export default function HomePage() {
         <div className="mx-auto w-[92%] max-w-4xl space-y-10">
           <div className="overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-lg">
             <h3 className="text-xl font-bold text-[#1E293B] md:text-2xl">
-              IA para expandir seus atendimentos e vendas. Desafogue suas equipes com líderes de mercado embarcados na nossa solução AI.
+              Inteligência Artificial para potencializar seus resultados
             </h3>
+            <p className="mt-4 text-[#64748B] leading-relaxed">
+              Tecnologia de ponta das principais plataformas de IA integrada para automatizar atendimentos, 
+              gerar respostas inteligentes e aumentar a eficiência da sua equipe.
+            </p>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-12">
             <img
               src={LOGO_MISTRAL}
               alt="Mistral AI"
-              className="h-24 w-auto object-contain rounded-[20%] md:h-28"
+              width={112}
+              height={112}
+              loading="lazy"
+              className="h-20 w-auto object-contain rounded-lg md:h-28"
             />
             <img
               src={LOGO_GOOGLE}
               alt="Google AI"
-              className="h-24 w-auto object-contain rounded-[20%] md:h-28"
+              width={112}
+              height={112}
+              loading="lazy"
+              className="h-20 w-auto object-contain rounded-lg md:h-28"
             />
           </div>
         </div>
@@ -233,16 +250,19 @@ export default function HomePage() {
       <section className="border-t border-[#E2E8F0] bg-white py-20">
         <div className="mx-auto w-[92%] max-w-xl text-center">
           <h2 className="text-2xl font-bold text-[#1E293B]">Assine nossa newsletter</h2>
+          <p className="mt-2 text-[#64748B]">Receba novidades e dicas para melhorar seu atendimento</p>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
             <input
               type="email"
               placeholder="Seu email aqui..."
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              aria-label="Email para newsletter"
               className="rounded-xl border border-[#E2E8F0] bg-white px-5 py-3.5 text-[#1E293B] placeholder-[#94A3B8] focus:border-[#34B097] focus:outline-none focus:ring-2 focus:ring-[#34B097]/20 sm:min-w-[280px]"
             />
             <button
               type="button"
+              aria-label="Assinar newsletter"
               className="rounded-xl bg-gradient-to-r from-[#34B097] to-[#2D9B85] px-8 py-3.5 font-semibold text-white shadow-md transition-all hover:shadow-lg"
             >
               Assinar

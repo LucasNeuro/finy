@@ -239,6 +239,208 @@ function ChatAudioPlayer({
   );
 }
 
+/** Barra de preview do áudio gravado antes de enviar (miniplayer com degradê verde). */
+function RecordingPreviewBar({
+  src,
+  isLoading,
+  sending,
+  onSend,
+  onDiscard,
+}: {
+  src: string | null;
+  isLoading: boolean;
+  sending: boolean;
+  onSend: () => void;
+  onDiscard: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    setPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    if (!el || !src) return;
+    const onTimeUpdate = () => setCurrentTime(el.currentTime);
+    const onLoadedMetadata = () => setDuration(el.duration || 0);
+    const onEnded = () => setPlaying(false);
+    el.addEventListener("timeupdate", onTimeUpdate);
+    el.addEventListener("loadedmetadata", onLoadedMetadata);
+    el.addEventListener("ended", onEnded);
+    return () => {
+      el.removeEventListener("timeupdate", onTimeUpdate);
+      el.removeEventListener("loadedmetadata", onLoadedMetadata);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [src]);
+
+  const togglePlay = useCallback(() => {
+    const el = audioRef.current;
+    if (!el || !src) return;
+    if (playing) {
+      el.pause();
+      setPlaying(false);
+    } else {
+      el
+        .play()
+        .then(() => setPlaying(true))
+        .catch(() => {
+          setPlaying(false);
+        });
+    }
+  }, [playing, src]);
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = audioRef.current;
+    if (!el || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    el.currentTime = pct * duration;
+    setCurrentTime(el.currentTime);
+  };
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  if (isLoading || !src) {
+    return (
+      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 px-5 py-3 shadow-lg text-white">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15">
+            <Loader2 className="h-5 w-5 animate-spin text-white" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold">Preparando áudio…</span>
+            <span className="text-xs text-emerald-50/80">Aguarde um instante antes de enviar.</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="rounded-full border border-white/60 px-4 py-1.5 text-xs font-medium text-white/90 hover:bg-white/10"
+        >
+          Cancelar
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 px-5 py-3 shadow-lg text-white">
+      {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
+      <button
+        type="button"
+        onClick={togglePlay}
+        className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-emerald-600 shadow-md hover:scale-105 transition-transform"
+        aria-label={playing ? "Pausar pré-visualização" : "Reproduzir pré-visualização"}
+      >
+        {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-50/90">
+          Pré-visualização do áudio
+        </p>
+        <div className="mt-1 flex items-center justify-between text-[11px] text-emerald-50/90">
+          <span>{formatDuration(currentTime)}</span>
+          <span>{duration ? formatDuration(duration) : "–:––"}</span>
+        </div>
+        <div
+          className="mt-1.5 h-1.5 w-full rounded-full bg-emerald-300/50 overflow-hidden cursor-pointer"
+          onClick={handleSeek}
+        >
+          <div
+            className="h-full rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)] transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+      <div className="flex flex-col items-center gap-2 ml-1 shrink-0">
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={sending}
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-emerald-600 shadow-md hover:bg-emerald-50 disabled:opacity-60"
+          title="Enviar áudio gravado"
+          aria-label="Enviar áudio gravado"
+        >
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-white/70 text-white/90 hover:bg-white/10"
+          title="Descartar gravação"
+          aria-label="Descartar gravação"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Barra enquanto está gravando (mostra tempo e "ondas" animadas). */
+function RecordingInProgressBar({
+  seconds,
+  onStop,
+}: {
+  seconds: number;
+  onStop: () => void;
+}) {
+  const [levels, setLevels] = useState<number[]>([0.4, 0.7, 0.5, 0.8, 0.6, 0.75]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setLevels((prev) =>
+        prev.map(() => 0.3 + Math.random() * 0.7)
+      );
+    }, 160);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-400 px-5 py-3 shadow-lg text-white">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onStop}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-emerald-600 shadow-md hover:bg-emerald-50"
+          aria-label="Parar gravação"
+        >
+          <Square className="h-5 w-5" />
+        </button>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-emerald-50/90">
+            Gravando áudio…
+          </span>
+          <span className="text-sm font-medium text-white">
+            {formatDuration(seconds)}
+          </span>
+        </div>
+      </div>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex items-end gap-1 h-8 w-full max-w-xs">
+          {levels.map((h, idx) => (
+            <div
+              // eslint-disable-next-line react/no-array-index-key
+              key={idx}
+              className="flex-1 rounded-full bg-emerald-200/70 transition-all"
+              style={{ height: `${h * 100}%` }}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="hidden sm:flex flex-col items-end text-[11px] text-emerald-50/90">
+        <span>Toque em parar para revisar</span>
+        <span>O áudio só será enviado depois da confirmação.</span>
+      </div>
+    </div>
+  );
+}
+
 /** Player de vídeo com fallback em caso de erro de carregamento (ex.: CORS, URL inválida). */
 function VideoPlayerWithFallback({
   src,
@@ -780,6 +982,7 @@ export default function ConversaThreadPage({
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [hasMoreOlderMessages, setHasMoreOlderMessages] = useState(true);
   const [inputEmojiPickerOpen, setInputEmojiPickerOpen] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -1442,6 +1645,17 @@ export default function ConversaThreadPage({
   }, [inputEmojiPickerOpen]);
 
   useEffect(() => {
+    if (!recording) {
+      setRecordingSeconds(0);
+      return;
+    }
+    const id = setInterval(() => {
+      setRecordingSeconds((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [recording]);
+
+  useEffect(() => {
     if (!recordedVideoBlob) {
       setRecordedVideoPreviewUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
@@ -1725,8 +1939,21 @@ export default function ConversaThreadPage({
         </div>
 
         <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-2">
-
           {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
+          {recording ? (
+            <RecordingInProgressBar
+              seconds={recordingSeconds}
+              onStop={stopRecording}
+            />
+          ) : recordedAudioBlob ? (
+            <RecordingPreviewBar
+              src={recordedAudioPreviewUrl}
+              isLoading={!!recordedAudioBlob && !recordedAudioPreviewUrl}
+              sending={sending}
+              onSend={sendRecordedAudio}
+              onDiscard={discardRecordedAudio}
+            />
+          ) : (
           <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 items-center ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
             <input
               type="file"
@@ -1828,47 +2055,7 @@ export default function ConversaThreadPage({
               className="flex-1 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
               disabled={sending || isLoading}
             />
-            {recording ? (
-              <button
-                type="button"
-                onClick={stopRecording}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
-              >
-                <Square className="h-4 w-4" />
-                Parar
-              </button>
-            ) : recordedAudioBlob ? (
-              <div className="flex items-center gap-3 min-w-0 max-w-[520px]">
-                <div className="flex-1 min-w-0">
-                  <ChatAudioPlayer
-                    src={recordedAudioPreviewUrl}
-                    isLoading={!!recordedAudioBlob && !recordedAudioPreviewUrl}
-                    onDownload={undefined}
-                  />
-                </div>
-                <div className="flex flex-col gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={sendRecordedAudio}
-                    disabled={sending}
-                    className="inline-flex items-center justify-center rounded-full bg-clicvend-green h-9 w-9 text-white hover:bg-clicvend-green/90 disabled:opacity-50"
-                    title="Enviar áudio gravado"
-                    aria-label="Enviar áudio gravado"
-                  >
-                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={discardRecordedAudio}
-                    className="inline-flex items-center justify-center rounded-full border border-[#E2E8F0] h-9 w-9 text-[#64748B] hover:bg-[#F8FAFC]"
-                    title="Descartar gravação"
-                    aria-label="Descartar gravação"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            ) : (
+            {!recording && (
               <button
                 type="button"
                 onClick={startRecording}
@@ -1887,6 +2074,7 @@ export default function ConversaThreadPage({
               {sending ? "Enviando…" : "Enviar"}
             </button>
           </form>
+          )}
         </div>
       </div>
 

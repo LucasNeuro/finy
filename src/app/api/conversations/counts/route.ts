@@ -59,7 +59,7 @@ export async function GET(request: Request) {
   }
 
   if (allowedQueueIds !== null && allowedQueueIds.length === 0 && allowedGroupKeys.length === 0) {
-    const res = NextResponse.json({ mine: 0, queues: 0, individual: 0, groups: 0 });
+    const res = NextResponse.json({ mine: 0, queues: 0, individual: 0, groups: 0, unassigned: 0, mine_closed: 0 });
     return withMetricsHeaders(res, { cacheHit: false, startTime });
   }
 
@@ -84,6 +84,7 @@ export async function GET(request: Request) {
   let individualQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", false).in("status", activeStatuses);
   let groupsQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", true).in("status", activeStatuses);
   let unassignedQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).is("assigned_to", null).in("status", unassignedStatuses);
+  let mineClosedQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("status", "closed");
 
   if (allowedQueueIds !== null) {
     if (allowedGroupKeys.length === 0) {
@@ -92,6 +93,7 @@ export async function GET(request: Request) {
       individualQ = individualQ.in("queue_id", allowedQueueIds);
       groupsQ = groupsQ.in("queue_id", allowedQueueIds);
       unassignedQ = unassignedQ.in("queue_id", allowedQueueIds);
+      mineClosedQ = mineClosedQ.in("queue_id", allowedQueueIds);
     } else {
       const orPred = `queue_id.in.(${allowedQueueIds.join(",")}),external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`;
       queuesQ = queuesQ.or(orPred);
@@ -99,15 +101,17 @@ export async function GET(request: Request) {
       individualQ = individualQ.or(orPred);
       groupsQ = groupsQ.or(orPred);
       unassignedQ = unassignedQ.or(orPred);
+      mineClosedQ = mineClosedQ.or(orPred);
     }
   }
 
-  const [queuesRes, mineRes, individualRes, groupsRes, unassignedRes] = await Promise.all([
+  const [queuesRes, mineRes, individualRes, groupsRes, unassignedRes, mineClosedRes] = await Promise.all([
     queuesQ,
     mineQ,
     individualQ,
     groupsQ,
     unassignedQ,
+    mineClosedQ,
   ]);
 
   const mine = typeof mineRes.count === "number" ? mineRes.count : 0;
@@ -115,8 +119,9 @@ export async function GET(request: Request) {
   const individual = typeof individualRes.count === "number" ? individualRes.count : 0;
   const groups = typeof groupsRes.count === "number" ? groupsRes.count : 0;
   const unassigned = typeof unassignedRes.count === "number" ? unassignedRes.count : 0;
+  const mine_closed = typeof mineClosedRes.count === "number" ? mineClosedRes.count : 0;
 
-  const payload = { mine, queues, individual, groups, unassigned };
+  const payload = { mine, queues, individual, groups, unassigned, mine_closed };
   if (userId) {
     await setCachedCounts(companyId, userId, payload);
     await setCachedCountsInSupabase(companyId, userId, payload);

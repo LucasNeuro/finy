@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo, useRef } from "react";
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -73,10 +73,10 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   return s.slice(0, 14) + "…";
 }
 
-type ViewMode = "mine" | "queues" | "unassigned";
+type ViewMode = "mine" | "queues" | "unassigned" | "mine_closed";
 type ConversationTypeFilter = "all" | "individual" | "group";
-/** Tab ativa: só ícones — Novos, Filas, Meus atendimentos, Contatos (individuais), Grupos */
-type TabId = "novos" | "queues" | "mine" | "contacts" | "groups";
+/** Tab ativa: Novos, Filas, Meus, Meus encerrado, Contatos, Grupos */
+type TabId = "novos" | "queues" | "mine" | "mine_closed" | "contacts" | "groups";
 
 /** Contato da API /api/contacts (mesma lista do módulo Contatos) */
 type SidebarContact = {
@@ -416,6 +416,7 @@ export function ConversasSidebar() {
             queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
             queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
             queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "unassigned") });
+            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine_closed") });
             queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
             if (typeof window !== "undefined") {
               window.dispatchEvent(new CustomEvent("conversations-status-reset"));
@@ -425,7 +426,11 @@ export function ConversasSidebar() {
         .finally(() => setResettingToOpen(false));
     }
   };
-  const viewMode: ViewMode = activeTab === "queues" ? "queues" : activeTab === "novos" ? "unassigned" : "mine";
+  const viewMode: ViewMode =
+    activeTab === "queues" ? "queues"
+    : activeTab === "novos" ? "unassigned"
+    : activeTab === "mine_closed" ? "mine_closed"
+    : "mine";
   const typeFilter: ConversationTypeFilter =
     activeTab === "groups" ? "group" : activeTab === "contacts" ? "individual" : "all";
   const queryClient = useQueryClient();
@@ -491,6 +496,7 @@ export function ConversasSidebar() {
     individual: typeof countsData?.individual === "number" ? countsData.individual : 0,
     groups: typeof countsData?.groups === "number" ? countsData.groups : 0,
     unassigned: typeof (countsData as { unassigned?: number })?.unassigned === "number" ? (countsData as { unassigned: number }).unassigned : 0,
+    mine_closed: typeof (countsData as { mine_closed?: number })?.mine_closed === "number" ? (countsData as { mine_closed: number }).mine_closed : 0,
   };
 
   // Re-verificar scroll dos tabs quando counts mudarem (após counts ser definido)
@@ -520,6 +526,10 @@ export function ConversasSidebar() {
   conversationsParams.set("limit", "500");
   if (viewMode === "mine") conversationsParams.set("only_assigned_to_me", "1");
   if (viewMode === "unassigned") conversationsParams.set("only_unassigned", "1");
+  if (viewMode === "mine_closed") {
+    conversationsParams.set("only_assigned_to_me", "1");
+    conversationsParams.set("status", "closed");
+  }
 
   const {
     data: conversationsData,
@@ -706,6 +716,25 @@ export function ConversasSidebar() {
           </button>
           <button
             type="button"
+            onClick={() => handleTabChange("mine_closed")}
+            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
+              activeTab === "mine_closed"
+                ? "bg-slate-100 text-slate-800 shadow-md shadow-slate-200/50 border border-slate-200/70"
+                : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
+            }`}
+            title="Meus encerrados"
+            aria-label="Meus encerrados"
+          >
+            <Archive className="h-5 w-5 shrink-0" />
+            <span className="truncate text-xs font-semibold">Encerrados</span>
+            {counts.mine_closed > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-slate-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
+                {counts.mine_closed > 99 ? "99+" : counts.mine_closed}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab("contacts")}
             className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "contacts"
@@ -838,6 +867,7 @@ export function ConversasSidebar() {
               {activeTab === "mine" && "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."}
               {activeTab === "queues" && "Nenhuma conversa nas suas filas no momento."}
               {activeTab === "novos" && "Novos chamados aparecem aqui. Clique em Pegar para assumir."}
+              {activeTab === "mine_closed" && "Nenhum chamado encerrado por você ainda. Ao fechar atendimentos, eles aparecerão aqui."}
             </p>
             <p className="mt-3 text-xs leading-relaxed">
               Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline font-medium">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline font-medium">Conexões</Link> recebem mensagens e histórico em segundo plano.
@@ -873,7 +903,7 @@ export function ConversasSidebar() {
                         }).then((r) => r.json()),
                     });
                   } : undefined}
-                  showQueueColors={activeTab === "queues" || activeTab === "novos" || activeTab === "mine"}
+                  showQueueColors={activeTab === "queues" || activeTab === "novos" || activeTab === "mine" || activeTab === "mine_closed"}
                   activeTab={activeTab}
                 />
               ))}

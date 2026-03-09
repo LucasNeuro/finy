@@ -56,16 +56,35 @@ export async function POST(request: Request) {
   const avatarUrl = (data as { imagePreview?: string; image?: string }).imagePreview
     || (data as { image?: string }).image
     || null;
-  if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
+  const contactName = ((data as { wa_contactName?: string }).wa_contactName
+    ?? (data as { wa_name?: string }).wa_name
+    ?? (data as { name?: string }).name)?.trim() || null;
+
+  const hasUpdates = (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) || contactName;
+  if (hasUpdates) {
     const supabase = await createClient();
     const jidNorm = number.includes("@") ? number : `${number.replace(/\D/g, "")}@s.whatsapp.net`;
     const jids = number === jidNorm ? [number] : [number, jidNorm];
+    const contactUpdates: Record<string, unknown> = { synced_at: new Date().toISOString() };
+    if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
+      contactUpdates.avatar_url = avatarUrl.trim();
+    }
+    if (contactName) {
+      contactUpdates.contact_name = contactName;
+      contactUpdates.first_name = contactName;
+    }
     await supabase
       .from("channel_contacts")
-      .update({ avatar_url: avatarUrl.trim(), synced_at: new Date().toISOString() })
+      .update(contactUpdates)
       .eq("channel_id", channelId)
       .eq("company_id", companyId)
       .in("jid", jids);
+    if (conversationId && contactName) {
+      await supabase
+        .from("conversations")
+        .update({ customer_name: contactName, updated_at: new Date().toISOString() })
+        .eq("id", conversationId);
+    }
     await invalidateConversationList(companyId);
     if (conversationId) {
       await invalidateConversationDetail(conversationId);
