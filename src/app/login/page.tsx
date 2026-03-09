@@ -3,7 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
-import { Globe, Eye, EyeOff, LogIn } from "lucide-react";
+import { Eye, EyeOff, LogIn } from "lucide-react";
 import { useLogin } from "@/lib/auth/use-login";
 
 function LoginForm() {
@@ -20,25 +20,30 @@ function LoginForm() {
   const isValid = email.trim().length > 0 && password.length > 0;
 
   const inputClass =
-    "w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-blue focus:bg-white focus:outline-none focus:ring-2 focus:ring-clicvend-blue/20 transition-all";
+    "w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3.5 text-[#1E293B] placeholder-[#94A3B8] focus:border-[#34B097] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#34B097]/20 transition-all";
 
   return (
-    <>
-      {/* Background */}
-      <div className="absolute inset-0 bg-[#F8FAFC]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_0%,rgba(37,99,235,0.12),transparent_60%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_40%_at_80%_80%,rgba(99,102,241,0.08),transparent)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_40%_30%_at_20%_90%,rgba(59,130,246,0.06),transparent)]" />
+    <div className="flex min-h-screen flex-row-reverse">
+      {/* Fundo degradê verde - lado direito no desktop */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#0D2B26] via-[#134D45] to-[#1A6B5C] md:relative md:flex-1">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_80%_50%,rgba(52,176,151,0.2),transparent)] pointer-events-none" />
+      </div>
 
-      <div className="relative w-full max-w-[420px]">
-        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 shadow-xl shadow-clicvend-blue/5 sm:p-10">
-          <Link href="/" className="flex justify-center focus:outline-none focus:ring-2 focus:ring-clicvend-blue focus:ring-offset-2 rounded">
-            <ClicVendLogo size="lg" />
-          </Link>
+      {/* Faixa branca à esquerda com o form - maior */}
+      <div className="relative z-10 flex w-full min-h-screen flex-col justify-center bg-white p-8 md:w-[55%] md:min-w-[520px] md:max-w-[640px] md:flex-none md:shadow-[8px_0_24px_rgba(0,0,0,0.08)]">
+        <div className="mx-auto w-full max-w-md">
+        <Link
+          href="/"
+          className="flex justify-center focus:outline-none focus:ring-2 focus:ring-[#34B097] focus:ring-offset-2 rounded"
+        >
+          <ClicVendLogo size="lg" />
+        </Link>
 
-          <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-8 space-y-4">
           <div>
-            <label htmlFor="email" className="sr-only">E-mail</label>
+            <label htmlFor="email" className="sr-only">
+              E-mail
+            </label>
             <input
               id="email"
               type="email"
@@ -51,7 +56,9 @@ function LoginForm() {
           </div>
 
           <div>
-            <label htmlFor="password" className="sr-only">Senha</label>
+            <label htmlFor="password" className="sr-only">
+              Senha
+            </label>
             <div className="relative">
               <input
                 id="password"
@@ -59,13 +66,13 @@ function LoginForm() {
                 placeholder="Digite a senha"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className={inputClass + " pr-12"}
+                className={`${inputClass} pr-12`}
                 autoComplete="current-password"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#1E293B] transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748B] transition-colors hover:text-[#1E293B]"
                 aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -74,7 +81,10 @@ function LoginForm() {
           </div>
 
           <div className="flex justify-end">
-            <Link href="/recuperar-senha" className="text-sm font-medium text-[#64748B] hover:text-clicvend-blue transition-colors">
+            <Link
+              href="/recuperar-senha"
+              className="text-sm font-medium text-[#64748B] transition-colors hover:text-[#34B097]"
+            >
               Esqueci minha senha
             </Link>
           </div>
@@ -84,47 +94,28 @@ function LoginForm() {
           <button
             type="submit"
             disabled={!isValid || loading}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 font-semibold text-white shadow-lg shadow-clicvend-blue/25 transition-all disabled:cursor-not-allowed disabled:bg-[#94A3B8] disabled:shadow-none enabled:bg-clicvend-orange enabled:hover:bg-clicvend-orange-dark"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#34B097] py-3.5 font-semibold text-white shadow-lg transition-all hover:bg-[#2D9B85] disabled:cursor-not-allowed disabled:bg-[#94A3B8] disabled:shadow-none"
           >
             <LogIn className="h-4 w-4" />
             {loading ? "Entrando…" : "Entrar"}
           </button>
         </form>
-
-          <div className="mt-6 flex items-center justify-center gap-2 text-[#64748B]">
-            <Globe className="h-4 w-4" />
-            <span className="text-sm">Português</span>
-            <span className="text-xs">&#9660;</span>
-          </div>
-
-          <p className="mt-4 text-center text-sm text-[#64748B]">
-            Não tem conta?{" "}
-            <Link href="/onboarding" className="font-semibold text-clicvend-blue hover:underline">
-              Cadastre-se
-            </Link>
-          </p>
         </div>
-
-        <footer className="mt-8 flex flex-wrap items-center justify-center gap-2 text-center text-sm text-[#64748B]">
-          <span>ClicVend © 2026</span>
-          <span className="text-[#CBD5E1]">|</span>
-          <Link href="#" className="hover:text-clicvend-blue transition-colors">Termos de uso</Link>
-          <span className="text-[#CBD5E1]">|</span>
-          <Link href="#" className="hover:text-clicvend-blue transition-colors">Política de Privacidade</Link>
-        </footer>
       </div>
-    </>
+    </div>
   );
 }
 
 export default function LoginPage() {
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 py-12">
-      <Suspense fallback={
-        <div className="flex min-h-[400px] items-center justify-center">
-          <div className="text-[#64748B]">Carregando…</div>
-        </div>
-      }>
+    <main className="min-h-screen">
+      <Suspense
+        fallback={
+          <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
+            <div className="text-[#64748B]">Carregando…</div>
+          </div>
+        }
+      >
         <LoginForm />
       </Suspense>
     </main>

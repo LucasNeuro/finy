@@ -724,6 +724,7 @@ export default function ConversaThreadPage({
   const [resolvedParams, setResolvedParams] = useState<{ slug: string; id: string } | null>(null);
   const [sendValue, setSendValue] = useState("");
   const [sending, setSending] = useState(false);
+  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [contactDetails, setContactDetails] = useState<ChatDetails | null>(null);
@@ -1066,48 +1067,63 @@ export default function ConversaThreadPage({
     }
   }
 
-  async function handleSend(e?: React.FormEvent, payload?: { type: string; file: string; caption?: string; docName?: string }) {
+  function handleSend(e?: React.FormEvent, payload?: { type: string; file: string; caption?: string; docName?: string }) {
     e?.preventDefault();
-    if (!resolved?.id || sending) return;
+    if (!resolved?.id) return;
     const isMedia = payload && payload.type && payload.file;
     const text = sendValue.trim();
     if (!isMedia && !text) return;
-    setSending(true);
     setError(null);
-    try {
-      const body = isMedia
-        ? { type: payload!.type, file: payload!.file, caption: payload!.caption || "", docName: payload!.docName || "" }
-        : { content: text };
-      const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setError(err?.error ?? "Falha ao enviar");
-        return;
-      }
-      if (!isMedia) setSendValue("");
 
-      queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const sentAt = new Date().toISOString();
+    const msgType = isMedia ? (payload!.type === "ptt" ? "ptt" : payload!.type) : "text";
+    const content = isMedia ? (payload!.caption || `[${msgType}]`) : text;
+    const optimistic: Message = {
+      id: tempId,
+      direction: "out",
+      content,
+      sent_at: sentAt,
+      message_type: msgType,
+      media_url: isMedia ? payload!.file : undefined,
+      caption: payload?.caption,
+      file_name: payload?.docName,
+    };
+    setOptimisticMessages((prev) => [...prev, optimistic]);
+    if (!isMedia) setSendValue("");
+    setSending(false);
 
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-      });
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
 
-      // Aguardar refetch para mostrar a mensagem real — sem bolha otimista (evita duplicação)
-      refetchConversation().then(() => {
+    const body = isMedia
+      ? { type: payload!.type, file: payload!.file, caption: payload!.caption || "", docName: payload!.docName || "" }
+      : { content: text };
+    fetch(`/api/conversations/${resolved.id}/messages`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...apiHeaders },
+      body: JSON.stringify(body),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          setError(err?.error ?? "Falha ao enviar");
+          setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
+          return;
+        }
+        queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+        await refetchConversation();
+        setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
         requestAnimationFrame(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
         });
+      })
+      .catch(() => {
+        setError("Falha ao enviar");
+        setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
       });
-    } catch {
-      setError("Falha ao enviar");
-    } finally {
-      setSending(false);
-    }
   }
 
   function fileToBase64(file: File): Promise<string> {
@@ -1132,7 +1148,7 @@ export default function ConversaThreadPage({
     try {
       const base64 = await fileToBase64(file);
       const uazType = type === "image" ? "image" : type === "audio" ? "audio" : type === "video" ? "video" : "document";
-      await handleSend(undefined, {
+      handleSend(undefined, {
         type: uazType,
         file: base64,
         docName: type === "document" ? file.name : undefined,
@@ -1173,35 +1189,55 @@ export default function ConversaThreadPage({
 
   async function sendRecordedAudio() {
     if (!recordedAudioBlob || !resolved?.id || !apiHeaders) return;
-    setSending(true);
     setError(null);
-    try {
-      const base64 = await new Promise<string>((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res((r.result as string).split(",")[1] || "");
-        r.onerror = rej;
-        r.readAsDataURL(recordedAudioBlob);
-      });
-      const res = await fetch(`/api/conversations/${resolved.id}/messages`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ type: "ptt", file: base64 }),
-      });
-      if (res.ok) {
-        setRecordedAudioBlob(null);
-        requestAnimationFrame(() => {
+    const blob = recordedAudioBlob;
+    setRecordedAudioBlob(null);
+    setSending(false);
+
+    const base64 = await new Promise<string>((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res((r.result as string).split(",")[1] || "");
+      r.onerror = rej;
+      r.readAsDataURL(blob);
+    });
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const sentAt = new Date().toISOString();
+    const optimistic: Message = {
+      id: tempId,
+      direction: "out",
+      content: "[ptt]",
+      sent_at: sentAt,
+      message_type: "ptt",
+      media_url: `data:audio/ogg;base64,${base64}`,
+    };
+    setOptimisticMessages((prev) => [...prev, optimistic]);
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+
+    fetch(`/api/conversations/${resolved.id}/messages`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...apiHeaders },
+      body: JSON.stringify({ type: "ptt", file: base64 }),
+    })
+      .then(async (res) => {
+        if (res.ok) {
+          queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+          await refetchConversation();
+          setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
           requestAnimationFrame(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
           });
-        });
-        await refetchConversation();
-      } else setError("Falha ao enviar áudio");
-    } catch {
-      setError("Falha ao enviar áudio");
-    } finally {
-      setSending(false);
-    }
+        } else {
+          setError("Falha ao enviar áudio");
+          setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
+        }
+      })
+      .catch(() => {
+        setError("Falha ao enviar áudio");
+        setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
+      });
   }
 
   function discardRecordedAudio() {
@@ -1604,30 +1640,45 @@ export default function ConversaThreadPage({
                     </button>
                   </div>
                 )}
-                {(Array.isArray(conv?.messages) ? conv.messages : [])
-                  .filter((m, i, arr) => {
+                {(() => {
+                  const base = Array.isArray(conv?.messages) ? conv.messages : [];
+                  const deduped = base.filter((m, i, arr) => {
                     const id = (m as Message).id;
                     const first = arr.findIndex((x) => (x as Message).id === id);
                     return first === i;
-                  })
-                  .map((m) => (
-                  <div
-                    key={(m as Message).id}
-                    className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
-                  >
-                    <MessageBubble
-                      m={m as Message}
-                      name={name}
-                      conversationId={resolved?.id}
-                      apiHeaders={apiHeaders}
-                      onReaction={handleReaction}
-                      onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
-                        setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
-                      }
-                      onDeleteMessage={handleDeleteMessage}
-                    />
-                  </div>
-                ))}
+                  });
+                  const toAdd = optimisticMessages.filter((opt) => {
+                    const hasMatch = deduped.some(
+                      (m) =>
+                        (m as Message).direction === "out" &&
+                        (m as Message).content === opt.content &&
+                        !String((m as Message).id).startsWith("temp-") &&
+                        Math.abs(new Date((m as Message).sent_at).getTime() - new Date(opt.sent_at).getTime()) < 20000
+                    );
+                    return !hasMatch;
+                  });
+                  const merged = [...deduped, ...toAdd].sort(
+                    (a, b) => new Date((a as Message).sent_at).getTime() - new Date((b as Message).sent_at).getTime()
+                  );
+                  return merged.map((m) => (
+                    <div
+                      key={(m as Message).id}
+                      className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
+                    >
+                      <MessageBubble
+                        m={m as Message}
+                        name={name}
+                        conversationId={resolved?.id}
+                        apiHeaders={apiHeaders}
+                        onReaction={handleReaction}
+                        onOpenDocumentViewer={(messageId, conversationId, fileName, fileUrl) =>
+                          setDocumentViewer({ messageId, conversationId, fileName, initialFileUrl: fileUrl ?? null })
+                        }
+                        onDeleteMessage={handleDeleteMessage}
+                      />
+                    </div>
+                  ));
+                })()}
                 <div ref={messagesEndRef} data-messages-end />
               </>
             )}
