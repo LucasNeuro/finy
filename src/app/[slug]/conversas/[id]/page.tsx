@@ -421,7 +421,7 @@ function MessageBubble({
     <div
       className={`max-w-[90%] rounded-lg px-3 py-2 ${
         m.direction === "out"
-          ? "bg-[#F1F5F9] border border-[#E2E8F0] text-[#1E293B]"
+          ? "bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]"
           : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       }`}
     >
@@ -523,7 +523,7 @@ function MessageBubble({
           <div
             className={`flex items-center gap-2 rounded-lg border py-2 px-2.5 min-w-0 max-w-[320px] ${
               m.direction === "out"
-                ? "border-[#E2E8F0] bg-[#F1F5F9]"
+                ? "border-[#CBD5E1] bg-[#E2E8F0]"
                 : "border-[#E2E8F0] bg-[#F8FAFC]"
             }`}
           >
@@ -1107,15 +1107,27 @@ export default function ConversaThreadPage({
       }
       if (!isMedia) setSendValue("");
 
+      // Uma única bolha: coloca a mensagem no cache na hora e remove o "Enviando…" para não duplicar
+      const optimisticMsg: Message = {
+        id: `temp-send-${Date.now()}`,
+        direction: "out",
+        content: contentToShow,
+        sent_at: new Date().toISOString(),
+        message_type: payload?.type || "text",
+      };
+      queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (prev) => {
+        if (!prev?.messages) return prev;
+        return { ...prev, messages: [...prev.messages, optimisticMsg] };
+      });
+      setPendingOutgoingMessage(null);
+
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
         });
       });
 
-      refetchConversation().then(() => {
-        setPendingOutgoingMessage(null);
-      });
+      refetchConversation();
       queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
     } catch {
       setError("Falha ao enviar");
@@ -1635,7 +1647,7 @@ export default function ConversaThreadPage({
                 ))}
                 {pendingOutgoingMessage && (
                   <div className="flex justify-end">
-                    <div className="max-w-[90%] rounded-lg px-3 py-2 bg-[#F1F5F9] border border-[#E2E8F0] text-[#1E293B]">
+                    <div className="max-w-[90%] rounded-lg px-3 py-2 bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]">
                       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
                         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-clicvend-orange" aria-hidden />
                         Você
