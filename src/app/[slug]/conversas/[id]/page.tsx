@@ -114,12 +114,10 @@ function ChatAudioPlayer({
   src,
   onDownload,
   isLoading,
-  variant = "out",
 }: {
   src: string | null;
   onDownload?: () => void;
   isLoading?: boolean;
-  variant?: "in" | "out";
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -173,23 +171,22 @@ function ChatAudioPlayer({
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  const isIn = variant === "in";
   if (isLoading || !src) {
     return (
-      <div className={`flex items-center gap-3 rounded-xl px-4 py-3 w-full min-w-[280px] shadow-sm ${isIn ? "bg-white/10 border border-white/20" : "bg-[#F8FAFC] border border-[#E2E8F0]"}`}>
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${isIn ? "bg-white/20" : "bg-[#E2E8F0]"}`}>
-          <Loader2 className={`h-5 w-5 animate-spin ${isIn ? "text-amber-300" : "text-clicvend-orange"}`} />
+      <div className="flex items-center gap-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 w-full min-w-[280px] shadow-sm">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
+          <Loader2 className="h-5 w-5 animate-spin text-clicvend-orange" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className={`h-2.5 w-full rounded-full overflow-hidden ${isIn ? "bg-white/20" : "bg-[#E2E8F0]"}`} />
-          <p className={`mt-1.5 text-xs ${isIn ? "text-slate-400" : "text-[#64748B]"}`}>Carregando áudio…</p>
+          <div className="h-2.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
+          <p className="mt-1.5 text-xs text-[#64748B]">Carregando áudio…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex items-center gap-3 rounded-xl px-4 py-3 w-full min-w-[280px] shadow-sm transition-colors ${isIn ? "bg-white/10 border border-white/20 hover:border-white/30" : "bg-[#F8FAFC] border border-[#E2E8F0] hover:border-[#CBD5E1]"}`}>
+    <div className="flex items-center gap-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 w-full min-w-[280px] shadow-sm hover:border-[#CBD5E1] transition-colors">
       {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
       <button
         type="button"
@@ -200,11 +197,11 @@ function ChatAudioPlayer({
         {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
       </button>
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium tabular-nums ${isIn ? "text-slate-200" : "text-[#475569]"}`}>
+        <p className="text-sm font-medium text-[#475569] tabular-nums">
           {formatDuration(currentTime)} / {loaded ? formatDuration(duration) : "–:––"}
         </p>
         <div
-          className={`h-2.5 w-full rounded-full overflow-hidden cursor-pointer mt-1.5 ${isIn ? "bg-white/20" : "bg-[#E2E8F0]"}`}
+          className="h-2.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-1.5"
           onClick={(e) => {
             const el = audioRef.current;
             if (!el) return;
@@ -216,7 +213,7 @@ function ChatAudioPlayer({
           }}
         >
           <div
-            className={`h-full rounded-full transition-all duration-150 ease-out ${isIn ? "bg-amber-400" : "bg-clicvend-orange"}`}
+            className="h-full rounded-full bg-clicvend-orange transition-all duration-150 ease-out"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -377,6 +374,7 @@ function MessageBubble({
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadLoading, setDownloadLoading] = useState(false);
+  const [downloadError, setDownloadError] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [moreEmojisOpen, setMoreEmojisOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
@@ -396,13 +394,31 @@ function MessageBubble({
     if (!(needsDownloadForPlay || needsDownloadForMedia || needsDownloadForDocument) || !conversationId || !apiHeaders || !m.id) return;
     let cancelled = false;
     setDownloadLoading(true);
-    fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { fileURL?: string } | null) => {
-        if (!cancelled && data?.fileURL) setDownloadUrl(data.fileURL);
+    setDownloadError(false);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders, signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) {
+          if (!cancelled) setDownloadError(true);
+          return null;
+        }
+        return r.json();
       })
-      .finally(() => { if (!cancelled) setDownloadLoading(false); });
-    return () => { cancelled = true; };
+      .then((data: { fileURL?: string } | null) => {
+        if (!cancelled && data?.fileURL) {
+          setDownloadUrl(data.fileURL);
+          setDownloadError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setDownloadError(true);
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (!cancelled) setDownloadLoading(false);
+      });
+    return () => { cancelled = true; controller.abort(); clearTimeout(timeout); };
   }, [needsDownloadForPlay, needsDownloadForMedia, needsDownloadForDocument, conversationId, apiHeaders, m.id]);
 
   const audioSrc = (displayType === "audio" || displayType === "ptt") ? (downloadUrl || mediaUrl) : null;
@@ -435,6 +451,7 @@ function MessageBubble({
     }
     if (!conversationId || !apiHeaders || !m.id) return;
     setDownloadLoading(true);
+    setDownloadError(false);
     try {
       const res = await fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders });
       const data = await res.json().catch(() => ({}));
@@ -452,28 +469,28 @@ function MessageBubble({
       className={`rounded-2xl px-4 py-3 shadow-sm transition-shadow hover:shadow-md ${
         m.direction === "out"
           ? "bg-[#E2E8F0] border border-[#CBD5E1]/60 text-[#1E293B]"
-          : "bg-[#334155] border border-[#475569]/40 text-white"
+          : "bg-[#F1F5F9] border border-[#E2E8F0] text-[#1E293B]"
       } ${
         ["video", "audio", "ptt", "image"].includes(displayType)
-          ? "max-w-[95%] min-w-0 w-full"
-          : "max-w-[90%]"
+          ? "max-w-[85%] min-w-0 w-full"
+          : "max-w-[85%]"
       }`}
     >
-      <p className={`text-xs font-medium mb-0.5 flex items-center gap-2 ${m.direction === "out" ? "text-[#64748B]" : "text-slate-300"}`}>
+      <p className={`text-xs font-medium mb-0.5 flex items-center gap-2 ${m.direction === "out" ? "text-[#64748B]" : "text-[#64748B]"}`}>
         {m.direction === "out" ? "Você" : name}
         {typeof m.id === "string" && m.id.startsWith("temp-") && (
           <span className="text-[#64748B] font-normal animate-pulse">Enviando…</span>
         )}
       </p>
       {displayType === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
-        <div className="space-y-1 w-full max-w-[min(100%,720px)]">
+        <div className="space-y-1 w-full max-w-[min(100%,300px)]">
           {(mediaUrl || downloadUrl) ? (
             <>
               <a
                 href={downloadUrl || mediaUrl || "#"}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`block rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange/50 ${m.direction === "out" ? "border border-[#E2E8F0]" : "border border-white/20"}`}
+                className="block rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange/50"
               >
                 <img
                   src={mediaUrl || downloadUrl || ""}
@@ -500,7 +517,7 @@ function MessageBubble({
         <div className="space-y-1">
           {(mediaUrl || downloadUrl) ? (
             <>
-              <div className={`relative rounded-xl overflow-hidden shadow-sm w-full max-w-[min(100%,720px)] group ${m.direction === "out" ? "border border-[#E2E8F0] bg-[#0F172A]" : "border border-white/20 bg-[#0F172A]"}`}>
+              <div className="relative rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm w-full max-w-[min(100%,300px)] bg-[#0F172A] group">
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
@@ -531,11 +548,11 @@ function MessageBubble({
               )}
             </>
           ) : (
-            <div className={`flex items-center gap-2 rounded-xl px-4 py-6 w-full max-w-[min(100%,720px)] ${m.direction === "out" ? "border border-[#E2E8F0] bg-[#F8FAFC]" : "border border-white/20 bg-white/10"}`}>
-              <Loader2 className={`h-6 w-6 animate-spin shrink-0 ${m.direction === "out" ? "text-clicvend-orange" : "text-amber-300"}`} />
+            <div className="flex items-center gap-2 rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 w-full max-w-[min(100%,300px)]">
+              <Loader2 className="h-6 w-6 animate-spin shrink-0 text-clicvend-orange" />
               <div>
-                <p className={`text-sm font-medium ${m.direction === "out" ? "text-[#475569]" : "text-slate-200"}`}>Carregando vídeo…</p>
-                <p className={`text-xs ${m.direction === "out" ? "text-[#64748B]" : "text-slate-400"}`}>A miniatura aparecerá em instantes.</p>
+                <p className="text-sm font-medium text-[#475569]">Carregando vídeo…</p>
+                <p className="text-xs text-[#64748B]">A miniatura aparecerá em instantes.</p>
               </div>
             </div>
           )}
@@ -543,9 +560,9 @@ function MessageBubble({
         </div>
       )}
       {(displayType === "audio" || displayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
-        <div className="space-y-1 w-full max-w-[min(100%,720px)]">
+        <div className="space-y-1 w-full max-w-[min(100%,300px)]">
           <div className="relative">
-            <span className={`absolute -top-0.5 left-0 z-10 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${m.direction === "out" ? "bg-[#CBD5E1]/90 text-[#475569]" : "bg-white/25 text-slate-200"}`}>
+            <span className="absolute -top-0.5 left-0 z-10 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-[#E2E8F0] text-[#475569]">
               Áudio
             </span>
             <div className="pt-5">
@@ -553,7 +570,6 @@ function MessageBubble({
             src={audioSrc}
             isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
             onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
-            variant={m.direction === "in" ? "in" : "out"}
           />
             </div>
           </div>
@@ -564,21 +580,21 @@ function MessageBubble({
         <div className="space-y-1">
           {/* Miniatura do documento: ícone + nome + Ver (só documentos) + Baixar */}
           <div
-            className={`flex items-center gap-2 rounded-lg border py-2 px-2.5 min-w-0 w-full max-w-[min(100%,720px)] ${
+            className={`flex items-center gap-2 rounded-lg border py-2 px-2.5 min-w-0 w-full max-w-[min(100%,300px)] ${
               m.direction === "out"
                 ? "border-[#CBD5E1] bg-[#E2E8F0]"
-                : "border-white/20 bg-white/10"
+                : "border-[#E2E8F0] bg-white"
             }`}
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600">
               <FileText className="h-4 w-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className={`truncate text-sm font-medium ${m.direction === "out" ? "text-[#1E293B]" : "text-slate-100"}`}>
+              <p className="truncate text-sm font-medium text-[#1E293B]">
                 {m.file_name || "Documento"}
               </p>
-              <p className={`text-[10px] ${m.direction === "out" ? "text-[#64748B]" : "text-slate-400"}`}>
-                {downloadUrl ? "Ver · Baixar" : needsDownloadForDocument && downloadLoading ? "Carregando…" : "Baixar"}
+              <p className="text-[10px] text-[#64748B]">
+                {downloadUrl ? "Ver · Baixar" : needsDownloadForDocument && downloadLoading ? "Carregando…" : downloadError ? "Erro ao carregar" : "Baixar"}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
@@ -586,7 +602,7 @@ function MessageBubble({
                 <button
                   type="button"
                   onClick={() => onOpenDocumentViewer(m.id, conversationId, m.file_name ?? null, downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : null))}
-                  className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${m.direction === "out" ? "text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange" : "text-slate-400 hover:bg-white/20 hover:text-amber-300"}`}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
                   title="Visualizar documento"
                 >
                   <Eye className="h-4 w-4" />
@@ -597,7 +613,7 @@ function MessageBubble({
                   href={downloadUrl || (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:")) ? mediaUrl : "#")}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${m.direction === "out" ? "text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange" : "text-slate-400 hover:bg-white/20 hover:text-amber-300"}`}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
                   title="Baixar"
                 >
                   <Download className="h-4 w-4" />
@@ -607,7 +623,7 @@ function MessageBubble({
                   type="button"
                   onClick={handleDownloadClick}
                   disabled={downloadLoading}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${m.direction === "out" ? "text-[#64748B] hover:bg-black/10 hover:text-clicvend-orange" : "text-slate-400 hover:bg-white/20 hover:text-amber-300"}`}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors disabled:opacity-50"
                   title="Baixar"
                 >
                   {downloadLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -639,13 +655,13 @@ function MessageBubble({
       {displayType === "text" && (
         <p className="whitespace-pre-wrap text-sm">{m.content}</p>
       )}
-      <footer className={`mt-2 pt-1.5 flex items-center justify-between gap-2 flex-wrap ${m.direction === "out" ? "border-t border-[#CBD5E1]/50" : "border-t border-white/20"}`}>
+      <footer className={`mt-2 pt-1.5 flex items-center justify-between gap-2 flex-wrap ${m.direction === "out" ? "border-t border-[#CBD5E1]/50" : "border-t border-[#E2E8F0]"}`}>
         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-          <span className={`text-xs ${m.direction === "out" ? "text-[#64748B]" : "text-slate-400"}`}>
+          <span className="text-xs text-[#64748B]">
             {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
           </span>
           {m.reaction && (
-            <span className="text-sm" title="Reação">
+            <span className="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-md bg-white/80 border border-[#E2E8F0] text-base leading-none" title="Reação">
               {m.reaction}
             </span>
           )}
@@ -654,13 +670,13 @@ function MessageBubble({
               href={downloadUrl || mediaUrl || "#"}
               target="_blank"
               rel="noopener noreferrer"
-              className={`inline-flex items-center gap-1 text-xs hover:underline ${m.direction === "out" ? "text-clicvend-orange" : "text-amber-300"}`}
+              className="inline-flex items-center gap-1 text-xs text-clicvend-orange hover:underline"
             >
               <Download className="h-3 w-3" /> Baixar vídeo
             </a>
           )}
           {displayType === "video" && canFetchDownload && !downloadUrl && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))) && (
-            <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className={`inline-flex items-center gap-1 text-xs hover:underline disabled:opacity-50 ${m.direction === "out" ? "text-clicvend-orange" : "text-amber-300"}`}>
+            <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="inline-flex items-center gap-1 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
               {downloadLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} Baixar vídeo
             </button>
           )}
@@ -674,7 +690,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setDeleteMenuOpen((v) => !v); }}
-                className={`p-1 rounded-lg transition-colors ${m.direction === "out" ? "text-[#64748B] hover:bg-[#CBD5E1]/50 hover:text-red-600" : "text-slate-400 hover:bg-white/20 hover:text-red-300"}`}
+                className="p-1 rounded-lg transition-colors text-[#64748B] hover:bg-[#E2E8F0] hover:text-red-600"
                 title="Apagar mensagem"
                 aria-label="Apagar mensagem"
               >
@@ -705,7 +721,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setReactionPickerOpen((v) => !v); }}
-                className={`p-1 rounded-lg transition-colors ${m.direction === "out" ? "text-[#64748B] hover:bg-[#CBD5E1]/50 hover:text-[#1E293B]" : "text-slate-400 hover:bg-white/20 hover:text-white"}`}
+                className="p-1 rounded-lg transition-colors text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#1E293B]"
                 title="Reagir"
                 aria-label="Reagir"
               >
@@ -1150,10 +1166,11 @@ export default function ConversaThreadPage({
       }
       if (!isMedia) setSendValue("");
 
-      // Limpar o "Enviando…" imediatamente para não duplicar a bolha quando o refetch trouxer a mensagem
+      // Limpar o "Enviando…" imediatamente para não duplicar a bolha
       setPendingOutgoingMessage(null);
 
       queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.conversation(resolved.id) });
 
       // Rolar para o fim
       requestAnimationFrame(() => {
@@ -1365,6 +1382,16 @@ export default function ConversaThreadPage({
 
   async function handleReaction(messageId: string, emoji: string) {
     if (!resolved?.id || !apiHeaders) return;
+    // Atualização otimista: mostrar reação imediatamente
+    queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (prev) => {
+      if (!prev?.messages) return prev;
+      return {
+        ...prev,
+        messages: prev.messages.map((msg) =>
+          String(msg.id) === messageId ? { ...msg, reaction: emoji || null } : msg
+        ),
+      };
+    });
     try {
       const res = await fetch(`/api/conversations/${resolved.id}/messages/reaction`, {
         method: "POST",
@@ -1373,8 +1400,12 @@ export default function ConversaThreadPage({
         body: JSON.stringify({ message_id: messageId, emoji }),
       });
       if (res.ok) await refetchConversation();
+      else {
+        // Reverter em caso de erro
+        queryClient.invalidateQueries({ queryKey: queryKeys.conversation(resolved.id) });
+      }
     } catch {
-      // silent fail
+      queryClient.invalidateQueries({ queryKey: queryKeys.conversation(resolved.id) });
     }
   }
 
@@ -1709,7 +1740,7 @@ export default function ConversaThreadPage({
                   }, [])}
                 {pendingOutgoingMessage && (
                   <div className="flex justify-end">
-                    <div className="max-w-[90%] rounded-2xl px-4 py-3 bg-[#E2E8F0] border border-[#CBD5E1]/60 text-[#1E293B] shadow-sm">
+                    <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[#E2E8F0] border border-[#CBD5E1]/60 text-[#1E293B] shadow-sm">
                       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
                         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-clicvend-orange" aria-hidden />
                         Você
