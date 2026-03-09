@@ -75,8 +75,9 @@ function ContactListAvatar({ avatarUrl, name }: { avatarUrl: string | null; name
   const [error, setError] = useState(false);
   const src = avatarSrc(avatarUrl);
   const showImg = src && !error;
+  const initial = (name || " ").slice(0, 1).toUpperCase();
   return (
-    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0] flex items-center justify-center">
+    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0] flex items-center justify-center text-sm font-semibold text-[#64748B]">
       {showImg ? (
         <img
           src={src}
@@ -86,7 +87,7 @@ function ContactListAvatar({ avatarUrl, name }: { avatarUrl: string | null; name
           onError={() => setError(true)}
         />
       ) : (
-        <User className="h-5 w-5 text-[#94A3B8]" />
+        <span aria-hidden>{initial || <User className="h-5 w-5 text-[#94A3B8]" />}</span>
       )}
     </div>
   );
