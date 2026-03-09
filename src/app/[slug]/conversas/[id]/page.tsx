@@ -271,16 +271,22 @@ function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
   return url.startsWith("http") || url.startsWith("data:");
 }
 
-/** Inferir tipo de mídia quando message_type vem "text" mas o conteúdo é [image], [video], etc. */
-function inferDisplayType(messageType: string | undefined, content: string): string {
-  const t = (messageType ?? "text").toLowerCase();
-  if (t !== "text") return t;
+/** Inferir tipo de mídia para mensagens já na conversa (message_type vazio ou conteúdo em formato antigo). */
+function inferDisplayType(messageType: string | undefined, content: string, m?: { file_name?: string | null; media_url?: string | null }): string {
+  const t = (messageType ?? "").trim().toLowerCase();
+  if (t && t !== "text") return t;
   const c = (content ?? "").trim();
   const match = c.match(/^\[(image|video|audio|document|ptt|media|sticker)\]$/i);
   if (match) {
     const k = match[1].toLowerCase();
     return k === "media" ? "document" : k;
   }
+  // Mensagens antigas: conteúdo "Documento" sem colchetes ou só file_name
+  if (m?.file_name || /^documento$/i.test(c) || c === "[Documento]") return "document";
+  if (/^áudio$|^audio$/i.test(c) || c === "[Áudio]") return "audio";
+  if (/^vídeo$|^video$/i.test(c) || c === "[Vídeo]") return "video";
+  if (/^imagem$|^image$/i.test(c) || c === "[Imagem]") return "image";
+  if (m?.media_url && !c && !t) return "document"; // mídia sem tipo nem conteúdo → documento genérico
   return "text";
 }
 
@@ -288,7 +294,7 @@ function inferDisplayType(messageType: string | undefined, content: string): str
 function getMediaMessages(messages: Message[] | undefined): Message[] {
   if (!Array.isArray(messages)) return [];
   return messages.filter((m) => {
-    const type = inferDisplayType(m.message_type, m.content ?? "");
+    const type = inferDisplayType(m.message_type, m.content ?? "", m);
     return ["image", "video", "document", "audio", "ptt"].includes(type);
   });
 }
@@ -325,7 +331,7 @@ function MessageBubble({
   onDeleteMessage?: (messageId: string, forEveryone: boolean) => void;
 }) {
   const type = m.message_type ?? "text";
-  const displayType = inferDisplayType(type, m.content ?? "");
+  const displayType = inferDisplayType(type, m.content ?? "", m);
   const rawMediaUrl = m.media_url;
   const mediaUrl = rawMediaUrl && (rawMediaUrl.startsWith("http") || rawMediaUrl.startsWith("data:"))
     ? rawMediaUrl
