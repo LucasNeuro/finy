@@ -13,6 +13,66 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
+const VIDEO_EXT = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
+const AUDIO_EXT = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+
+/** Normaliza message_type para exibir miniplayers: document → video/audio quando houver file_name, media_url ou content indicando. */
+function normalizeMessageTypes(messages: unknown[]): Record<string, unknown>[] {
+  const list = messages as Record<string, unknown>[];
+  const out = list.map((m) => {
+    const msg = { ...m };
+    const currentType = String(msg.message_type ?? msg.messageType ?? "").trim().toLowerCase();
+    if (currentType === "video" || currentType === "audio" || currentType === "ptt" || currentType === "ptv" || currentType === "myaudio") {
+      return msg;
+    }
+    const fileName = String(msg.file_name ?? msg.fileName ?? "").toLowerCase();
+    const mediaUrl = String(msg.media_url ?? msg.mediaUrl ?? "");
+    if (fileName && VIDEO_EXT.test(fileName)) {
+      msg.message_type = "video";
+      return msg;
+    }
+    if (fileName && AUDIO_EXT.test(fileName)) {
+      msg.message_type = "audio";
+      return msg;
+    }
+    if (mediaUrl) {
+      const prefix = mediaUrl.slice(0, 80);
+      if (/data:video\//i.test(prefix) || (mediaUrl.length < 2000 && VIDEO_EXT.test(mediaUrl))) {
+        msg.message_type = "video";
+        return msg;
+      }
+      if (/data:audio\//i.test(prefix) || (mediaUrl.length < 2000 && AUDIO_EXT.test(mediaUrl))) {
+        msg.message_type = "audio";
+        return msg;
+      }
+    }
+    const content = String(msg.content ?? msg.caption ?? "").trim();
+    if (/^\[?(vídeo|video)\]?$/i.test(content)) {
+      msg.message_type = "video";
+      return msg;
+    }
+    if (/^\[?(áudio|audio|ptt)\]?$/i.test(content)) {
+      msg.message_type = "audio";
+      return msg;
+    }
+    return msg;
+  });
+
+  // Fallback: duas "document" seguidas do mesmo remetente no mesmo minuto → 1º vídeo, 2º áudio
+  const sentAtMinute = (m: Record<string, unknown>) => String(m.sent_at ?? "").slice(0, 16);
+  for (let i = 0; i < out.length - 1; i++) {
+    const a = out[i];
+    const b = out[i + 1];
+    const typeA = String(a.message_type ?? a.messageType ?? "").toLowerCase();
+    const typeB = String(b.message_type ?? b.messageType ?? "").toLowerCase();
+    if (typeA !== "document" || typeB !== "document") continue;
+    if (a.direction !== b.direction || sentAtMinute(a) !== sentAtMinute(b)) continue;
+    a.message_type = "video";
+    b.message_type = "audio";
+  }
+  return out;
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -32,7 +92,8 @@ export async function GET(
   if (!skipCache) {
     const cached = await getCachedConversationDetail(id);
     if (cached) {
-      const res = NextResponse.json(cached);
+      const messages = Array.isArray(cached.messages) ? normalizeMessageTypes(cached.messages) : cached.messages;
+      const res = NextResponse.json({ ...cached, messages });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }
@@ -154,47 +215,7 @@ export async function GET(
     return true;
   });
 
-  // Normalizar message_type para mensagens já salvas: se estiver como "document" (ou vazio) mas
-  // file_name/media_url indicarem vídeo ou áudio, corrigir para exibir miniplayers no front
-  const videoExt = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
-  const audioExt = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
-  messages = (messages as Record<string, unknown>[]).map((m) => {
-    const msg = { ...m };
-    const currentType = String(msg.message_type ?? "").trim().toLowerCase();
-    if (currentType === "video" || currentType === "audio" || currentType === "ptt" || currentType === "ptv" || currentType === "myaudio") {
-      return msg;
-    }
-    const fileName = String(msg.file_name ?? "").toLowerCase();
-    const mediaUrl = String(msg.media_url ?? "");
-    if (fileName && videoExt.test(fileName)) {
-      msg.message_type = "video";
-      return msg;
-    }
-    if (fileName && audioExt.test(fileName)) {
-      msg.message_type = "audio";
-      return msg;
-    }
-    if (mediaUrl && mediaUrl.length < 2000) {
-      if (videoExt.test(mediaUrl) || /data:video\//i.test(mediaUrl)) {
-        msg.message_type = "video";
-        return msg;
-      }
-      if (audioExt.test(mediaUrl) || /data:audio\//i.test(mediaUrl)) {
-        msg.message_type = "audio";
-        return msg;
-      }
-    }
-    const content = String(msg.content ?? msg.caption ?? "").trim();
-    if (/^\[?(vídeo|video)\]?$/i.test(content)) {
-      msg.message_type = "video";
-      return msg;
-    }
-    if (/^\[?(áudio|audio|ptt)\]?$/i.test(content)) {
-      msg.message_type = "audio";
-      return msg;
-    }
-    return msg;
-  });
+  messages = normalizeMessageTypes(messages as Record<string, unknown>[]);
 
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
   const displayPhone = contact_phone_from_cc ?? conversation.customer_phone;
