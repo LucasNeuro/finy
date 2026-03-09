@@ -105,10 +105,20 @@ export async function GET(request: Request) {
       limit
     );
     if (cached) {
-      const sorted = !onlyAssignedToMe && !includeClosed && !onlyUnassigned
-        ? sortQueuesListNewFirst((cached.data ?? []) as { assigned_to?: string | null; status?: string; last_message_at: string }[])
-        : (cached.data ?? []);
-      const res = NextResponse.json({ data: sorted, total: cached.total ?? sorted.length });
+      let sorted = !onlyAssignedToMe && !includeClosed && !onlyUnassigned
+        ? sortQueuesListNewFirst((cached.data ?? []) as { assigned_to?: string | null; status?: string; last_message_at: string; channel_id?: string; customer_phone?: string; is_group?: boolean }[])
+        : (cached.data ?? []) as { channel_id?: string; customer_phone?: string; is_group?: boolean }[];
+      // Deduplica contatos (mesmo canal + mesmo telefone) também ao ler do cache
+      const seen = new Set<string>();
+      sorted = sorted.filter((c) => {
+        if (c.is_group === true) return true;
+        const norm = (toCanonicalDigits(c.customer_phone) ?? (c.customer_phone ?? "").replace(/\D/g, "").trim()) || "";
+        const key = `${c.channel_id ?? ""}|${norm}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const res = NextResponse.json({ data: sorted, total: (cached.total ?? sorted.length) });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }
@@ -330,6 +340,17 @@ export async function GET(request: Request) {
     ...c,
     channel_name: channelNameById[c.channel_id] ?? null,
   }));
+
+  // Evita mesmo contato aparecer 2x (ex.: external_id diferente ou customer_phone 55 vs sem 55)
+  const seenTicketKey = new Set<string>();
+  listWithPreview = listWithPreview.filter((c) => {
+    if (c.is_group === true) return true;
+    const norm = (toCanonicalDigits(c.customer_phone) ?? (c.customer_phone ?? "").replace(/\D/g, "").trim()) || "";
+    const key = `${c.channel_id}|${norm}`;
+    if (seenTicketKey.has(key)) return false;
+    seenTicketKey.add(key);
+    return true;
+  });
 
   if (!onlyAssignedToMe && !includeClosed) {
     listWithPreview = sortQueuesListNewFirst(listWithPreview);

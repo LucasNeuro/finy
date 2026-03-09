@@ -734,6 +734,22 @@ async function processOneMessage(
         .limit(1)
         .maybeSingle();
       if (byPhone) existingTicket = byPhone;
+      // Mesmo contato pode estar gravado sem 55 (ex.: 4184727733) — evita duplicata na lista
+      if (!existingTicket && canonicalDigits.length === 12 && canonicalDigits.startsWith("55")) {
+        const without55 = canonicalDigits.slice(2);
+        const { data: byPhoneAlt } = await supabase
+          .from("conversations")
+          .select("id, status")
+          .eq("channel_id", channelId)
+          .eq("company_id", companyId)
+          .eq("customer_phone", without55)
+          .eq("kind", "ticket")
+          .neq("status", "closed")
+          .order("last_message_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (byPhoneAlt) existingTicket = byPhoneAlt;
+      }
     }
     // Só reutilizamos conversas abertas (closed já excluído no filtro acima); se não houver, criamos novo chamado.
 
@@ -769,7 +785,7 @@ async function processOneMessage(
           updated_at: new Date().toISOString(),
           wa_chat_jid: canonicalExternalId,
           external_id: canonicalExternalId,
-          customer_phone: displayPhone || undefined,
+          customer_phone: (canonicalDigits ?? displayPhone) || undefined,
         })
         .eq("id", conversationId);
       console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId });
