@@ -12,7 +12,7 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Mini player de áudio na conversa — play, linha fina de progresso (permite voltar/avançar) e tempo.
+ * Mini player de áudio na conversa — play, onda de barras finas (permite voltar/avançar) e tempo.
  * Enviadas: degradê roxo suave. Recebidas: degradê verde suave.
  */
 export function ChatAudioPlayer({
@@ -86,15 +86,15 @@ export function ChatAudioPlayer({
   );
 
   const isOut = direction === "out";
-  // Enviadas (out): roxo suave; Recebidas (in): verde suave
+  // Enviadas (out): roxo um pouco mais forte; Recebidas (in): verde um pouco mais forte
   const gradientClasses = isOut
-    ? "bg-gradient-to-r from-violet-200 via-purple-100 to-fuchsia-100 text-violet-900/90"
-    : "bg-gradient-to-r from-emerald-200 via-green-100 to-teal-100 text-emerald-900/90";
-  const loadingBarBg = "bg-white/40";
+    ? "bg-gradient-to-r from-violet-300 via-purple-200 to-fuchsia-200 text-violet-900/90"
+    : "bg-gradient-to-r from-emerald-300 via-green-200 to-teal-200 text-emerald-900/90";
+  const loadingBarBg = "bg-white/30";
   const textClasses = isOut ? "text-violet-800/90" : "text-emerald-800/90";
   const btnClasses = isOut
-    ? "bg-white text-violet-500 shadow-sm hover:scale-105"
-    : "bg-white text-emerald-500 shadow-sm hover:scale-105";
+    ? "bg-white text-violet-600 shadow-sm hover:scale-105"
+    : "bg-white text-emerald-600 shadow-sm hover:scale-105";
 
   if (isLoading || !src) {
     return (
@@ -127,7 +127,7 @@ export function ChatAudioPlayer({
           <span>{loaded ? formatDuration(duration) : "–:––"}</span>
         </div>
         <div
-          className="mt-1 h-1 w-full rounded-full bg-white/40 overflow-hidden cursor-pointer"
+          className="mt-1 h-1.5 w-full rounded-full bg-white/40 overflow-hidden cursor-pointer"
           onClick={handleSeek}
           role="slider"
           aria-label="Posição do áudio"
