@@ -1589,6 +1589,16 @@ export default function ConversaThreadPage({
 
   async function handleReaction(messageId: string, emoji: string) {
     if (!resolved?.id || !apiHeaders) return;
+    const prev = queryClient.getQueryData<ConversationDetail>(queryKeys.conversation(resolved.id));
+    const nextEmoji = emoji || null;
+    if (prev?.messages) {
+      queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), {
+        ...prev,
+        messages: prev.messages.map((m) =>
+          String(m.id) === String(messageId) ? { ...m, reaction: nextEmoji } : m
+        ),
+      });
+    }
     try {
       const res = await fetch(`/api/conversations/${resolved.id}/messages/reaction`, {
         method: "POST",
@@ -1596,9 +1606,13 @@ export default function ConversaThreadPage({
         headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({ message_id: messageId, emoji }),
       });
-      if (res.ok) await refetchConversation();
+      if (!res.ok && prev) {
+        queryClient.setQueryData(queryKeys.conversation(resolved.id), prev);
+      }
     } catch {
-      // silent fail
+      if (prev) {
+        queryClient.setQueryData(queryKeys.conversation(resolved.id), prev);
+      }
     }
   }
 
