@@ -42,9 +42,9 @@ type Queue = { id: string; name: string };
 
 const FALLBACK_STATUSES: TicketStatusColumn[] = [
   { id: "", key: "open", title: "Novo", color_hex: "#22C55E", is_closed: false, sort_order: 0 },
-  { id: "", key: "in_queue", title: "Fila", color_hex: "#3B82F6", is_closed: false, sort_order: 1 },
-  { id: "", key: "in_progress", title: "Em atendimento", color_hex: "#8B5CF6", is_closed: false, sort_order: 2 },
-  { id: "", key: "closed", title: "Encerrados", color_hex: "#64748B", is_closed: true, sort_order: 3 },
+  // Status padrão "Fila" continua existindo na API, mas não exibimos como coluna no Kanban.
+  { id: "", key: "in_progress", title: "Em atendimento", color_hex: "#8B5CF6", is_closed: false, sort_order: 1 },
+  { id: "", key: "closed", title: "Encerrados", color_hex: "#64748B", is_closed: true, sort_order: 2 },
 ];
 
 function normalizeStatus(raw: string): string {
@@ -117,14 +117,17 @@ export default function TicketsPage() {
 
   const statusColumns = useMemo(() => {
     if (Array.isArray(statusesData) && statusesData.length > 0) {
-      return statusesData.map((s: { id: string; name: string; slug: string; color_hex?: string; is_closed?: boolean; sort_order?: number }) => ({
-        id: s.id,
-        key: s.slug,
-        title: s.name,
-        color_hex: s.color_hex ?? "#64748B",
-        is_closed: !!s.is_closed,
-        sort_order: s.sort_order ?? 0,
-      }));
+      return statusesData
+        // Não exibimos a coluna padrão "Fila" no Kanban; ela continua válida na API/chat.
+        .filter((s: { slug: string }) => s.slug !== "in_queue")
+        .map((s: { id: string; name: string; slug: string; color_hex?: string; is_closed?: boolean; sort_order?: number }) => ({
+          id: s.id,
+          key: s.slug,
+          title: s.name,
+          color_hex: s.color_hex ?? "#64748B",
+          is_closed: !!s.is_closed,
+          sort_order: s.sort_order ?? 0,
+        }));
     }
     return FALLBACK_STATUSES;
   }, [statusesData]);
@@ -355,15 +358,10 @@ export default function TicketsPage() {
     });
     for (const t of tickets) {
       const baseKey = normalizeStatus(t.status);
-      const keys: string[] = [baseKey];
-      // Duplicar cards: se estiver em atendimento e tiver fila, mostrar também na coluna "Fila"
-      if (baseKey === "in_progress" && t.queue_id) {
-        keys.push("in_queue");
-      }
-      for (const key of keys) {
-        if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(t);
-      }
+      // No Kanban, tratamos "in_queue" como "open" (sem coluna própria).
+      const key = baseKey === "in_queue" ? "open" : baseKey;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(t);
     }
     return statusColumns.map((c) => ({
       ...c,
@@ -600,6 +598,17 @@ export default function TicketsPage() {
                     const statusKey = normalizeStatus(t.status);
                     const colDef = statusColumns.find((s) => s.key === statusKey);
                     const barColor = colDef?.color_hex ?? "#64748B";
+                    const statusLabel =
+                      colDef?.title ??
+                      (statusKey === "open"
+                        ? "Novo"
+                        : statusKey === "in_queue"
+                          ? "Fila"
+                          : statusKey === "in_progress"
+                            ? "Em atendimento"
+                            : statusKey === "closed"
+                              ? "Encerrado"
+                              : statusKey);
                     return (
                       <tr key={t.id} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
                         <td className="w-10 px-2 py-3">
@@ -628,7 +637,7 @@ export default function TicketsPage() {
                             className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold uppercase text-white"
                             style={{ backgroundColor: barColor }}
                           >
-                            {colDef?.title ?? statusKey}
+                            {statusLabel}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-[#64748B]">
@@ -758,6 +767,17 @@ export default function TicketsPage() {
                   const statusKey = normalizeStatus(t.status);
                   const colDef = statusColumns.find((s) => s.key === statusKey);
                   const barColor = colDef?.color_hex ?? "#3B82F6";
+                  const statusLabel =
+                    colDef?.title ??
+                    (statusKey === "open"
+                      ? "Novo"
+                      : statusKey === "in_queue"
+                        ? "Fila"
+                        : statusKey === "in_progress"
+                          ? "Em atendimento"
+                          : statusKey === "closed"
+                            ? "Encerrado"
+                            : statusKey);
                   const lastMsgAt = t.last_message_at
                     ? new Date(t.last_message_at).toLocaleString("pt-BR", {
                         day: "2-digit",
@@ -838,7 +858,7 @@ export default function TicketsPage() {
                               className="inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white mt-0.5"
                               style={{ backgroundColor: barColor }}
                             >
-                              {colDef?.title ?? (statusKey === "closed" ? "Fechado" : t.assigned_to ? "Em atendimento" : "Na fila")}
+                              {statusLabel}
                             </span>
                           </div>
                         </div>
