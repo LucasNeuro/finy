@@ -12,6 +12,7 @@ import { Loader2 } from "lucide-react";
 import { RealtimeMessages } from "@/components/RealtimeMessages";
 import { EmojiReactionPicker } from "@/components/EmojiReactionPicker";
 import { ChannelIcon } from "@/components/ChannelIcon";
+import { ChatAudioPlayer } from "@/components/chat/ChatAudioPlayer";
 
 type Message = {
   id: string;
@@ -109,140 +110,7 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-/**
- * Mini player de áudio na conversa (enviados e recebidos): reprodução direta na interface.
- * Estilo: pill, play/pause, tempo atual/total, barra de progresso, volume, menu (baixar).
- */
-function ChatAudioPlayer({
-  src,
-  onDownload,
-  isLoading,
-}: {
-  src: string | null;
-  onDownload?: () => void;
-  isLoading?: boolean;
-}) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [loaded, setLoaded] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const togglePlay = useCallback(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    if (playing) {
-      el.pause();
-    } else {
-      el.play().catch(() => {});
-    }
-    setPlaying(!playing);
-  }, [playing]);
-
-  useEffect(() => {
-    const el = audioRef.current;
-    if (!el || !src) return;
-    setLoaded(false);
-    setDuration(0);
-    setCurrentTime(0);
-    setPlaying(false);
-    const onTimeUpdate = () => setCurrentTime(el.currentTime);
-    const onDurationChange = () => {
-      setDuration(el.duration);
-      setLoaded(true);
-    };
-    const onEnded = () => setPlaying(false);
-    const onLoadedData = () => setLoaded(true);
-    el.addEventListener("timeupdate", onTimeUpdate);
-    el.addEventListener("durationchange", onDurationChange);
-    el.addEventListener("ended", onEnded);
-    el.addEventListener("loadeddata", onLoadedData);
-    return () => {
-      el.removeEventListener("timeupdate", onTimeUpdate);
-      el.removeEventListener("durationchange", onDurationChange);
-      el.removeEventListener("ended", onEnded);
-      el.removeEventListener("loadeddata", onLoadedData);
-    };
-  }, [src]);
-
-  useEffect(() => {
-    const el = audioRef.current;
-    if (el) el.volume = volume;
-  }, [volume]);
-
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-
-  if (isLoading || !src) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-2 w-full min-w-0 shadow-sm">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
-          <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="h-2 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
-          <p className="mt-1 text-xs text-[#64748B]">Carregando áudio…</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-2 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] px-2 py-2 w-full min-w-0 shadow-sm hover:border-[#CBD5E1] transition-colors">
-      {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
-      <button
-        type="button"
-        onClick={togglePlay}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-2"
-        aria-label={playing ? "Pausar" : "Reproduzir"}
-      >
-        {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 ml-0.5" />}
-      </button>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-[#475569] tabular-nums">
-          {formatDuration(currentTime)} / {loaded ? formatDuration(duration) : "–:––"}
-        </p>
-        <div
-          className="h-2 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-1"
-          onClick={(e) => {
-            const el = audioRef.current;
-            if (!el) return;
-            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const pct = Math.max(0, Math.min(1, x / rect.width));
-            el.currentTime = pct * el.duration;
-            setCurrentTime(el.currentTime);
-          }}
-        >
-          <div
-            className="h-full rounded-full bg-clicvend-orange transition-all duration-150 ease-out"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      </div>
-      <div className="flex items-center gap-0.5 shrink-0">
-        <div className="flex items-center gap-1" title="Volume">
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={volume}
-            onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="w-12 h-1.5 accent-clicvend-orange cursor-pointer"
-            aria-label="Volume"
-          />
-          <span className="text-[#64748B]" aria-hidden>
-            <Volume2 className="h-4 w-4" />
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Barra de preview do áudio gravado antes de enviar (miniplayer com degradê verde). */
+/** Barra de preview do áudio gravado antes de enviar (miniplayer com degradê roxo claro, igual ao mini player da conversa). */
 function RecordingPreviewBar({
   src,
   isLoading,
@@ -310,20 +178,20 @@ function RecordingPreviewBar({
 
   if (isLoading || !src) {
     return (
-      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 px-5 py-3 shadow-lg text-white">
+      <div className="flex items-center justify-between gap-4 rounded-xl bg-gradient-to-r from-violet-400 via-purple-300 to-fuchsia-300 px-5 py-3 shadow-lg text-white">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/15">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20">
             <Loader2 className="h-5 w-5 animate-spin text-white" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold">Preparando áudio…</span>
-            <span className="text-xs text-emerald-50/80">Aguarde um instante antes de enviar.</span>
+            <span className="text-sm font-semibold text-violet-900/90">Preparando áudio…</span>
+            <span className="text-xs text-violet-800/70">Aguarde um instante antes de enviar.</span>
           </div>
         </div>
         <button
           type="button"
           onClick={onDiscard}
-          className="rounded-full border border-white/60 px-4 py-1.5 text-xs font-medium text-white/90 hover:bg-white/10"
+          className="rounded-full border border-white/60 px-4 py-1.5 text-xs font-medium text-violet-900/90 hover:bg-white/10"
         >
           Cancelar
         </button>
@@ -332,26 +200,26 @@ function RecordingPreviewBar({
   }
 
   return (
-    <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 px-5 py-3 shadow-lg text-white">
+    <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-violet-400 via-purple-300 to-fuchsia-300 px-5 py-3 shadow-lg text-white">
       {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
       <button
         type="button"
         onClick={togglePlay}
-        className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-emerald-600 shadow-md hover:scale-105 transition-transform"
+        className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-violet-600 shadow-md hover:scale-105 transition-transform"
         aria-label={playing ? "Pausar pré-visualização" : "Reproduzir pré-visualização"}
       >
         {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
       </button>
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-50/90">
+        <p className="text-xs font-semibold uppercase tracking-wide text-violet-900/80">
           Pré-visualização do áudio
         </p>
-        <div className="mt-1 flex items-center justify-between text-[11px] text-emerald-50/90">
+        <div className="mt-1 flex items-center justify-between text-[11px] text-violet-800/90">
           <span>{formatDuration(currentTime)}</span>
           <span>{duration ? formatDuration(duration) : "–:––"}</span>
         </div>
         <div
-          className="mt-1.5 h-1.5 w-full rounded-full bg-emerald-300/50 overflow-hidden cursor-pointer"
+          className="mt-1.5 h-1.5 w-full rounded-full bg-white/30 overflow-hidden cursor-pointer"
           onClick={handleSeek}
         >
           <div
@@ -365,7 +233,7 @@ function RecordingPreviewBar({
           type="button"
           onClick={onSend}
           disabled={sending}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-emerald-600 shadow-md hover:bg-emerald-50 disabled:opacity-60"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-violet-600 shadow-md hover:bg-violet-50 disabled:opacity-60"
           title="Enviar áudio gravado"
           aria-label="Enviar áudio gravado"
         >
@@ -385,7 +253,7 @@ function RecordingPreviewBar({
   );
 }
 
-/** Barra enquanto está gravando (mostra tempo e "ondas" animadas). */
+/** Barra enquanto está gravando (mostra tempo e "ondas" animadas). Degradê roxo igual ao preview. */
 function RecordingInProgressBar({
   seconds,
   onStop,
@@ -405,18 +273,18 @@ function RecordingInProgressBar({
   }, []);
 
   return (
-    <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-400 px-5 py-3 shadow-lg text-white">
+    <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-violet-500 via-purple-400 to-fuchsia-400 px-5 py-3 shadow-lg text-white">
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={onStop}
-          className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-emerald-600 shadow-md hover:bg-emerald-50"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-violet-600 shadow-md hover:bg-violet-50"
           aria-label="Parar gravação"
         >
           <Square className="h-5 w-5" />
         </button>
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-semibold uppercase tracking-wide text-emerald-50/90">
+          <span className="text-xs font-semibold uppercase tracking-wide text-violet-100/90">
             Gravando áudio…
           </span>
           <span className="text-sm font-medium text-white">
@@ -430,13 +298,13 @@ function RecordingInProgressBar({
             <div
               // eslint-disable-next-line react/no-array-index-key
               key={idx}
-              className="flex-1 rounded-full bg-emerald-200/70 transition-all"
+              className="flex-1 rounded-full bg-white/40 transition-all"
               style={{ height: `${h * 100}%` }}
             />
           ))}
         </div>
       </div>
-      <div className="hidden sm:flex flex-col items-end text-[11px] text-emerald-50/90">
+      <div className="hidden sm:flex flex-col items-end text-[11px] text-violet-100/90">
         <span>Toque em parar para revisar</span>
         <span>O áudio só será enviado depois da confirmação.</span>
       </div>
@@ -641,6 +509,11 @@ function MessageBubble({
   const captionTrim = String(caption ?? "").trim();
   const captionNormalized = captionTrim.toLowerCase().replace(/^\[|\]$/g, "").trim();
   const isPlaceholderCaption = ["document", "documento", "media", "video", "audio", "ptt", "vídeo", "áudio", "image", "imagem"].includes(captionNormalized) || /^\[?(document|documento|media|video|audio|ptt|vídeo|áudio|image|imagem)\]?$/i.test(captionTrim);
+  const contentTrim = String(m.content ?? "").trim();
+  const contentNormalized = contentTrim.toLowerCase().replace(/^\[|\]$/g, "").trim();
+  const isContentPlaceholder = ["document", "documento", "media", "video", "audio", "ptt", "vídeo", "áudio", "image", "imagem"].includes(contentNormalized) || /^\[?(document|documento|media|video|audio|ptt|vídeo|áudio|image|imagem)\]?$/i.test(contentTrim);
+  const displayCaptionForMedia = (displayType === "video" || displayType === "document") && isPlaceholderCaption && m.content && !isContentPlaceholder ? m.content : caption;
+  const showCaptionForMedia = displayCaptionForMedia && ((displayType === "video" || displayType === "document") ? !(isPlaceholderCaption && isContentPlaceholder) : !isPlaceholderCaption);
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(immediateUrl ?? null);
   const [downloadLoading, setDownloadLoading] = useState(false);
@@ -816,15 +689,19 @@ function MessageBubble({
   return (
     <div
       className={`rounded-lg ${
-        m.direction === "out"
-          ? "bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]"
-          : "bg-white border border-[#E2E8F0] text-[#1E293B]"
+        ["audio", "ptt"].includes(resolvedDisplayType)
+          ? "bg-transparent border-0 text-[#1E293B]"
+          : m.direction === "out"
+            ? "bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]"
+            : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       } ${
         resolvedDisplayType === "document"
           ? "max-w-[41%] min-w-0 w-full px-1 py-0.5"
-          : ["video", "audio", "ptt", "image"].includes(resolvedDisplayType)
+          : ["video", "image"].includes(resolvedDisplayType)
             ? "max-w-[77%] min-w-0 w-full px-1 py-0.5"
-            : "max-w-[69%] px-3 py-2"
+            : ["audio", "ptt"].includes(resolvedDisplayType)
+              ? "max-w-[65%] min-w-0 w-full px-1 py-0.5"
+              : "max-w-[69%] px-3 py-2"
       }`}
     >
       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
@@ -907,7 +784,9 @@ function MessageBubble({
               </div>
             </div>
           )}
-          {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+          {showCaptionForMedia && (
+            <p className="whitespace-pre-wrap text-sm text-[#1E293B]">{displayCaptionForMedia}</p>
+          )}
         </div>
       )}
       {(resolvedDisplayType === "audio" || resolvedDisplayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
@@ -928,6 +807,7 @@ function MessageBubble({
             <ChatAudioPlayer
               key={audioSrc ?? "no-src"}
               src={audioSrc}
+              direction={m.direction}
               isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
               onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
             />
@@ -1054,8 +934,8 @@ function MessageBubble({
               </button>
             </div>
           )}
-          {caption && caption !== "[document]" && caption !== "[media]" && !isPlaceholderCaption && m.file_name !== caption && (
-            <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>
+          {showCaptionForMedia && (
+            <p className="whitespace-pre-wrap text-sm mt-1">{displayCaptionForMedia}</p>
           )}
         </div>
       )}

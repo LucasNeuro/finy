@@ -64,7 +64,7 @@ export function AppNavTabs() {
   if (!base) return null;
 
   return (
-    <div className="flex shrink-0 gap-1 overflow-x-auto px-4 py-2 scrollbar-thin scrollbar-track-[#0a0a0a] scrollbar-thumb-white/20">
+    <div className="flex shrink-0 gap-0.5 overflow-x-auto px-4 py-2.5 scrollbar-thin scrollbar-track-emerald-950/50 scrollbar-thumb-emerald-600/50">
       {tabs.map(({ href, label, icon: Icon }) => {
         const fullHref = `${base}${href}`;
         const isActive = pathname === fullHref || (href !== "/" && pathname?.startsWith(fullHref));
@@ -72,14 +72,14 @@ export function AppNavTabs() {
           <Link
             key={href}
             href={fullHref}
-            className={`flex shrink-0 items-center gap-2 px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ${
               isActive
-                ? "text-clicvend-green"
-                : "text-white/60 hover:text-white"
+                ? "bg-emerald-600/30 text-emerald-300 ring-1 ring-emerald-500/50"
+                : "text-white/70 hover:bg-white/5 hover:text-white"
             }`}
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {label}
+            <span className="whitespace-nowrap">{label}</span>
           </Link>
         );
       })}

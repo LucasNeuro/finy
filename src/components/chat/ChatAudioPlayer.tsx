@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Play, Pause, Volume2, Download, Loader2, MoreVertical } from "lucide-react";
+import { Play, Pause, Loader2 } from "lucide-react";
 
 /** Formata segundos em mm:ss */
 function formatDuration(seconds: number): string {
@@ -12,25 +12,26 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Mini player de áudio na conversa (enviados e recebidos).
- * Estilo compacto: play/pause, tempo, barra de progresso, volume, menu.
+ * Mini player de áudio na conversa — play, linha fina de progresso (permite voltar/avançar) e tempo.
+ * Enviadas: degradê roxo suave. Recebidas: degradê verde suave.
  */
 export function ChatAudioPlayer({
   src,
   onDownload,
   isLoading,
+  direction = "in",
 }: {
   src: string | null;
   onDownload?: () => void;
   isLoading?: boolean;
+  /** "in" = recebido (roxo), "out" = enviado (verde) */
+  direction?: "in" | "out";
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [loaded, setLoaded] = useState(false);
-  const [volume, setVolume] = useState(1);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const togglePlay = useCallback(() => {
     const el = audioRef.current;
@@ -69,101 +70,75 @@ export function ChatAudioPlayer({
     };
   }, [src]);
 
-  useEffect(() => {
-    const el = audioRef.current;
-    if (el) el.volume = volume;
-  }, [volume]);
-
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  const handleSeek = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      const el = audioRef.current;
+      if (!el || !duration) return;
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      el.currentTime = pct * el.duration;
+      setCurrentTime(el.currentTime);
+    },
+    [duration]
+  );
+
+  const isOut = direction === "out";
+  // Enviadas (out): roxo suave; Recebidas (in): verde suave
+  const gradientClasses = isOut
+    ? "bg-gradient-to-r from-violet-200 via-purple-100 to-fuchsia-100 text-violet-900/90"
+    : "bg-gradient-to-r from-emerald-200 via-green-100 to-teal-100 text-emerald-900/90";
+  const loadingBarBg = "bg-white/40";
+  const textClasses = isOut ? "text-violet-800/90" : "text-emerald-800/90";
+  const btnClasses = isOut
+    ? "bg-white text-violet-500 shadow-sm hover:scale-105"
+    : "bg-white text-emerald-500 shadow-sm hover:scale-105";
 
   if (isLoading || !src) {
     return (
-      <div className="flex items-center gap-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 w-full max-w-[min(100%,260px)] shadow-sm">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#E2E8F0]">
-          <Loader2 className="h-5 w-5 animate-spin text-clicvend-orange" />
+      <div className={`flex items-center gap-2 rounded-xl ${gradientClasses} px-4 py-3 w-full shadow-sm`}>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/25">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="h-2.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden" />
-          <p className="mt-1.5 text-xs text-[#64748B]">Carregando áudio…</p>
+          <div className={`h-1 w-full rounded-full ${loadingBarBg} overflow-hidden`} />
+          <p className={`mt-1 text-[10px] ${textClasses}`}>Carregando…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-4 py-3 w-full max-w-[min(100%,260px)] shadow-sm hover:border-[#CBD5E1] transition-colors">
-      {src && <audio ref={audioRef} src={src} preload="metadata" className="hidden" />}
+    <div className={`flex items-center gap-3 rounded-xl ${gradientClasses} px-4 py-3 w-full shadow-sm hover:shadow-md transition-shadow`}>
+      {src && <audio ref={audioRef} src={src} preload="auto" className="hidden" />}
       <button
         type="button"
         onClick={togglePlay}
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-clicvend-orange text-white hover:bg-clicvend-orange-dark active:scale-95 transition-all focus:outline-none focus:ring-2 focus:ring-clicvend-orange focus:ring-offset-2"
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${btnClasses} transition-transform focus:outline-none focus:ring-2 focus:ring-white/50`}
         aria-label={playing ? "Pausar" : "Reproduzir"}
       >
-        {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
+        {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ml-0.5" />}
       </button>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[#475569] tabular-nums">
-          {formatDuration(currentTime)} / {loaded ? formatDuration(duration) : "–:––"}
-        </p>
+        <div className={`flex items-center justify-between text-[11px] tabular-nums ${textClasses}`}>
+          <span>{formatDuration(currentTime)}</span>
+          <span>{loaded ? formatDuration(duration) : "–:––"}</span>
+        </div>
         <div
-          className="h-2.5 w-full rounded-full bg-[#E2E8F0] overflow-hidden cursor-pointer mt-1.5"
-          onClick={(e) => {
-            const el = audioRef.current;
-            if (!el) return;
-            const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const pct = Math.max(0, Math.min(1, x / rect.width));
-            el.currentTime = pct * el.duration;
-            setCurrentTime(el.currentTime);
-          }}
+          className="mt-1 h-1 w-full rounded-full bg-white/40 overflow-hidden cursor-pointer"
+          onClick={handleSeek}
+          role="slider"
+          aria-label="Posição do áudio"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
         >
           <div
-            className="h-full rounded-full bg-clicvend-orange transition-all duration-150 ease-out"
+            className="h-full rounded-full bg-white/90 shadow-[0_0_2px_rgba(255,255,255,0.8)] transition-all duration-150"
             style={{ width: `${progress}%` }}
           />
-        </div>
-      </div>
-      <div className="flex items-center gap-0.5 shrink-0">
-        <div className="flex items-center gap-1" title="Volume">
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={volume}
-            onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="w-14 h-2 accent-clicvend-orange cursor-pointer"
-            aria-label="Volume"
-          />
-          <span className="text-[#64748B]" aria-hidden>
-            <Volume2 className="h-4 w-4" />
-          </span>
-        </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            className="p-1.5 rounded-full text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#1E293B] transition-colors"
-            aria-label="Opções"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden />
-              <div className="absolute right-0 top-full mt-1 z-20 rounded-lg border border-[#E2E8F0] bg-white shadow-lg py-1 min-w-[120px]">
-                {onDownload && (
-                  <button
-                    type="button"
-                    onClick={() => { onDownload(); setMenuOpen(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange text-left"
-                  >
-                    <Download className="h-4 w-4" /> Baixar
-                  </button>
-                )}
-              </div>
-            </>
-          )}
         </div>
       </div>
     </div>
