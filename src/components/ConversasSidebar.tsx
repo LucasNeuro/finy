@@ -668,7 +668,7 @@ export function ConversasSidebar() {
   // o usuário abre o painel de informações e chama chat-details. Sem chamadas em loop à UAZAPI.
 
   return (
-    <aside className="flex min-h-0 w-[440px] shrink-0 flex-col border-r border-[#E2E8F0]/60 bg-white shadow-sm overflow-hidden self-stretch">
+    <aside className="flex min-h-0 w-[25%] min-w-[280px] max-w-[400px] shrink-0 flex-col border-r border-[#E2E8F0]/60 bg-white shadow-sm overflow-hidden self-stretch">
       <div className="flex shrink-0 items-center p-4">
         
       </div>

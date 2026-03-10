@@ -644,6 +644,8 @@ function MessageBubble({
 
   const [downloadUrl, setDownloadUrl] = useState<string | null>(immediateUrl ?? null);
   const [downloadLoading, setDownloadLoading] = useState(false);
+  const [documentPreviewFailed, setDocumentPreviewFailed] = useState(false);
+  const [mediaLoadFailed, setMediaLoadFailed] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -693,6 +695,44 @@ function MessageBubble({
     return base;
   })();
 
+  // Detectar link expirado no preview de documento (PDF): HEAD na URL; se 400/403, mostrar fallback
+  const isDocumentPdfPreview = resolvedDisplayType === "document" && Boolean(effectiveMediaUrl) && mayBePdf(m.file_name);
+  useEffect(() => {
+    if (!isDocumentPdfPreview || !effectiveMediaUrl) {
+      setDocumentPreviewFailed(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(effectiveMediaUrl, { method: "HEAD" })
+      .then((res) => {
+        if (!cancelled && (res.status === 400 || res.status === 403)) setDocumentPreviewFailed(true);
+        else if (!cancelled) setDocumentPreviewFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setDocumentPreviewFailed(false);
+      });
+    return () => { cancelled = true; };
+  }, [isDocumentPdfPreview, effectiveMediaUrl]);
+
+  // Detectar link expirado em áudio/vídeo: HEAD na URL; se 400/403, mostrar fallback "Carregar de novo"
+  const isMediaWithUrl = (resolvedDisplayType === "audio" || resolvedDisplayType === "ptt" || resolvedDisplayType === "video") && Boolean(effectiveMediaUrl);
+  useEffect(() => {
+    if (!isMediaWithUrl || !effectiveMediaUrl) {
+      setMediaLoadFailed(false);
+      return;
+    }
+    let cancelled = false;
+    fetch(effectiveMediaUrl, { method: "HEAD" })
+      .then((res) => {
+        if (!cancelled && (res.status === 400 || res.status === 403)) setMediaLoadFailed(true);
+        else if (!cancelled) setMediaLoadFailed(false);
+      })
+      .catch(() => {
+        if (!cancelled) setMediaLoadFailed(false);
+      });
+    return () => { cancelled = true; };
+  }, [isMediaWithUrl, effectiveMediaUrl]);
+
   const audioSrc = (resolvedDisplayType === "audio" || resolvedDisplayType === "ptt") ? effectiveMediaUrl : null;
 
   useEffect(() => {
@@ -731,6 +771,43 @@ function MessageBubble({
         if (m.id) mediaUrlCache.set(m.id, data.fileURL);
         window.open(data.fileURL, "_blank", "noopener,noreferrer");
       }
+    } finally {
+      setDownloadLoading(false);
+    }
+  }
+
+  async function fetchFreshMediaUrl(): Promise<string | null> {
+    if (!conversationId || !apiHeaders || !m.id) return null;
+    const res = await fetch(
+      `/api/conversations/${conversationId}/messages/${m.id}/download?refresh=1`,
+      { credentials: "include", headers: apiHeaders }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (data?.fileURL) {
+      setDownloadUrl(data.fileURL);
+      if (m.id) mediaUrlCache.set(m.id, data.fileURL);
+      return data.fileURL;
+    }
+    return null;
+  }
+
+  async function handleRefreshDocumentPreview() {
+    if (!conversationId || !apiHeaders || !m.id) return;
+    setDownloadLoading(true);
+    try {
+      const url = await fetchFreshMediaUrl();
+      if (url) setDocumentPreviewFailed(false);
+    } finally {
+      setDownloadLoading(false);
+    }
+  }
+
+  async function handleRefreshMedia() {
+    if (!conversationId || !apiHeaders || !m.id) return;
+    setDownloadLoading(true);
+    try {
+      await fetchFreshMediaUrl();
+      setMediaLoadFailed(false);
     } finally {
       setDownloadLoading(false);
     }
@@ -789,13 +866,26 @@ function MessageBubble({
       )}
       {resolvedDisplayType === "video" && (effectiveMediaUrl || needsDownloadForMedia || canFetchDownload) && (
         <div className="w-full space-y-0.5">
-          {effectiveMediaUrl ? (
+          {mediaLoadFailed && effectiveMediaUrl ? (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-6 text-center">
+              <p className="text-sm text-[#64748B]">Link expirado. Clique para carregar de novo.</p>
+              <button
+                type="button"
+                onClick={handleRefreshMedia}
+                disabled={downloadLoading}
+                className="text-sm font-medium text-clicvend-orange hover:underline disabled:opacity-50"
+              >
+                {downloadLoading ? "Carregando…" : "Carregar de novo"}
+              </button>
+            </div>
+          ) : effectiveMediaUrl ? (
             <>
               <div className="relative rounded-lg overflow-hidden border border-[#E2E8F0] shadow-sm w-full bg-[#0F172A] group">
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
                 <VideoPlayerWithFallback
+                  key={effectiveMediaUrl}
                   src={effectiveMediaUrl || ""}
                   canFetchDownload={canFetchDownload}
                   downloadLoading={!effectiveMediaUrl && downloadLoading}
@@ -822,11 +912,26 @@ function MessageBubble({
       )}
       {(resolvedDisplayType === "audio" || resolvedDisplayType === "ptt") && (audioSrc || downloadLoading || mediaUrl || canFetchDownload) && (
         <div className="w-full space-y-0.5">
-          <ChatAudioPlayer
-            src={audioSrc}
-            isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
-            onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
-          />
+          {mediaLoadFailed && audioSrc ? (
+            <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 text-center">
+              <p className="text-sm text-[#64748B]">Link expirado. Clique para carregar de novo.</p>
+              <button
+                type="button"
+                onClick={handleRefreshMedia}
+                disabled={downloadLoading}
+                className="text-sm font-medium text-clicvend-orange hover:underline disabled:opacity-50"
+              >
+                {downloadLoading ? "Carregando…" : "Carregar de novo"}
+              </button>
+            </div>
+          ) : (
+            <ChatAudioPlayer
+              key={audioSrc ?? "no-src"}
+              src={audioSrc}
+              isLoading={downloadLoading || (canFetchDownload && !audioSrc && !(mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))))}
+              onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
+            />
+          )}
           {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
         </div>
       )}
@@ -834,9 +939,22 @@ function MessageBubble({
         <div className="w-full space-y-0 min-w-0">
           {/* Miniatura: preview do PDF ou ícone genérico */}
           <div className="rounded-t-lg overflow-hidden border border-b-0 border-[#E2E8F0] bg-white">
-            {effectiveMediaUrl && mayBePdf(m.file_name) ? (
+            {effectiveMediaUrl && mayBePdf(m.file_name) && documentPreviewFailed ? (
+              <div className="flex flex-col items-center justify-center gap-3 h-[200px] bg-[#F8FAFC] px-4 text-center">
+                <p className="text-sm text-[#64748B]">Link expirado. Clique para carregar de novo.</p>
+                <button
+                  type="button"
+                  onClick={handleRefreshDocumentPreview}
+                  disabled={downloadLoading}
+                  className="text-sm font-medium text-clicvend-orange hover:underline disabled:opacity-50"
+                >
+                  {downloadLoading ? "Carregando…" : "Carregar de novo"}
+                </button>
+              </div>
+            ) : effectiveMediaUrl && mayBePdf(m.file_name) ? (
               <div className="relative w-full h-[200px] bg-white overflow-hidden">
                 <iframe
+                  key={effectiveMediaUrl}
                   src={effectiveMediaUrl}
                   title={m.file_name || "Documento"}
                   className="w-full h-full border-0"

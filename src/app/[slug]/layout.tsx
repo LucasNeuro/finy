@@ -61,8 +61,8 @@ export default async function AppLayout({
           <AppHeader />
           <div className="flex min-h-0 flex-1 overflow-hidden pt-14">
             <AppSidebar />
-            <div className="ml-16 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              <header className="fixed left-16 right-0 top-14 z-30 shrink-0 border-b border-white/10 bg-[#0a0a0a]">
+            <div className="ml-[5px] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <header className="fixed left-[5px] right-0 top-14 z-30 shrink-0 border-b border-white/10 bg-[#0a0a0a]">
                 <AppNavTabs />
               </header>
               <main className="min-h-0 flex-1 flex flex-col overflow-hidden bg-[#FAFBFC] pt-12">

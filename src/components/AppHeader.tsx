@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
-import { Settings, ChevronDown, Bell, Loader2, Check } from "lucide-react";
+import { Settings, ChevronDown, Bell, Loader2, Check, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
 
@@ -19,6 +19,7 @@ type NotificationItem = {
 
 export function AppHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const [user, setUser] = useState<{ email?: string } | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -112,6 +113,12 @@ export function AppHeader() {
   }, []);
 
   const initial = user?.email?.[0]?.toUpperCase() ?? "U";
+
+  async function handleLogout() {
+    await createClient().auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
 
   function formatRelativeTime(iso: string): string {
     const d = new Date(iso);
@@ -251,6 +258,14 @@ export function AppHeader() {
                 Configurações
               </Link>
             )}
+            <button
+              type="button"
+              onClick={() => { setDropdownOpen(false); handleLogout(); }}
+              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm text-[#64748B] hover:bg-red-50 hover:text-red-600 transition-colors text-left"
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              Sair
+            </button>
           </div>
         )}
       </div>

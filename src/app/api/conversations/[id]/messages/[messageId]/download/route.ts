@@ -56,23 +56,28 @@ export async function GET(
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  // 1. Verificar cache Redis (evita UAZAPI/storage em reproduções repetidas)
-  const cached = await getCachedMediaUrl(conversationId, messageId);
-  if (cached?.fileURL) {
-    return NextResponse.json({
-      fileURL: cached.fileURL,
-      mimetype: cached.mimeType ?? null,
-    });
+  // ?refresh=1 ou ?renew=1: ignora cache e gera nova URL (30 dias) — usado quando link expirou
+  const url = new URL(request.url);
+  const skipCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("renew") === "1";
+
+  if (!skipCache) {
+    const cached = await getCachedMediaUrl(conversationId, messageId);
+    if (cached?.fileURL) {
+      return NextResponse.json({
+        fileURL: cached.fileURL,
+        mimetype: cached.mimeType ?? null,
+      });
+    }
   }
 
   const serviceSupabase = createServiceRoleClient();
   const bucket = "whatsapp-media";
 
-  // 2. Se já temos path no bucket, criar signed URL, gravar no cache e retornar
+  // 2. Se já temos path no bucket, criar signed URL (30 dias para cobrir ciclo do ticket)
   if (message.media_storage_path) {
     const { data: signed, error: signedError } = await serviceSupabase.storage
       .from(bucket)
-      .createSignedUrl(message.media_storage_path, 60 * 60); // 1h
+      .createSignedUrl(message.media_storage_path, 30 * 24 * 60 * 60); // 30 dias
 
     if (signedError || !signed?.signedUrl) {
       return NextResponse.json(
@@ -132,7 +137,7 @@ export async function GET(
 
   const { data: signed, error: signedError } = await serviceSupabase.storage
     .from(bucket)
-    .createSignedUrl(path, 60 * 60);
+    .createSignedUrl(path, 30 * 24 * 60 * 60); // 30 dias
 
   if (signedError || !signed?.signedUrl) {
     return NextResponse.json(
