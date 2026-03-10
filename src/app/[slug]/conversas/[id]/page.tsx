@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
@@ -646,6 +647,7 @@ function MessageBubble({
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerPortalRef = useRef<HTMLDivElement>(null);
   const deleteMenuRef = useRef<HTMLDivElement>(null);
 
   // Permite buscar mídia por message id mesmo sem external_id no snapshot (mensagens recebidas antigas)
@@ -696,9 +698,10 @@ function MessageBubble({
   useEffect(() => {
     if (!reactionPickerOpen) return;
     const close = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setReactionPickerOpen(false);
-      }
+      const target = e.target as Node;
+      const inButton = pickerRef.current?.contains(target);
+      const inPicker = pickerPortalRef.current?.contains(target);
+      if (!inButton && !inPicker) setReactionPickerOpen(false);
     };
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
@@ -743,7 +746,7 @@ function MessageBubble({
         resolvedDisplayType === "document"
           ? "max-w-[41%] min-w-0 w-full px-1 py-0.5"
           : ["video", "audio", "ptt", "image"].includes(resolvedDisplayType)
-            ? "max-w-[73%] min-w-0 w-full px-1 py-0.5"
+            ? "max-w-[77%] min-w-0 w-full px-1 py-0.5"
             : "max-w-[69%] px-3 py-2"
       }`}
     >
@@ -1011,23 +1014,37 @@ function MessageBubble({
               >
                 <Smile className="h-4 w-4" />
               </button>
-              {reactionPickerOpen && (
-                <div
-                  className="absolute top-full right-0 mt-1 rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden z-50"
-                  role="dialog"
-                  aria-label="Escolher reação"
-                >
-                  <div className="max-h-[320px] overflow-auto">
-                    <EmojiReactionPicker
-                      onSelect={(emoji) => {
-                        onReaction(m.id, m.reaction === emoji ? "" : emoji);
-                        setReactionPickerOpen(false);
-                      }}
-                      onClose={() => setReactionPickerOpen(false)}
-                    />
-                  </div>
-                </div>
-              )}
+              {reactionPickerOpen &&
+                typeof document !== "undefined" &&
+                (() => {
+                  const rect = pickerRef.current?.getBoundingClientRect();
+                  if (!rect) return null;
+                  const PICKER_W = 352;
+                  const SIDEOVER_W = 600;
+                  const visibleRight = typeof window !== "undefined" ? window.innerWidth - SIDEOVER_W : 9999;
+                  const left = Math.max(8, Math.min(rect.right - PICKER_W, visibleRight - PICKER_W));
+                  const top = rect.bottom + 4;
+                  return createPortal(
+                    <div
+                      ref={pickerPortalRef}
+                      className="fixed rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden z-[60]"
+                      role="dialog"
+                      aria-label="Escolher reação"
+                      style={{ left, top, width: PICKER_W }}
+                    >
+                      <div className="max-h-[320px] overflow-auto">
+                        <EmojiReactionPicker
+                          onSelect={(emoji) => {
+                            onReaction(m.id, m.reaction === emoji ? "" : emoji);
+                            setReactionPickerOpen(false);
+                          }}
+                          onClose={() => setReactionPickerOpen(false)}
+                        />
+                      </div>
+                    </div>,
+                    document.body
+                  );
+                })()}
             </div>
           )}
         </div>
@@ -1133,7 +1150,7 @@ export default function ConversaThreadPage({
     },
     enabled: !!resolved?.id && !!slug,
     staleTime: 5 * 60 * 1000, // 5 minutos - Realtime atualiza em tempo real
-    // Removido refetchInterval - Realtime cuida das atualizações
+    refetchOnWindowFocus: false, // Evita refetch ao fechar picker de reação (reação sumia e voltava)
   });
 
   useEffect(() => {
