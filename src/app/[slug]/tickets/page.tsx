@@ -57,6 +57,19 @@ function normalizeStatus(raw: string): string {
   return s || "open";
 }
 
+// Status "efetivo" usado no Kanban/Tabela:
+// - Se estiver fechado → sempre "closed"
+// - Se tiver atendente → sempre "in_progress" (Em atendimento)
+// - Se estiver em fila e sem atendente → "in_queue"
+// - Caso contrário → normalizado (open / custom)
+function effectiveStatusForKanban(status: string, assigned_to: string | null): string {
+  const norm = normalizeStatus(status);
+  if (norm === "closed") return "closed";
+  if (assigned_to) return "in_progress";
+  if (norm === "in_queue") return "in_queue";
+  return norm;
+}
+
 function statusToApi(slug: string): string {
   return slug;
 }
@@ -358,7 +371,7 @@ export default function TicketsPage() {
       grouped[c.key] = [];
     });
     for (const t of tickets) {
-      const baseKey = normalizeStatus(t.status);
+      const baseKey = effectiveStatusForKanban(t.status, t.assigned_to);
       // No Kanban, tratamos "in_queue" como "open" (sem coluna própria).
       const key = baseKey === "in_queue" ? "open" : baseKey;
       if (!grouped[key]) grouped[key] = [];
@@ -596,7 +609,7 @@ export default function TicketsPage() {
                 </thead>
                 <tbody>
                   {tableTickets.map((t) => {
-                    const statusKey = normalizeStatus(t.status);
+                    const statusKey = effectiveStatusForKanban(t.status, t.assigned_to);
                     const colDef = statusColumns.find((s) => s.key === statusKey);
                     const barColor = colDef?.color_hex ?? "#64748B";
                     const statusLabel =
@@ -769,7 +782,7 @@ export default function TicketsPage() {
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-md">
                 {col.items.map((t) => {
-                  const statusKey = normalizeStatus(t.status);
+                  const statusKey = effectiveStatusForKanban(t.status, t.assigned_to);
                   const colDef = statusColumns.find((s) => s.key === statusKey);
                   const barColor = colDef?.color_hex ?? "#3B82F6";
                   const statusLabel =
@@ -799,7 +812,7 @@ export default function TicketsPage() {
                     onDragStart={(e) => {
                       setDraggingId(t.id);
                       e.dataTransfer.setData("ticketId", t.id);
-                      e.dataTransfer.setData("fromStatus", normalizeStatus(t.status));
+                      e.dataTransfer.setData("fromStatus", effectiveStatusForKanban(t.status, t.assigned_to));
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onDragEnd={() => setDraggingId(null)}
