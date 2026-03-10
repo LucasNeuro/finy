@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
+import { useInboxStore } from "@/stores/inbox-store";
 import { SideOver } from "@/components/SideOver";
 import { Skeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
@@ -1097,6 +1098,8 @@ export default function ConversaThreadPage({
   const slug = resolved?.slug ?? pathname?.split("/")[1] ?? "";
   const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+  const focusMode = useInboxStore((s) => s.focusMode);
+  const setFocusMode = useInboxStore((s) => s.setFocusMode);
   const queryClient = useQueryClient();
 
   const { data: permissionsData } = useQuery({
@@ -1841,13 +1844,15 @@ export default function ConversaThreadPage({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F1F5F9]">
       <header className="flex shrink-0 items-center gap-3 border-b border-[#E2E8F0] bg-white px-4 py-3">
-        <a
-          href={`${base}/conversas`}
-          className="shrink-0 text-[#64748B] hover:text-[#1E293B] transition-colors"
-          aria-label="Voltar"
+        <button
+          type="button"
+          onClick={() => setFocusMode(!focusMode)}
+          className="shrink-0 rounded p-1 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors"
+          aria-label={focusMode ? "Sair do modo foco" : "Modo foco"}
+          title={focusMode ? "Sair do modo foco (mostrar sidebar)" : "Modo foco: sidebar recolhida, abas com suas conversas"}
         >
           <ArrowLeft className="h-5 w-5" />
-        </a>
+        </button>
         <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
           {isLoading ? (
             <Skeleton className="h-10 w-10 rounded-full" />
