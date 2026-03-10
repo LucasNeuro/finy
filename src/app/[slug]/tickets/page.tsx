@@ -354,9 +354,16 @@ export default function TicketsPage() {
       grouped[c.key] = [];
     });
     for (const t of tickets) {
-      const key = normalizeStatus(t.status);
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(t);
+      const baseKey = normalizeStatus(t.status);
+      const keys: string[] = [baseKey];
+      // Duplicar cards: se estiver em atendimento e tiver fila, mostrar também na coluna "Fila"
+      if (baseKey === "in_progress" && t.queue_id) {
+        keys.push("in_queue");
+      }
+      for (const key of keys) {
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(t);
+      }
     }
     return statusColumns.map((c) => ({
       ...c,

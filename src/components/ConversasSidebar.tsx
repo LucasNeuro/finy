@@ -166,7 +166,15 @@ const ConversationListItem = memo(function ConversationListItem({
   };
 
   const statusLabel =
-    c.status === "open" ? "Novo" : c.status === "in_queue" ? "Fila" : c.status === "in_progress" ? "Em atendimento" : c.status === "closed" ? "Encerrado" : c.status;
+    c.status === "closed"
+      ? "Encerrado"
+      : c.assigned_to
+        ? "Em atendimento"
+        : c.status === "in_queue"
+          ? "Fila"
+          : c.status === "open" || !c.status
+            ? "Novo"
+            : c.status;
   const shortId = c.id.replace(/-/g, "").slice(0, 8).toUpperCase();
 
   return (
@@ -245,7 +253,7 @@ const ConversationListItem = memo(function ConversationListItem({
               className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ${
                 c.status === "closed"
                   ? "bg-[#64748B]/10 text-[#64748B]"
-                  : c.status === "in_progress"
+                  : c.assigned_to
                     ? "bg-[#8B5CF6]/10 text-[#7C3AED]"
                     : c.status === "open" || c.status === "in_queue"
                       ? "bg-[#22C55E]/10 text-[#16A34A]"

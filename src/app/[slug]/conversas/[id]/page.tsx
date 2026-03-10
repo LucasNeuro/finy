@@ -1188,12 +1188,11 @@ export default function ConversaThreadPage({
         credentials: "include",
         headers: apiHeaders ?? {},
       });
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setError(err?.error ?? "Falha ao atribuir");
+        setError(json?.error ?? "Falha ao atribuir");
         return;
       }
-      const json = await res.json().catch(() => ({}));
       const assignedToName = json?.assigned_to_name ?? null;
       queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (prev) =>
         prev ? { ...prev, assigned_to: json?.assigned_to ?? currentUserId, assigned_to_name: assignedToName ?? prev.assigned_to_name, status: "in_progress" } : prev
@@ -1748,7 +1747,14 @@ export default function ConversaThreadPage({
             )}
             {!isLoading && (
               <span className="rounded bg-[#E2E8F0] px-1.5 py-0.5 text-xs text-[#64748B]">
-                Atendente: {conv?.assigned_to_name ?? "—"}
+                Atendente:{" "}
+                {conv?.assigned_to
+                  ? (conv.assigned_to_name && String(conv.assigned_to_name).trim() !== ""
+                      ? conv.assigned_to_name
+                      : conv.assigned_to === currentUserId
+                        ? "Você"
+                        : "—")
+                  : "—"}
               </span>
             )}
             {!isLoading && conv?.status && (
