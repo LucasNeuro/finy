@@ -1771,20 +1771,38 @@ export default function ConversaThreadPage({
                   : "—"}
               </span>
             )}
-            {!isLoading && conv?.status && (
-              <span
-                className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                  conv.status === "closed"
+            {!isLoading && (
+              (() => {
+                const rawStatus = conv?.status ?? "open";
+                const isAssigned = !!conv?.assigned_to;
+                let statusKey =
+                  rawStatus === "closed"
+                    ? "closed"
+                    : isAssigned
+                      ? "in_progress"
+                      : rawStatus === "in_queue"
+                        ? "in_queue"
+                        : "open";
+                const label =
+                  statusKey === "closed"
+                    ? "Encerrado"
+                    : statusKey === "in_progress"
+                      ? "Em atendimento"
+                      : statusKey === "in_queue"
+                        ? "Fila"
+                        : "Novo";
+                const colorClass =
+                  statusKey === "closed"
                     ? "bg-[#64748B]/15 text-[#64748B]"
-                    : conv.status === "in_progress"
+                    : statusKey === "in_progress"
                       ? "bg-[#8B5CF6]/15 text-[#7C3AED]"
-                      : conv.status === "open" || conv.status === "in_queue"
-                        ? "bg-[#22C55E]/15 text-[#16A34A]"
-                        : "bg-[#E2E8F0] text-[#64748B]"
-                }`}
-              >
-                {conv.status === "open" ? "Novo" : conv.status === "in_queue" ? "Fila" : conv.status === "in_progress" ? "Em atendimento" : conv.status === "closed" ? "Encerrado" : conv.status}
-              </span>
+                      : "bg-[#22C55E]/15 text-[#16A34A]";
+                return (
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
+                    {label}
+                  </span>
+                );
+              })()
             )}
           </div>
         </div>
