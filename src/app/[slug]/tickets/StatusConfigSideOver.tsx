@@ -22,6 +22,8 @@ const TAB_LABELS: Record<TabId, string> = {
   "por-fila": "Por fila",
 };
 
+const MAX_QUEUE_EXCLUSIVE_STATUSES = 9;
+
 type StatusConfigSideOverProps = {
   open: boolean;
   onClose: () => void;
@@ -721,12 +723,19 @@ export function StatusConfigSideOver({
 
                           <div className="border-t border-[#E2E8F0] pt-3">
                             <span className="text-sm font-medium text-[#334155]">Status exclusivo desta fila</span>
-                            <p className="mt-1 text-xs text-[#64748B]">Crie um status que só existe nesta fila de atendimento.</p>
+                            <p className="mt-1 text-xs text-[#64748B]">
+                              Crie um status que só existe nesta fila. Máximo {MAX_QUEUE_EXCLUSIVE_STATUSES} exclusivos por fila
+                              {(() => {
+                                const exclusiveCount = queueStatuses.filter((qs) => !statuses.some((s) => s.id === qs.id)).length;
+                                return exclusiveCount > 0 ? ` (${exclusiveCount}/${MAX_QUEUE_EXCLUSIVE_STATUSES})` : "";
+                              })()}.
+                            </p>
                             {!creatingQueueExclusive ? (
                               <button
                                 type="button"
                                 onClick={() => setCreatingQueueExclusive(true)}
-                                className="mt-2 inline-flex items-center gap-2 rounded-lg border border-dashed border-[#CBD5E1] px-3 py-2 text-sm font-medium text-[#64748B] hover:border-clicvend-orange hover:text-clicvend-orange"
+                                disabled={queueStatuses.filter((qs) => !statuses.some((s) => s.id === qs.id)).length >= MAX_QUEUE_EXCLUSIVE_STATUSES}
+                                className="mt-2 inline-flex items-center gap-2 rounded-lg border border-dashed border-[#CBD5E1] px-3 py-2 text-sm font-medium text-[#64748B] hover:border-clicvend-orange hover:text-clicvend-orange disabled:opacity-50 disabled:pointer-events-none"
                               >
                                 <Plus className="h-4 w-4" />
                                 Novo status exclusivo

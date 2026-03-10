@@ -38,10 +38,23 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
 
+  const MAX_QUEUE_EXCLUSIVE_STATUSES = 9;
+
   if (queue_id) {
     const { data: q } = await supabase.from("queues").select("id").eq("id", queue_id).eq("company_id", companyId).single();
     if (!q) {
       return NextResponse.json({ error: "Fila não encontrada" }, { status: 404 });
+    }
+    const { count, error: countErr } = await supabase
+      .from("company_ticket_statuses")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .eq("queue_id", queue_id);
+    if (!countErr && (count ?? 0) >= MAX_QUEUE_EXCLUSIVE_STATUSES) {
+      return NextResponse.json(
+        { error: `Cada fila pode ter no máximo ${MAX_QUEUE_EXCLUSIVE_STATUSES} statuses exclusivos.` },
+        { status: 400 }
+      );
     }
   }
 
@@ -62,6 +75,21 @@ export async function POST(request: Request) {
   if (error) {
     if (error.code === "23505") return NextResponse.json({ error: "Já existe um status com esse slug" }, { status: 409 });
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (queue_id && data) {
+    const { data: qRows } = await supabase
+      .from("queue_ticket_statuses")
+      .select("sort_order")
+      .eq("queue_id", queue_id)
+      .order("sort_order", { ascending: false })
+      .limit(1);
+    const nextOrder = (qRows?.[0] as { sort_order?: number } | undefined)?.sort_order ?? -1;
+    await supabase.from("queue_ticket_statuses").insert({
+      queue_id,
+      ticket_status_id: data.id,
+      sort_order: nextOrder + 1,
+    });
   }
 
   return NextResponse.json(data);

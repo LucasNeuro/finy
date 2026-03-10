@@ -5,13 +5,14 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, GripVertical, LayoutGrid, Table2, Settings2, UserPlus, MessageSquare } from "lucide-react";
+import { Loader2, GripVertical, LayoutGrid, Table2, Settings2, UserPlus, MessageSquare, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 
 const StatusConfigSideOver = dynamic(() => import("./StatusConfigSideOver").then((m) => ({ default: m.StatusConfigSideOver })), { ssr: false });
 const ReassignSideOver = dynamic(() => import("./ReassignSideOver").then((m) => ({ default: m.ReassignSideOver })), { ssr: false });
 
 const TICKETS_PAGE_SIZE = 40;
+const TABLE_PAGE_SIZE = 20;
 
 type Ticket = {
   id: string;
@@ -39,11 +40,10 @@ type TicketStatusColumn = {
 type Queue = { id: string; name: string };
 
 const FALLBACK_STATUSES: TicketStatusColumn[] = [
-  { id: "", key: "open", title: "Abertos", color_hex: "#22C55E", is_closed: false, sort_order: 1 },
-  { id: "", key: "in_progress", title: "Em atendimento", color_hex: "#3B82F6", is_closed: false, sort_order: 2 },
-  { id: "", key: "in_queue", title: "Em fila", color_hex: "#3B82F6", is_closed: false, sort_order: 3 },
-  { id: "", key: "waiting", title: "Aguardando", color_hex: "#F59E0B", is_closed: false, sort_order: 4 },
-  { id: "", key: "closed", title: "Fechados", color_hex: "#64748B", is_closed: true, sort_order: 5 },
+  { id: "", key: "open", title: "Novo", color_hex: "#22C55E", is_closed: false, sort_order: 0 },
+  { id: "", key: "in_queue", title: "Fila", color_hex: "#3B82F6", is_closed: false, sort_order: 1 },
+  { id: "", key: "in_progress", title: "Em atendimento", color_hex: "#8B5CF6", is_closed: false, sort_order: 2 },
+  { id: "", key: "closed", title: "Encerrados", color_hex: "#64748B", is_closed: true, sort_order: 3 },
 ];
 
 function normalizeStatus(raw: string): string {
@@ -70,6 +70,9 @@ export default function TicketsPage() {
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
   const [statusConfigOpen, setStatusConfigOpen] = useState(false);
   const [reassignTicket, setReassignTicket] = useState<Ticket | null>(null);
+  const [tablePageIndex, setTablePageIndex] = useState(0);
+  const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set());
+  const [bulkStatusSaving, setBulkStatusSaving] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -163,6 +166,43 @@ export default function TicketsPage() {
   const totalCount = ticketsData?.pages[0]?.total ?? tickets.length;
   const error = ticketsError instanceof Error ? ticketsError.message : null;
 
+  const { data: tablePageData, isLoading: tableLoading } = useQuery({
+    queryKey: [...queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets), "table", tablePageIndex],
+    queryFn: async () => {
+      const p = new URLSearchParams();
+      p.set("include_closed", "1");
+      p.set("limit", String(TABLE_PAGE_SIZE));
+      p.set("offset", String(tablePageIndex * TABLE_PAGE_SIZE));
+      p.set("only_assigned_to_me", canManageTickets ? "0" : "1");
+      if (queueId) p.set("queue_id", queueId);
+      const r = await fetch(`/api/conversations?${p}`, { credentials: "include", headers: apiHeaders });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body?.error || "Falha ao carregar tickets");
+      }
+      return r.json();
+    },
+    enabled: !!slug && permissionsData !== undefined && viewMode === "table",
+    staleTime: 45 * 1000,
+  });
+  const tableTickets = Array.isArray(tablePageData?.data) ? tablePageData.data : [];
+  const tableTotal = typeof tablePageData?.total === "number" ? tablePageData.total : 0;
+  const tablePageCount = Math.max(1, Math.ceil(tableTotal / TABLE_PAGE_SIZE));
+
+  useEffect(() => {
+    if (viewMode === "table") {
+      setTablePageIndex(0);
+      setSelectedTicketIds(new Set());
+    }
+  }, [viewMode, queueId]);
+
+  useEffect(() => {
+    const el = tableSelectAllRef.current;
+    if (!el || tableTickets.length === 0) return;
+    const selectedOnPage = tableTickets.filter((t) => selectedTicketIds.has(t.id)).length;
+    el.indeterminate = selectedOnPage > 0 && selectedOnPage < tableTickets.length;
+  }, [tableTickets, selectedTicketIds]);
+
   const refreshStatuses = useCallback(() => {
     if (!slug) return;
     queryClient.invalidateQueries({ queryKey: queryKeys.ticketStatuses(slug, queueId || undefined) });
@@ -183,6 +223,7 @@ export default function TicketsPage() {
   const [reorderingColumns, setReorderingColumns] = useState(false);
 
   const sentinelRefsByColumn = useRef<Record<string, HTMLDivElement>>({});
+  const tableSelectAllRef = useRef<HTMLInputElement>(null);
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasNextPage) return;
     fetchNextPage();
@@ -433,77 +474,218 @@ export default function TicketsPage() {
         </div>
       ) : viewMode === "table" ? (
         <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-[#E2E8F0] bg-white">
-          <div className="overflow-x-auto overflow-y-auto flex-1">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead className="sticky top-0 z-10 border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Cliente</th>
-                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Status</th>
-                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Últ. msg</th>
-                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Atribuído a</th>
-                  <th className="px-4 py-3 text-left font-semibold text-[#334155]">Entrou</th>
-                  {canManageTickets && (
-                    <th className="w-12 px-2 py-3 text-center font-semibold text-[#334155]">Reatribuir</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {tickets.map((t) => {
-                  const statusKey = normalizeStatus(t.status);
-                  const colDef = statusColumns.find((s) => s.key === statusKey);
-                  const barColor = colDef?.color_hex ?? "#64748B";
-                  return (
-                    <tr key={t.id} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
-                      <td className="px-4 py-3">
-                        <Link href={slug ? `/${slug}/conversas/${t.id}` : "#"} className="font-medium text-[#0F172A] hover:text-clicvend-orange">
-                          {t.customer_name || t.customer_phone}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold uppercase text-white"
-                          style={{ backgroundColor: barColor }}
-                        >
-                          {colDef?.title ?? statusKey}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-[#64748B]">
-                        {t.last_message_at
-                          ? new Date(t.last_message_at).toLocaleString("pt-BR", {
-                              day: "2-digit",
-                              month: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
+          {selectedTicketIds.size > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#E2E8F0] bg-clicvend-orange/10 px-4 py-3">
+              <span className="text-sm font-medium text-[#1E293B]">
+                {selectedTicketIds.size} ticket(s) selecionado(s)
+              </span>
+              <div className="inline-flex flex-wrap items-center gap-2">
+                {canManageTickets && (
+                  <select
+                    className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm text-[#334155]"
+                    defaultValue=""
+                    onChange={async (e) => {
+                      const slugStatus = e.target.value;
+                      if (!slugStatus) return;
+                      e.target.value = "";
+                      setBulkStatusSaving(true);
+                      try {
+                        const apiStatus = statusToApi(slugStatus);
+                        await Promise.all(
+                          Array.from(selectedTicketIds).map((id) =>
+                            fetch(`/api/conversations/${id}`, {
+                              method: "PATCH",
+                              credentials: "include",
+                              headers: { "Content-Type": "application/json", ...apiHeaders },
+                              body: JSON.stringify({ status: apiStatus }),
                             })
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-[#64748B]">
-                        {t.assigned_to_name ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-[#64748B]">
-                        {new Date(t.created_at).toLocaleDateString("pt-BR", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "2-digit",
-                        })}
-                      </td>
-                      {canManageTickets && (
-                        <td className="px-2 py-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setReassignTicket(t)}
-                            className="inline-flex items-center justify-center rounded p-2 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange"
-                            title="Reatribuir a outro agente"
-                          >
-                            <UserPlus className="h-4 w-4" />
-                          </button>
+                          )
+                        );
+                        queryClient.invalidateQueries({ queryKey: queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets) });
+                        queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
+                        setSelectedTicketIds(new Set());
+                      } catch {
+                        alert("Erro ao atualizar status");
+                      } finally {
+                        setBulkStatusSaving(false);
+                      }
+                    }}
+                    disabled={bulkStatusSaving}
+                  >
+                    <option value="">Alterar status</option>
+                    {statusColumns.map((col) => (
+                      <option key={col.id || col.key} value={col.key}>{col.title}</option>
+                    ))}
+                  </select>
+                )}
+                {canManageTickets && tableTickets.some((t) => selectedTicketIds.has(t.id)) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const first = tableTickets.find((t) => selectedTicketIds.has(t.id));
+                      if (first) setReassignTicket(first);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+                    title="Reatribuir selecionados (abre o primeiro)"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Reatribuir
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedTicketIds(new Set())}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9]"
+                  title="Limpar seleção"
+                >
+                  <X className="h-4 w-4" />
+                  Limpar seleção
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="flex-1 min-h-0 overflow-auto max-h-[60vh]">
+            {tableLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-10 w-10 animate-spin text-clicvend-orange" />
+              </div>
+            ) : (
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="sticky top-0 z-10 border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                  <tr>
+                    <th className="w-10 px-2 py-3">
+                      <input
+                        ref={tableSelectAllRef}
+                        type="checkbox"
+                        checked={tableTickets.length > 0 && tableTickets.every((t) => selectedTicketIds.has(t.id))}
+                        onChange={() => {
+                          if (tableTickets.every((t) => selectedTicketIds.has(t.id))) {
+                            setSelectedTicketIds((prev) => {
+                              const next = new Set(prev);
+                              tableTickets.forEach((t) => next.delete(t.id));
+                              return next;
+                            });
+                          } else {
+                            setSelectedTicketIds((prev) => {
+                              const next = new Set(prev);
+                              tableTickets.forEach((t) => next.add(t.id));
+                              return next;
+                            });
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                        aria-label="Selecionar todos da página"
+                      />
+                    </th>
+                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Cliente</th>
+                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Status</th>
+                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Últ. msg</th>
+                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Atribuído a</th>
+                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Entrou</th>
+                    {canManageTickets && (
+                      <th className="w-12 px-2 py-3 text-center font-semibold text-[#334155]">Reatribuir</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableTickets.map((t) => {
+                    const statusKey = normalizeStatus(t.status);
+                    const colDef = statusColumns.find((s) => s.key === statusKey);
+                    const barColor = colDef?.color_hex ?? "#64748B";
+                    return (
+                      <tr key={t.id} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
+                        <td className="w-10 px-2 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedTicketIds.has(t.id)}
+                            onChange={() => {
+                              setSelectedTicketIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(t.id)) next.delete(t.id);
+                                else next.add(t.id);
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                            aria-label={`Selecionar ${t.customer_name || t.customer_phone}`}
+                          />
                         </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <td className="px-4 py-3">
+                          <Link href={slug ? `/${slug}/conversas/${t.id}` : "#"} className="font-medium text-[#0F172A] hover:text-clicvend-orange">
+                            {t.customer_name || t.customer_phone}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold uppercase text-white"
+                            style={{ backgroundColor: barColor }}
+                          >
+                            {colDef?.title ?? statusKey}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-[#64748B]">
+                          {t.last_message_at
+                            ? new Date(t.last_message_at).toLocaleString("pt-BR", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-[#64748B]">
+                          {t.assigned_to_name ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 text-[#64748B]">
+                          {new Date(t.created_at).toLocaleDateString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "2-digit",
+                          })}
+                        </td>
+                        {canManageTickets && (
+                          <td className="px-2 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setReassignTicket(t)}
+                              className="inline-flex items-center justify-center rounded p-2 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange"
+                              title="Reatribuir a outro agente"
+                            >
+                              <UserPlus className="h-4 w-4" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-4 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
+            <span className="text-sm text-[#64748B]">
+              Página {tablePageIndex + 1} de {tablePageCount} ({tableTotal} ticket{tableTotal !== 1 ? "s" : ""})
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => { setTablePageIndex((i) => Math.max(0, i - 1)); setSelectedTicketIds(new Set()); }}
+                disabled={tablePageIndex === 0}
+                className="inline-flex items-center justify-center rounded p-2 text-[#64748B] hover:bg-[#E2E8F0] disabled:opacity-40 disabled:pointer-events-none"
+                aria-label="Página anterior"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTablePageIndex((i) => Math.min(tablePageCount - 1, i + 1)); setSelectedTicketIds(new Set()); }}
+                disabled={tablePageIndex >= tablePageCount - 1}
+                className="inline-flex items-center justify-center rounded p-2 text-[#64748B] hover:bg-[#E2E8F0] disabled:opacity-40 disabled:pointer-events-none"
+                aria-label="Próxima página"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
       ) : (
