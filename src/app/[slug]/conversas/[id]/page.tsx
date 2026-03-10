@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { Loader2 } from "lucide-react";
 import { RealtimeMessages } from "@/components/RealtimeMessages";
 import { EmojiReactionPicker } from "@/components/EmojiReactionPicker";
+import { ChannelIcon } from "@/components/ChannelIcon";
 
 type Message = {
   id: string;
@@ -1192,9 +1193,15 @@ export default function ConversaThreadPage({
         setError(err?.error ?? "Falha ao atribuir");
         return;
       }
+      const json = await res.json().catch(() => ({}));
+      const assignedToName = json?.assigned_to_name ?? null;
+      queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (prev) =>
+        prev ? { ...prev, assigned_to: json?.assigned_to ?? currentUserId, assigned_to_name: assignedToName ?? prev.assigned_to_name, status: "in_progress" } : prev
+      );
       await refetchConversation();
       queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug) });
+      window.dispatchEvent(new CustomEvent("conversations-status-reset"));
     } finally {
       setChatActionLoading(null);
     }
@@ -1719,26 +1726,44 @@ export default function ConversaThreadPage({
           )}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-[#1E293B]">{isLoading ? "Carregando…" : (displayName || name)}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-2">
+            <p className="font-medium text-[#1E293B] truncate">{isLoading ? "Carregando…" : (displayName || name)}</p>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {!isLoading && displayPhone && displayPhone !== "—" && (
               <span className="rounded bg-[#F1F5F9] px-1.5 py-0.5 text-xs font-medium text-[#64748B]" title="Número normalizado para envio">
                 {displayPhone}
               </span>
             )}
             {!isLoading && conv?.channel_name && (
-              <span className="rounded bg-clicvend-green/15 px-1.5 py-0.5 text-xs font-medium text-clicvend-green">
+              <span className="inline-flex items-center gap-1 rounded bg-clicvend-green/15 px-1.5 py-0.5 text-xs font-medium text-clicvend-green">
+                <ChannelIcon variant="outline" channelName={conv.channel_name} size={14} />
                 {conv.channel_name}
               </span>
             )}
             {!isLoading && conv?.queue_name && (
               <span className="rounded bg-[#E2E8F0] px-1.5 py-0.5 text-xs text-[#64748B]">
-                {conv.queue_name}
+                Fila: {conv.queue_name}
               </span>
             )}
-            {!isLoading && conv?.assigned_to_name && (
+            {!isLoading && (
               <span className="rounded bg-[#E2E8F0] px-1.5 py-0.5 text-xs text-[#64748B]">
-                {conv.assigned_to_name}
+                Atendente: {conv?.assigned_to_name ?? "—"}
+              </span>
+            )}
+            {!isLoading && conv?.status && (
+              <span
+                className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                  conv.status === "closed"
+                    ? "bg-[#64748B]/15 text-[#64748B]"
+                    : conv.status === "in_progress"
+                      ? "bg-[#8B5CF6]/15 text-[#7C3AED]"
+                      : conv.status === "open" || conv.status === "in_queue"
+                        ? "bg-[#22C55E]/15 text-[#16A34A]"
+                        : "bg-[#E2E8F0] text-[#64748B]"
+                }`}
+              >
+                {conv.status === "open" ? "Novo" : conv.status === "in_queue" ? "Fila" : conv.status === "in_progress" ? "Em atendimento" : conv.status === "closed" ? "Encerrado" : conv.status}
               </span>
             )}
           </div>

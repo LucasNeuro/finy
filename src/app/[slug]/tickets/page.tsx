@@ -5,7 +5,8 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, GripVertical, LayoutGrid, Table2, Settings2, UserPlus, MessageSquare, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Loader2, GripVertical, LayoutGrid, Table2, Settings2, UserPlus, MessageSquare, ChevronLeft, ChevronRight, X, Hash, Layers, UserCheck } from "lucide-react";
+import { ChannelIcon } from "@/components/ChannelIcon";
 import { queryKeys } from "@/lib/query-keys";
 
 const StatusConfigSideOver = dynamic(() => import("./StatusConfigSideOver").then((m) => ({ default: m.StatusConfigSideOver })), { ssr: false });
@@ -580,7 +581,7 @@ export default function TicketsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Cliente</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Últ. msg</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Atribuído a</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Atendente</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Entrou</th>
                     {canManageTickets && (
                       <th className="w-12 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Reatribuir</th>
@@ -800,53 +801,68 @@ export default function TicketsPage() {
                     </div>
                     <Link
                       href={slug ? `/${slug}/conversas/${t.id}` : "#"}
-                      className="min-w-0 flex-1 block p-3 cursor-pointer"
+                      className="min-w-0 flex-1 flex flex-col cursor-pointer"
                     >
-                      <div className="mb-1.5 flex items-start gap-2">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-[#64748B]">
-                          {t.avatar_url ? (
-                            <img
-                              src={t.avatar_url}
-                              alt=""
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <span className="text-xs font-semibold">
-                              {t.customer_name
-                                ? t.customer_name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?"
-                                : (t.customer_phone || "?").slice(-2)}
+                      <div className="p-3">
+                        <div className="flex items-start gap-2 mb-1.5">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#F1F5F9] to-[#E2E8F0] text-[#64748B] ring-1 ring-white/80">
+                            {t.avatar_url ? (
+                              <img
+                                src={t.avatar_url.startsWith("http") ? `/api/contacts/avatar?url=${encodeURIComponent(t.avatar_url)}` : t.avatar_url}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-xs font-semibold">
+                                {t.customer_name
+                                  ? t.customer_name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?"
+                                  : (t.customer_phone || "?").slice(-2)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1.5">
+                              <p className="truncate font-medium text-[#0F172A]" title={displayName}>
+                                {displayName}
+                              </p>
+                              <ChannelIcon variant="outline" channelName={t.channel_name} size={18} title={t.channel_name ?? "WhatsApp"} />
+                            </div>
+                            <span
+                              className="inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white mt-0.5"
+                              style={{ backgroundColor: barColor }}
+                            >
+                              {colDef?.title ?? (statusKey === "closed" ? "Fechado" : t.assigned_to ? "Em atendimento" : "Na fila")}
                             </span>
-                          )}
+                          </div>
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium text-[#0F172A]" title={displayName}>
-                            {displayName}
-                          </p>
-                          <span
-                            className="inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase text-white"
-                            style={{ backgroundColor: barColor }}
-                          >
-                            {colDef?.title ?? (statusKey === "closed" ? "Fechado" : t.assigned_to ? "Em atendimento" : "Na fila")}
+                        <div className="text-[11px] text-[#64748B] space-y-0.5">
+                          {lastMsgAt && <span title="Última mensagem">Últ. msg: {lastMsgAt}</span>}
+                          <span>
+                            Entrou:{" "}
+                            {new Date(t.created_at).toLocaleDateString("pt-BR", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "2-digit",
+                            })}
                           </span>
                         </div>
                       </div>
-                      <div className="flex flex-col gap-0.5 text-[11px] text-[#64748B]">
-                        {lastMsgAt && (
-                          <span title="Última mensagem">Últ. msg: {lastMsgAt}</span>
-                        )}
-                        <span title="Atribuído a">Atribuído a: {t.assigned_to_name ?? "—"}</span>
-                        {t.channel_name && (
-                          <span className="truncate" title={t.channel_name}>Instância: {t.channel_name}</span>
-                        )}
-                        <span>
-                          Entrou:{" "}
-                          {new Date(t.created_at).toLocaleDateString("pt-BR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "2-digit",
-                          })}
+                      <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[#F1F5F9] bg-[#F8FAFC]/80 px-3 py-2 text-[10px] text-[#64748B]">
+                        <span className="inline-flex items-center gap-1" title={`ID: ${t.id}`}>
+                          <Hash className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+                          <span className="font-mono font-medium">{t.id.replace(/-/g, "").slice(0, 8).toUpperCase()}</span>
                         </span>
-                      </div>
+                        {t.channel_name && (
+                          <span className="inline-flex items-center gap-1 truncate max-w-[90px]" title={t.channel_name}>
+                            <Layers className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+                            {t.channel_name}
+                          </span>
+                        )}
+                        <span className="inline-flex items-center gap-1 ml-auto" title={t.assigned_to_name ? `Atendente: ${t.assigned_to_name}` : "Ninguém pegou ainda"}>
+                          <UserCheck className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+                          <span className="truncate max-w-[72px]"><span className="text-[#94A3B8]">Atendente:</span> {t.assigned_to_name ?? "—"}</span>
+                        </span>
+                      </footer>
                     </Link>
                   </div>
                   );

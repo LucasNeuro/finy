@@ -4,13 +4,15 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo, useRef } from "react";
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive } from "lucide-react";
+import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive, Hash, Layers } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
+import { ChannelIcon } from "@/components/ChannelIcon";
 import { queryKeys } from "@/lib/query-keys";
 
 type Conversation = {
   id: string;
   channel_id?: string;
+  channel_name?: string | null;
   customer_phone: string;
   customer_name: string | null;
   wa_chat_jid?: string | null;
@@ -163,76 +165,108 @@ const ConversationListItem = memo(function ConversationListItem({
     }
   };
 
+  const statusLabel =
+    c.status === "open" ? "Novo" : c.status === "in_queue" ? "Fila" : c.status === "in_progress" ? "Em atendimento" : c.status === "closed" ? "Encerrado" : c.status;
+  const shortId = c.id.replace(/-/g, "").slice(0, 8).toUpperCase();
+
   return (
-    <li onMouseEnter={() => onHover?.(c.id)}>
+    <li onMouseEnter={() => onHover?.(c.id)} className="px-2 py-1">
       <div
-        className={`flex items-center gap-1.5 transition-all duration-150 ${currentId === c.id ? "bg-clicvend-green/10 ring-1 ring-clicvend-green/20" : ""} ${rowStyle}`}
+        className={`flex items-stretch gap-1.5 rounded-xl border transition-all duration-200 overflow-hidden ${currentId === c.id ? "border-clicvend-green/40 bg-clicvend-green/5 shadow-sm ring-1 ring-clicvend-green/20" : "border-[#E2E8F0]/80 bg-white hover:border-[#CBD5E1] hover:shadow-sm"} ${rowStyle}`}
       >
-        <Link
-          href={href}
-          className="flex min-w-0 flex-1 items-center gap-3.5 p-3.5 hover:bg-[#F8FAFC] rounded-lg transition-colors duration-150"
-        >
-          <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-base font-semibold text-[#475569] shadow-sm ring-1 ring-white/50">
-            {avatarSrc ? (
-              <img
-                src={avatarSrc}
-                alt=""
-                className="h-full w-full object-cover"
-                referrerPolicy="no-referrer"
-                onError={() => setImgError(true)}
-              />
-            ) : isGroup ? (
-              <Users className="h-5 w-5 text-[#64748B]" />
-            ) : (
-              <span aria-hidden>{initial}</span>
-            )}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center justify-between gap-2">
-              <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-[#1E293B]">
-                {isNew && (
-                  <span
-                    className={`h-2.5 w-2.5 shrink-0 rounded-full shadow-sm ring-2 ${showQueueColors ? `${tabDot.dot} ${tabDot.dotRing}` : "bg-amber-500 ring-amber-100"}`}
-                    title="Nova conversa (não atribuída)"
-                    aria-hidden
-                  />
+        <Link href={href} className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-start gap-3 p-3">
+            <span className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#F1F5F9] to-[#E2E8F0] text-base font-semibold text-[#475569] shadow-sm ring-1 ring-white/80">
+              {avatarSrc ? (
+                <img
+                  src={avatarSrc}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  referrerPolicy="no-referrer"
+                  onError={() => setImgError(true)}
+                />
+              ) : isGroup ? (
+                <Users className="h-6 w-6 text-[#64748B]" />
+              ) : (
+                <span aria-hidden>{initial}</span>
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-[#1E293B]">
+                  {isNew && (
+                    <span
+                      className={`h-2 w-2 shrink-0 rounded-full shadow-sm ring-2 ${showQueueColors ? `${tabDot.dot} ${tabDot.dotRing}` : "bg-amber-500 ring-amber-100"}`}
+                      title="Nova conversa (não atribuída)"
+                      aria-hidden
+                    />
+                  )}
+                  <span className="truncate">{c.customer_name || formatPhoneBrazil(c.customer_phone)}</span>
+                </p>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <ChannelIcon variant="outline" provider="generic" channelName={c.channel_name} size={20} title={c.channel_name ?? "WhatsApp"} />
+                  <span className="text-xs font-medium text-[#64748B] tabular-nums">
+                    {formatLastMessageTime(c.last_message_at)}
+                  </span>
+                </span>
+              </div>
+              <p className="mt-1 truncate text-xs text-[#64748B]">
+                {isGroup && (
+                  <span className="mr-1.5 inline-flex shrink-0 rounded-md bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] font-semibold text-[#64748B]">
+                    Grupo
+                  </span>
                 )}
-                <span className="truncate">{c.customer_name || formatPhoneBrazil(c.customer_phone)}</span>
+                {!isGroup && c.customer_phone && (
+                  <span className="text-[#64748B]" title="Número">
+                    {formatPhoneBrazil(c.customer_phone)}
+                  </span>
+                )}
+                {!isGroup && c.customer_phone && (c.last_message_preview != null && c.last_message_preview !== "" || c.status) && (
+                  <span className="mx-1 text-[#94A3B8]">·</span>
+                )}
+                {c.last_message_preview != null && c.last_message_preview !== ""
+                  ? c.last_message_preview
+                  : statusLabel}
               </p>
-              <span className="shrink-0 text-xs font-medium text-[#64748B]">
-                {formatLastMessageTime(c.last_message_at)}
-              </span>
             </div>
-            <p className="truncate text-xs text-[#64748B] flex items-center gap-2 mt-0.5">
-              {isGroup && (
-                <span className="shrink-0 rounded-md bg-[#E2E8F0] px-2 py-0.5 text-[10px] font-semibold text-[#64748B]">
-                  Grupo
-                </span>
-              )}
-              {!isGroup && c.customer_phone && (
-                <span className="shrink-0 text-[#64748B]" title="Número normalizado para envio">
-                  {formatPhoneBrazil(c.customer_phone)}
-                </span>
-              )}
-              {!isGroup && c.customer_phone && (c.last_message_preview != null && c.last_message_preview !== "" || c.status) && (
-                <span className="text-[#94A3B8]">·</span>
-              )}
-              {c.last_message_preview != null && c.last_message_preview !== ""
-                ? c.last_message_preview
-                : c.status === "open"
-                  ? "Aberto"
-                  : c.status === "closed"
-                    ? "Encerrado"
-                    : c.status}
-            </p>
           </div>
+          <footer className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-[#F1F5F9] bg-[#F8FAFC]/80 px-3 py-2 text-[10px] text-[#64748B]">
+            <span className="inline-flex items-center gap-1" title={`ID: ${c.id}`}>
+              <Hash className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+              <span className="font-mono font-medium tracking-wide">{shortId}</span>
+            </span>
+            {c.queue_name && (
+              <span className="inline-flex items-center gap-1" title={`Fila: ${c.queue_name}`}>
+                <Layers className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+                <span className="truncate max-w-[100px]">{c.queue_name}</span>
+              </span>
+            )}
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ${
+                c.status === "closed"
+                  ? "bg-[#64748B]/10 text-[#64748B]"
+                  : c.status === "in_progress"
+                    ? "bg-[#8B5CF6]/10 text-[#7C3AED]"
+                    : c.status === "open" || c.status === "in_queue"
+                      ? "bg-[#22C55E]/10 text-[#16A34A]"
+                      : "bg-[#E2E8F0] text-[#64748B]"
+              }`}
+              title={`Status: ${statusLabel}`}
+            >
+              {statusLabel}
+            </span>
+            <span className="inline-flex items-center gap-1 ml-auto" title={c.assigned_to_name ? `Atendente: ${c.assigned_to_name}` : "Ninguém pegou ainda"}>
+              <UserCheck className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+              <span className="truncate max-w-[80px]"><span className="text-[#94A3B8]">Atendente:</span> {c.assigned_to_name ?? "—"}</span>
+            </span>
+          </footer>
         </Link>
         {showClaim && (
           <button
             type="button"
             onClick={handleClaimClick}
             disabled={claiming}
-            className="mr-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-[#E2E8F0] bg-white text-[#009B84] shadow-sm transition-all duration-200 hover:bg-[#009B84] hover:text-white hover:border-[#009B84] hover:shadow-md hover:scale-105 disabled:opacity-60 disabled:hover:scale-100"
+            className="flex w-9 shrink-0 items-center justify-center self-stretch min-h-[2.25rem] rounded-lg border border-[#E2E8F0] bg-white text-[#009B84] shadow-sm transition-all duration-200 hover:bg-[#DCFCE7] hover:text-[#16A34A] hover:border-[#86EFAC] hover:shadow mr-2 disabled:opacity-60"
             title="Atribuir a mim e colocar em atendimento"
             aria-label="Atribuir a mim"
           >
@@ -890,7 +924,20 @@ export function ConversasSidebar() {
                       headers: apiHeaders ?? {},
                     });
                     if (res.ok) {
+                      const json = await res.json().catch(() => ({}));
+                      const assignedToName = json?.assigned_to_name ?? null;
                       queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", viewMode) });
+                      queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
+                      queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
+                      queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "unassigned") });
+                      queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
+                      window.dispatchEvent(new CustomEvent("conversations-status-reset"));
+                      queryClient.refetchQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
+                      if (assignedToName) {
+                        queryClient.setQueryData(queryKeys.conversation(conversationId), (prev: Record<string, unknown> | undefined) =>
+                          prev ? { ...prev, assigned_to: json?.assigned_to ?? null, assigned_to_name: assignedToName, status: "in_progress" } : prev
+                        );
+                      }
                     }
                   }}
                   onHover={slug ? (id) => {

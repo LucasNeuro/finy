@@ -107,7 +107,7 @@ export async function GET(request: Request) {
     if (cached) {
       let sorted = !onlyAssignedToMe && !includeClosed && !onlyUnassigned
         ? sortQueuesListNewFirst((cached.data ?? []) as { assigned_to?: string | null; status?: string; last_message_at: string; channel_id?: string; customer_phone?: string; is_group?: boolean }[])
-        : (cached.data ?? []) as { channel_id?: string; customer_phone?: string; is_group?: boolean }[];
+        : (cached.data ?? []) as { assigned_to?: string | null; channel_id?: string; customer_phone?: string; is_group?: boolean }[];
       // Deduplica contatos (mesmo canal + mesmo telefone) também ao ler do cache
       const seen = new Set<string>();
       sorted = sorted.filter((c) => {
@@ -118,6 +118,28 @@ export async function GET(request: Request) {
         seen.add(key);
         return true;
       });
+      // Garantir assigned_to_name mesmo quando veio do cache (cache antigo pode não ter)
+      const cachedList = sorted as { assigned_to?: string | null; assigned_to_name?: string | null }[];
+      const needNames = cachedList.some((c) => c.assigned_to && (c.assigned_to_name == null || c.assigned_to_name === ""));
+      if (needNames) {
+        const assignedIds = [...new Set(cachedList.map((c) => c.assigned_to).filter(Boolean))] as string[];
+        let assignedNames: Record<string, string> = {};
+        if (assignedIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from("profiles")
+            .select("user_id, full_name")
+            .eq("company_id", companyId)
+            .in("user_id", assignedIds);
+          assignedNames = (profiles ?? []).reduce(
+            (acc, p) => ({ ...acc, [(p as { user_id: string }).user_id]: ((p as { full_name?: string }).full_name ?? "").trim() || "—" }),
+            {} as Record<string, string>
+          );
+        }
+        sorted = cachedList.map((c) => ({
+          ...c,
+          assigned_to_name: c.assigned_to ? assignedNames[c.assigned_to] ?? null : null,
+        })) as typeof sorted;
+      }
       const res = NextResponse.json({ data: sorted, total: (cached.total ?? sorted.length) });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }

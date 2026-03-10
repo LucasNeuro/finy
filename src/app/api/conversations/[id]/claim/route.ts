@@ -72,10 +72,19 @@ export async function POST(
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
   }
 
+  let assigned_to_name: string | null = null;
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("user_id", user.id)
+    .eq("company_id", companyId)
+    .single();
+  assigned_to_name = (profile as { full_name?: string } | null)?.full_name?.trim() ?? null;
+
   await Promise.all([
     invalidateConversationList(companyId),
     invalidateConversationDetail(id),
   ]);
 
-  return NextResponse.json(updated);
+  return NextResponse.json({ ...updated, assigned_to_name });
 }
