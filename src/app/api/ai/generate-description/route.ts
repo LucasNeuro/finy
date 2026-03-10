@@ -6,8 +6,9 @@ const MAX_DESCRIPTION_LENGTH = 512;
 const MAX_GROUP_NAME_LENGTH = 25;
 const MAX_COMMUNITY_NAME_LENGTH = 100;
 const MAX_INSTANCE_NAME_LENGTH = 80;
+const MAX_QUICK_REPLY_LENGTH = 400;
 
-type EntityType = "community" | "group" | "instance";
+type EntityType = "community" | "group" | "instance" | "quick_reply";
 type FieldType = "description" | "name";
 
 /**
@@ -20,6 +21,28 @@ function buildMessages(
   name: string,
   context: string
 ): Array<{ role: "system" | "user"; content: string }> {
+  if (type === "quick_reply") {
+    const systemContent = `You are a copywriter for customer service. Generate a single short message in Brazilian Portuguese for WhatsApp.
+
+# Role
+Generate only the message text that an agent will send as a quick reply. No explanations, no quotes, no prefix like "Message:".
+
+# Output format
+- Reply with ONLY the message text.
+- Maximum ${MAX_QUICK_REPLY_LENGTH} characters.
+- Professional, polite, clear. Suitable for customer service or sales.`;
+
+    const userParts: string[] = ["Generate a short WhatsApp message for a quick reply template."];
+    if (name) userParts.push(`Title/shortcut for this reply: "${name}". The message should match this theme.`);
+    if (context) userParts.push(`Context (e.g. queue names or use case): ${context}`);
+    userParts.push("\nReply with only the message text, nothing else.");
+
+    return [
+      { role: "system", content: systemContent },
+      { role: "user", content: userParts.join("\n") },
+    ];
+  }
+
   const entityLabels = {
     community: {
       name: "comunidade no WhatsApp (reúne vários grupos sob um tema)",
@@ -87,14 +110,16 @@ You generate only one short description for WhatsApp. No explanations, no quotes
 
 /**
  * POST /api/ai/generate-description
- * Gera nome ou descrição em português via Mistral AI para comunidade, grupo ou instância.
- * Usa system + user messages conforme documentação Mistral.
- * Body: { type: "community" | "group" | "instance", field?: "description" | "name", name?: string, context?: string }
+ * Gera nome ou descrição em português via Mistral AI para comunidade, grupo, instância ou resposta rápida.
+ * Body: { type: "community" | "group" | "instance" | "quick_reply", field?: "description" | "name", name?: string, context?: string }
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { error: "Não autorizado. Verifique se está logado e com a empresa selecionada." },
+      { status: 401 }
+    );
   }
 
   const apiKey = process.env.MISTRAL_API_KEY?.trim();
@@ -102,7 +127,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "MISTRAL_API_KEY não configurada. Adicione no .env e reinicie o servidor (npm run dev).",
+          "MISTRAL_API_KEY não configurada. Adicione no .env (ex.: MISTRAL_API_KEY=sua_chave) e reinicie o servidor (npm run dev).",
       },
       { status: 503 }
     );
@@ -116,7 +141,7 @@ export async function POST(request: Request) {
   }
 
   const type: EntityType =
-    body?.type === "community" || body?.type === "group" || body?.type === "instance"
+    body?.type === "community" || body?.type === "group" || body?.type === "instance" || body?.type === "quick_reply"
       ? body.type
       : "group";
   const field: FieldType = body?.field === "name" ? "name" : "description";
@@ -126,13 +151,15 @@ export async function POST(request: Request) {
   const messages = buildMessages(type, field, name, context);
 
   const maxLength =
-    field === "name"
-      ? type === "group"
-        ? MAX_GROUP_NAME_LENGTH
-        : type === "community"
-          ? MAX_COMMUNITY_NAME_LENGTH
-          : MAX_INSTANCE_NAME_LENGTH
-      : MAX_DESCRIPTION_LENGTH;
+    type === "quick_reply"
+      ? MAX_QUICK_REPLY_LENGTH
+      : field === "name"
+        ? type === "group"
+          ? MAX_GROUP_NAME_LENGTH
+          : type === "community"
+            ? MAX_COMMUNITY_NAME_LENGTH
+            : MAX_INSTANCE_NAME_LENGTH
+        : MAX_DESCRIPTION_LENGTH;
 
   try {
     const res = await fetch(MISTRAL_URL, {
@@ -159,8 +186,11 @@ export async function POST(request: Request) {
           return null;
         }
       })();
-      const message =
-        errJson?.message ?? errJson?.error ?? errText ?? `Mistral API ${res.status}`;
+      const detail = errJson?.detail ?? errJson?.message ?? errJson?.error;
+      const isUnauthorized = res.status === 401 || (typeof detail === "string" && /unauthorized/i.test(detail));
+      const message = isUnauthorized
+        ? "Chave da API Mistral inválida ou expirada. Verifique MISTRAL_API_KEY no .env."
+        : (typeof detail === "string" ? detail : errText) || `Mistral API ${res.status}`;
       return NextResponse.json(
         { error: `Falha ao gerar: ${message}` },
         { status: res.status >= 500 ? 502 : 400 }
