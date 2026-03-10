@@ -2,7 +2,6 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
@@ -1014,41 +1013,28 @@ function MessageBubble({
               >
                 <Smile className="h-4 w-4" />
               </button>
-              {reactionPickerOpen &&
-                typeof document !== "undefined" &&
-                (() => {
-                  const rect = pickerRef.current?.getBoundingClientRect();
-                  if (!rect) return null;
-                  const PICKER_W = 352;
-                  const SIDEOVER_W = 600;
-                  const visibleRight = typeof window !== "undefined" ? window.innerWidth - SIDEOVER_W : 9999;
-                  const left = Math.max(8, Math.min(rect.right - PICKER_W, visibleRight - PICKER_W));
-                  const top = rect.bottom + 4;
-                  return createPortal(
-                    <div
-                      ref={pickerPortalRef}
-                      className="fixed rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden z-[60]"
-                      role="dialog"
-                      aria-label="Escolher reação"
-                      style={{ left, top, width: PICKER_W }}
-                    >
-                      <div className="max-h-[320px] overflow-auto">
-                        <EmojiReactionPicker
-                          onSelect={(emoji) => {
-                            onReaction(m.id, m.reaction === emoji ? "" : emoji);
-                            setReactionPickerOpen(false);
-                          }}
-                          onClose={() => setReactionPickerOpen(false)}
-                        />
-                      </div>
-                    </div>,
-                    document.body
-                  );
-                })()}
             </div>
           )}
         </div>
       </footer>
+      {conversationId && apiHeaders && onReaction && !String(m.id).startsWith("temp-") && reactionPickerOpen && (
+        <div
+          ref={pickerPortalRef}
+          className="mt-2 rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden w-full max-w-[352px]"
+          role="dialog"
+          aria-label="Escolher reação"
+        >
+          <div className="max-h-[320px] overflow-auto">
+            <EmojiReactionPicker
+              onSelect={(emoji) => {
+                onReaction(m.id, m.reaction === emoji ? "" : emoji);
+                setReactionPickerOpen(false);
+              }}
+              onClose={() => setReactionPickerOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1098,6 +1084,7 @@ export default function ConversaThreadPage({
   const docInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const inputEmojiPickerRef = useRef<HTMLDivElement>(null);
+  const inputEmojiButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const p = Promise.resolve(params);
@@ -1787,9 +1774,10 @@ export default function ConversaThreadPage({
   useEffect(() => {
     if (!inputEmojiPickerOpen) return;
     const close = (e: MouseEvent) => {
-      if (inputEmojiPickerRef.current && !inputEmojiPickerRef.current.contains(e.target as Node)) {
-        setInputEmojiPickerOpen(false);
-      }
+      const target = e.target as Node;
+      const inPicker = inputEmojiPickerRef.current?.contains(target);
+      const onButton = inputEmojiButtonRef.current?.contains(target);
+      if (!inPicker && !onButton) setInputEmojiPickerOpen(false);
     };
     document.addEventListener("click", close, true);
     return () => document.removeEventListener("click", close, true);
@@ -2148,6 +2136,7 @@ export default function ConversaThreadPage({
               onDiscard={discardRecordedAudio}
             />
           ) : (
+          <>
           <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 items-center ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
             <input
               type="file"
@@ -2198,8 +2187,9 @@ export default function ConversaThreadPage({
                 </div>
               )}
             </div>
-            <div className="relative shrink-0">
+            <div className="shrink-0">
               <button
+                ref={inputEmojiButtonRef}
                 type="button"
                 onClick={() => setInputEmojiPickerOpen((v) => !v)}
                 className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#E2E8F0] bg-white text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B]"
@@ -2207,19 +2197,6 @@ export default function ConversaThreadPage({
               >
                 <Smile className="h-5 w-5" />
               </button>
-              {inputEmojiPickerOpen && (
-                <div
-                  ref={inputEmojiPickerRef}
-                  className="absolute bottom-full left-0 mb-2 rounded-xl bg-white border border-[#E2E8F0] shadow-lg z-50"
-                >
-                  <EmojiReactionPicker
-                    onSelect={(emoji) => {
-                      setSendValue((prev) => prev + emoji);
-                    }}
-                    onClose={() => setInputEmojiPickerOpen(false)}
-                  />
-                </div>
-              )}
             </div>
             <input
               type="text"
@@ -2268,6 +2245,22 @@ export default function ConversaThreadPage({
               {sending ? "Enviando…" : "Enviar"}
             </button>
           </form>
+          {inputEmojiPickerOpen && (
+            <div
+              ref={inputEmojiPickerRef}
+              className="mt-2 rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden w-full max-w-[352px]"
+            >
+              <div className="max-h-[320px] overflow-auto">
+                <EmojiReactionPicker
+                  onSelect={(emoji) => {
+                    setSendValue((prev) => prev + emoji);
+                  }}
+                  onClose={() => setInputEmojiPickerOpen(false)}
+                />
+              </div>
+            </div>
+          )}
+          </>
           )}
         </div>
       </div>
