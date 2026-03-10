@@ -19,6 +19,7 @@ type Message = {
   sent_at: string;
   message_type?: string;
   media_url?: string | null;
+  media_cached_url?: string | null;
   caption?: string | null;
   file_name?: string | null;
   external_id?: string | null;
@@ -506,6 +507,9 @@ function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
   return url.startsWith("http") || url.startsWith("data:");
 }
 
+/** Cache local de URLs de mídia por messageId (evita refetch ao navegar entre abas). */
+const mediaUrlCache = new Map<string, string>();
+
 /** Inferir tipo de mídia para mensagens já na conversa (message_type vazio ou conteúdo em formato antigo). */
 function inferDisplayType(messageType: string | undefined, content: string, m?: { file_name?: string | null; media_url?: string | null }): string {
   const c = (content ?? "").trim();
@@ -602,12 +606,16 @@ function MessageBubble({
               ? `data:${videoMime};base64,${rawMediaUrl}`
               : rawMediaUrl)
       : null;
+  // Prioridade: media_cached_url (API) > cache local > fetch /download
+  const cachedFromApi = m.media_cached_url && isPlayableOrDirectUrl(m.media_cached_url) ? m.media_cached_url : null;
+  const cachedFromLocal = m.id && !String(m.id).startsWith("temp-") ? mediaUrlCache.get(m.id) : null;
+  const immediateUrl = cachedFromApi || cachedFromLocal || null;
   const caption = m.caption ?? m.content;
   const captionTrim = String(caption ?? "").trim();
   const captionNormalized = captionTrim.toLowerCase().replace(/^\[|\]$/g, "").trim();
   const isPlaceholderCaption = ["document", "documento", "media", "video", "audio", "ptt", "vídeo", "áudio", "image", "imagem"].includes(captionNormalized) || /^\[?(document|documento|media|video|audio|ptt|vídeo|áudio|image|imagem)\]?$/i.test(captionTrim);
 
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(immediateUrl ?? null);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
@@ -619,26 +627,36 @@ function MessageBubble({
     conversationId && apiHeaders && m.id && !String(m.id).startsWith("temp-") &&
     ["audio", "ptt", "document", "image", "video"].includes(displayType)
   );
-  const needsDownloadForPlay = (displayType === "audio" || displayType === "ptt") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
-  const needsDownloadForMedia = (displayType === "image" || displayType === "video") && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
-  const needsDownloadForDocument = displayType === "document" && !isPlayableOrDirectUrl(mediaUrl) && canFetchDownload;
+  const hasResolvedUrl = immediateUrl || downloadUrl || (mediaUrl && isPlayableOrDirectUrl(mediaUrl));
+  const needsDownloadForPlay = (displayType === "audio" || displayType === "ptt") && !hasResolvedUrl && canFetchDownload;
+  const needsDownloadForMedia = (displayType === "image" || displayType === "video") && !hasResolvedUrl && canFetchDownload;
+  const needsDownloadForDocument = displayType === "document" && !hasResolvedUrl && canFetchDownload;
 
   useEffect(() => {
+    if (immediateUrl) {
+      if (m.id && !String(m.id).startsWith("temp-")) mediaUrlCache.set(m.id, immediateUrl);
+      return;
+    }
     if (!(needsDownloadForPlay || needsDownloadForMedia || needsDownloadForDocument) || !conversationId || !apiHeaders || !m.id) return;
     let cancelled = false;
     setDownloadLoading(true);
     fetch(`/api/conversations/${conversationId}/messages/${m.id}/download`, { credentials: "include", headers: apiHeaders })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { fileURL?: string } | null) => {
-        if (!cancelled && data?.fileURL) setDownloadUrl(data.fileURL);
+        if (!cancelled && data?.fileURL) {
+          setDownloadUrl(data.fileURL);
+          if (m.id) mediaUrlCache.set(m.id, data.fileURL);
+        }
       })
       .finally(() => { if (!cancelled) setDownloadLoading(false); });
     return () => { cancelled = true; };
-  }, [needsDownloadForPlay, needsDownloadForMedia, needsDownloadForDocument, conversationId, apiHeaders, m.id]);
+  }, [immediateUrl, needsDownloadForPlay, needsDownloadForMedia, needsDownloadForDocument, conversationId, apiHeaders, m.id]);
+
+  const effectiveMediaUrl = immediateUrl || downloadUrl || mediaUrl;
 
   const resolvedDisplayType = (() => {
     const base = displayType;
-    const url = (downloadUrl || mediaUrl || "").toString().toLowerCase();
+    const url = (effectiveMediaUrl || "").toString().toLowerCase();
     if (!url) return base;
     const videoExt2 = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
     const audioExt2 = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
@@ -647,7 +665,7 @@ function MessageBubble({
     return base;
   })();
 
-  const audioSrc = (resolvedDisplayType === "audio" || resolvedDisplayType === "ptt") ? (downloadUrl || mediaUrl) : null;
+  const audioSrc = (resolvedDisplayType === "audio" || resolvedDisplayType === "ptt") ? effectiveMediaUrl : null;
 
   useEffect(() => {
     if (!reactionPickerOpen) return;
@@ -670,8 +688,8 @@ function MessageBubble({
   }, [deleteMenuOpen]);
 
   async function handleDownloadClick() {
-    if (downloadUrl) {
-      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+    if (effectiveMediaUrl) {
+      window.open(effectiveMediaUrl, "_blank", "noopener,noreferrer");
       return;
     }
     if (!conversationId || !apiHeaders || !m.id) return;
@@ -681,6 +699,7 @@ function MessageBubble({
       const data = await res.json().catch(() => ({}));
       if (data?.fileURL) {
         setDownloadUrl(data.fileURL);
+        if (m.id) mediaUrlCache.set(m.id, data.fileURL);
         window.open(data.fileURL, "_blank", "noopener,noreferrer");
       }
     } finally {
@@ -706,18 +725,18 @@ function MessageBubble({
           <span className="text-[#64748B] font-normal animate-pulse">Enviando…</span>
         )}
       </p>
-      {resolvedDisplayType === "image" && (mediaUrl || downloadUrl || needsDownloadForMedia) && (
+      {resolvedDisplayType === "image" && (effectiveMediaUrl || needsDownloadForMedia) && (
         <div className="w-full space-y-0.5">
-          {(mediaUrl || downloadUrl) ? (
+          {effectiveMediaUrl ? (
             <>
               <a
-                href={downloadUrl || mediaUrl || "#"}
+                href={effectiveMediaUrl || "#"}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="block rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm hover:shadow-md transition-shadow focus:outline-none focus:ring-2 focus:ring-clicvend-orange/50"
               >
                 <img
-                  src={mediaUrl || downloadUrl || ""}
+                  src={effectiveMediaUrl || ""}
                   alt=""
                   className="max-h-[380px] min-h-[140px] w-full object-cover cursor-pointer"
                 />
@@ -737,22 +756,22 @@ function MessageBubble({
           {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {resolvedDisplayType === "video" && (mediaUrl || downloadUrl || needsDownloadForMedia || canFetchDownload) && (
+      {resolvedDisplayType === "video" && (effectiveMediaUrl || needsDownloadForMedia || canFetchDownload) && (
         <div className="w-full space-y-0.5">
-          {(mediaUrl || downloadUrl) ? (
+          {effectiveMediaUrl ? (
             <>
               <div className="relative rounded-lg overflow-hidden border border-[#E2E8F0] shadow-sm w-full bg-[#0F172A] group">
                 <span className="absolute top-1.5 left-1.5 z-10 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white uppercase tracking-wide">
                   Vídeo
                 </span>
                 <VideoPlayerWithFallback
-                  src={downloadUrl || mediaUrl || ""}
+                  src={effectiveMediaUrl || ""}
                   canFetchDownload={canFetchDownload}
-                  downloadLoading={!downloadUrl && downloadLoading}
+                  downloadLoading={!effectiveMediaUrl && downloadLoading}
                   onDownloadClick={handleDownloadClick}
                 />
               </div>
-              {canFetchDownload && !downloadUrl && downloadLoading && (
+              {canFetchDownload && !effectiveMediaUrl && downloadLoading && (
                 <button type="button" disabled className="inline-flex items-center gap-1.5 text-xs text-[#64748B]">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Baixar…
                 </button>
@@ -794,9 +813,9 @@ function MessageBubble({
                 {m.file_name || "Documento"}
               </p>
               <div className="flex items-center gap-3 mt-1">
-                {(downloadUrl || mediaUrl) ? (
+                {effectiveMediaUrl ? (
                   (() => {
-                    const docUrl = downloadUrl || (mediaUrl && /^(http|data:)/.test(mediaUrl) ? mediaUrl : null) || "#";
+                    const docUrl = effectiveMediaUrl || "#";
                     return (
                       <>
                         <a
@@ -842,7 +861,7 @@ function MessageBubble({
               </div>
             </div>
           </div>
-          {needsDownloadForDocument && !downloadUrl && !downloadLoading && (
+          {needsDownloadForDocument && !effectiveMediaUrl && !downloadLoading && (
             <div className="flex gap-3 mt-1">
               <button type="button" onClick={handleDownloadClick} className="text-xs font-medium text-clicvend-orange hover:underline">
                 Abrir
@@ -855,10 +874,10 @@ function MessageBubble({
           {caption && caption !== "[document]" && caption !== "[media]" && !isPlaceholderCaption && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
         </div>
       )}
-      {displayType === "sticker" && (mediaUrl || downloadUrl) && (
+      {displayType === "sticker" && effectiveMediaUrl && (
         <div>
           <div className="rounded-xl overflow-hidden border border-[#E2E8F0] shadow-sm inline-block">
-            <img src={mediaUrl || downloadUrl || ""} alt="" className="max-h-32 w-auto block" />
+            <img src={effectiveMediaUrl} alt="" className="max-h-32 w-auto block" />
           </div>
           {canFetchDownload && (
             <button type="button" onClick={handleDownloadClick} disabled={downloadLoading} className="mt-1 inline-flex items-center gap-1.5 text-xs text-clicvend-orange hover:underline disabled:opacity-50">
@@ -1353,8 +1372,18 @@ export default function ConversaThreadPage({
           setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
           return;
         }
+        const data = await res.json().catch(() => ({}));
         queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
-        await refetchConversation();
+        const newMsg = data?.message;
+        if (newMsg && resolved?.id) {
+          queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (c) => {
+            if (!c) return c;
+            const existing = Array.isArray(c.messages) ? c.messages : [];
+            return { ...c, messages: [...existing, newMsg] };
+          });
+        } else {
+          await refetchConversation();
+        }
         setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
         requestAnimationFrame(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -1463,8 +1492,18 @@ export default function ConversaThreadPage({
     })
       .then(async (res) => {
         if (res.ok) {
+          const data = await res.json().catch(() => ({}));
           queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
-          await refetchConversation();
+          const newMsg = data?.message;
+          if (newMsg && resolved?.id) {
+            queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (c) => {
+              if (!c) return c;
+              const existing = Array.isArray(c.messages) ? c.messages : [];
+              return { ...c, messages: [...existing, newMsg] };
+            });
+          } else {
+            await refetchConversation();
+          }
           setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
           requestAnimationFrame(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -1565,13 +1604,24 @@ export default function ConversaThreadPage({
         body: JSON.stringify({ type: "video", file: base64, mimetype: rec.mimeType }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
         setRecordedVideoBlob(null);
+        queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+        const newMsg = data?.message;
+        if (newMsg && resolved?.id) {
+          queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(resolved.id), (c) => {
+            if (!c) return c;
+            const existing = Array.isArray(c.messages) ? c.messages : [];
+            return { ...c, messages: [...existing, newMsg] };
+          });
+        } else {
+          await refetchConversation();
+        }
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
           });
         });
-        await refetchConversation();
       } else {
         const data = await res.json().catch(() => ({}));
         setError(typeof data?.error === "string" ? data.error : "Falha ao enviar vídeo");

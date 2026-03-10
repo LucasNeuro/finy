@@ -251,5 +251,5 @@ export async function POST(
     invalidateConversationDetail(conversationId),
     invalidateConversationList(companyId),
   ]);
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, message: newMsg });
 }

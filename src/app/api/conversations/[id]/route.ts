@@ -8,6 +8,7 @@ import {
   setCachedConversationDetail,
   invalidateConversationDetail,
 } from "@/lib/redis/inbox-state";
+import { getCachedMediaUrlsBulk } from "@/lib/redis/media-cache";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -17,6 +18,30 @@ import { NextResponse } from "next/server";
 
 const VIDEO_EXT = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
 const AUDIO_EXT = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+
+const MEDIA_MESSAGE_TYPES = ["image", "video", "audio", "ptt", "document", "sticker"] as const;
+
+/** Enriquece mensagens com media_cached_url do Redis (evita chamadas /download no frontend). */
+async function enrichMessagesWithCachedMedia(
+  conversationId: string,
+  messages: Record<string, unknown>[]
+): Promise<Record<string, unknown>[]> {
+  const mediaIds = messages
+    .filter((m) => {
+      const id = m?.id as string | undefined;
+      const mt = String(m?.message_type ?? m?.messageType ?? "").toLowerCase();
+      return id && !String(id).startsWith("temp-") && MEDIA_MESSAGE_TYPES.includes(mt as (typeof MEDIA_MESSAGE_TYPES)[number]);
+    })
+    .map((m) => m.id as string);
+  if (mediaIds.length === 0) return messages;
+  const urlMap = await getCachedMediaUrlsBulk(conversationId, mediaIds);
+  if (Object.keys(urlMap).length === 0) return messages;
+  return messages.map((m) => {
+    const id = m?.id as string | undefined;
+    const url = id ? urlMap[id] : null;
+    return url ? { ...m, media_cached_url: url } : m;
+  });
+}
 
 /** Normaliza message_type para exibir miniplayers: document → video/audio quando houver file_name, media_url ou content indicando. */
 function normalizeMessageTypes(messages: unknown[]): Record<string, unknown>[] {
@@ -94,7 +119,9 @@ export async function GET(
   if (!skipCache) {
     const cached = await getCachedConversationDetail(id);
     if (cached) {
-      const messages = Array.isArray(cached.messages) ? normalizeMessageTypes(cached.messages) : cached.messages;
+
+      let messages = Array.isArray(cached.messages) ? normalizeMessageTypes(cached.messages) : cached.messages;
+      messages = await enrichMessagesWithCachedMedia(id, messages as Record<string, unknown>[]);
       const res = NextResponse.json({ ...cached, messages });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
@@ -254,6 +281,7 @@ export async function GET(
   });
 
   messages = normalizeMessageTypes(messages as Record<string, unknown>[]);
+  messages = await enrichMessagesWithCachedMedia(id, messages as Record<string, unknown>[]);
 
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
   const displayPhone = contact_phone_from_cc ?? conversation.customer_phone;

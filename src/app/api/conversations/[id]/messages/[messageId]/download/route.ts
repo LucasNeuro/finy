@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { getCachedMediaUrl, setCachedMediaUrl } from "@/lib/redis/media-cache";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { migrateOneMessageToStorage } from "@/lib/media-storage-migrate";
@@ -55,10 +56,19 @@ export async function GET(
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
 
+  // 1. Verificar cache Redis (evita UAZAPI/storage em reproduções repetidas)
+  const cached = await getCachedMediaUrl(conversationId, messageId);
+  if (cached?.fileURL) {
+    return NextResponse.json({
+      fileURL: cached.fileURL,
+      mimetype: cached.mimeType ?? null,
+    });
+  }
+
   const serviceSupabase = createServiceRoleClient();
   const bucket = "whatsapp-media";
 
-  // Se já temos path no bucket, só criar signed URL e retornar
+  // 2. Se já temos path no bucket, criar signed URL, gravar no cache e retornar
   if (message.media_storage_path) {
     const { data: signed, error: signedError } = await serviceSupabase.storage
       .from(bucket)
@@ -71,10 +81,9 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({
-      fileURL: signed.signedUrl,
-      mimetype: null,
-    });
+    const payload = { fileURL: signed.signedUrl, mimetype: null };
+    await setCachedMediaUrl(conversationId, messageId, payload);
+    return NextResponse.json(payload);
   }
 
   const resolved = await getChannelToken(conversation.channel_id, companyId);
@@ -132,8 +141,7 @@ export async function GET(
     );
   }
 
-  return NextResponse.json({
-    fileURL: signed.signedUrl,
-    mimetype: null,
-  });
+  const payload = { fileURL: signed.signedUrl, mimetype: null };
+  await setCachedMediaUrl(conversationId, messageId, payload);
+  return NextResponse.json(payload);
 }
