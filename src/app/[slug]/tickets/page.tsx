@@ -475,7 +475,7 @@ export default function TicketsPage() {
       ) : viewMode === "table" ? (
         <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-[#E2E8F0] bg-white">
           {selectedTicketIds.size > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-clicvend-orange/10 border-b border-[#E2E8F0]">
+            <div className="shrink-0 flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-clicvend-orange/10 border-b border-[#E2E8F0]">
               <span className="text-sm font-medium text-[#1E293B]">
                 {selectedTicketIds.size} ticket(s) selecionado(s)
               </span>
@@ -544,7 +544,7 @@ export default function TicketsPage() {
               </div>
             </div>
           )}
-          <div className="overflow-auto max-h-[60vh] min-h-[200px]">
+          <div className="flex-1 min-h-0 overflow-auto">
             {tableLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-10 w-10 animate-spin text-clicvend-orange" />
@@ -662,7 +662,7 @@ export default function TicketsPage() {
               </table>
             )}
           </div>
-          <div className="flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
+          <div className="shrink-0 flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
             <span className="text-sm text-[#64748B]">
               Página {tablePageIndex + 1} de {tablePageCount} ({tableTotal} ticket{tableTotal !== 1 ? "s" : ""})
             </span>
