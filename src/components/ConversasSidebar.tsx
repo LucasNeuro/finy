@@ -266,7 +266,7 @@ const ConversationListItem = memo(function ConversationListItem({
             type="button"
             onClick={handleClaimClick}
             disabled={claiming}
-            className="flex w-9 shrink-0 items-center justify-center self-stretch min-h-[2.25rem] rounded-lg border border-[#E2E8F0] bg-white text-[#009B84] shadow-sm transition-all duration-200 hover:bg-[#DCFCE7] hover:text-[#16A34A] hover:border-[#86EFAC] hover:shadow mr-2 disabled:opacity-60"
+            className="flex h-8 w-8 shrink-0 items-center justify-center self-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#22C55E]/80 shadow-sm transition-all duration-200 hover:bg-[#DCFCE7] hover:text-[#16A34A] hover:border-[#BBF7D0] mr-2 disabled:opacity-60"
             title="Atribuir a mim e colocar em atendimento"
             aria-label="Atribuir a mim"
           >
