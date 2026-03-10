@@ -475,14 +475,14 @@ export default function TicketsPage() {
       ) : viewMode === "table" ? (
         <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-[#E2E8F0] bg-white">
           {selectedTicketIds.size > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#E2E8F0] bg-clicvend-orange/10 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-clicvend-orange/10 border-b border-[#E2E8F0]">
               <span className="text-sm font-medium text-[#1E293B]">
                 {selectedTicketIds.size} ticket(s) selecionado(s)
               </span>
-              <div className="inline-flex flex-wrap items-center gap-2">
+              <div className="inline-flex flex-wrap rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
                 {canManageTickets && (
                   <select
-                    className="rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm text-[#334155]"
+                    className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
                     defaultValue=""
                     onChange={async (e) => {
                       const slugStatus = e.target.value;
@@ -525,7 +525,7 @@ export default function TicketsPage() {
                       const first = tableTickets.find((t) => selectedTicketIds.has(t.id));
                       if (first) setReassignTicket(first);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange"
+                    className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] hover:text-clicvend-orange disabled:opacity-60"
                     title="Reatribuir selecionados (abre o primeiro)"
                   >
                     <UserPlus className="h-4 w-4" />
@@ -535,8 +535,8 @@ export default function TicketsPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedTicketIds(new Set())}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9]"
-                  title="Limpar seleção"
+                  className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-60 last:border-r-0"
+                  title="Desmarcar todos os tickets selecionados"
                 >
                   <X className="h-4 w-4" />
                   Limpar seleção
@@ -544,16 +544,16 @@ export default function TicketsPage() {
               </div>
             </div>
           )}
-          <div className="flex-1 min-h-0 overflow-auto max-h-[60vh]">
+          <div className="overflow-auto max-h-[60vh] min-h-[200px]">
             {tableLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-10 w-10 animate-spin text-clicvend-orange" />
               </div>
             ) : (
-              <table className="w-full min-w-[640px] text-sm">
-                <thead className="sticky top-0 z-10 border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                  <tr>
-                    <th className="w-10 px-2 py-3">
+              <table className="w-full min-w-[640px] border-collapse text-sm">
+                <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+                  <tr className="border-b border-[#E2E8F0]">
+                    <th className="w-10 px-4 py-3 text-left">
                       <input
                         ref={tableSelectAllRef}
                         type="checkbox"
@@ -577,13 +577,13 @@ export default function TicketsPage() {
                         aria-label="Selecionar todos da página"
                       />
                     </th>
-                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Cliente</th>
-                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Status</th>
-                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Últ. msg</th>
-                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Atribuído a</th>
-                    <th className="px-4 py-3 text-left font-semibold text-[#334155]">Entrou</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Cliente</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Últ. msg</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Atribuído a</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">Entrou</th>
                     {canManageTickets && (
-                      <th className="w-12 px-2 py-3 text-center font-semibold text-[#334155]">Reatribuir</th>
+                      <th className="w-12 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">Reatribuir</th>
                     )}
                   </tr>
                 </thead>
@@ -644,7 +644,7 @@ export default function TicketsPage() {
                           })}
                         </td>
                         {canManageTickets && (
-                          <td className="px-2 py-3 text-center">
+                          <td className="px-4 py-3 text-center">
                             <button
                               type="button"
                               onClick={() => setReassignTicket(t)}
@@ -662,7 +662,7 @@ export default function TicketsPage() {
               </table>
             )}
           </div>
-          <div className="flex items-center justify-between gap-4 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
+          <div className="flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
             <span className="text-sm text-[#64748B]">
               Página {tablePageIndex + 1} de {tablePageCount} ({tableTotal} ticket{tableTotal !== 1 ? "s" : ""})
             </span>
@@ -671,19 +671,19 @@ export default function TicketsPage() {
                 type="button"
                 onClick={() => { setTablePageIndex((i) => Math.max(0, i - 1)); setSelectedTicketIds(new Set()); }}
                 disabled={tablePageIndex === 0}
-                className="inline-flex items-center justify-center rounded p-2 text-[#64748B] hover:bg-[#E2E8F0] disabled:opacity-40 disabled:pointer-events-none"
+                className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:opacity-40 disabled:pointer-events-none"
                 aria-label="Página anterior"
               >
-                <ChevronLeft className="h-5 w-5" />
+                <ChevronLeft className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={() => { setTablePageIndex((i) => Math.min(tablePageCount - 1, i + 1)); setSelectedTicketIds(new Set()); }}
                 disabled={tablePageIndex >= tablePageCount - 1}
-                className="inline-flex items-center justify-center rounded p-2 text-[#64748B] hover:bg-[#E2E8F0] disabled:opacity-40 disabled:pointer-events-none"
+                className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:opacity-40 disabled:pointer-events-none"
                 aria-label="Próxima página"
               >
-                <ChevronRight className="h-5 w-5" />
+                <ChevronRight className="h-4 w-4" />
               </button>
             </div>
           </div>

@@ -23,6 +23,7 @@ const TAB_LABELS: Record<TabId, string> = {
 };
 
 const MAX_QUEUE_EXCLUSIVE_STATUSES = 9;
+const DEFAULT_STATUS_SLUGS = ["open", "in_queue", "in_progress", "closed"];
 
 type StatusConfigSideOverProps = {
   open: boolean;
@@ -682,14 +683,16 @@ export function StatusConfigSideOver({
                                     >
                                       <Pencil className="h-4 w-4" />
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeStatusFromQueue(s.id)}
-                                      className="rounded p-1 text-red-600 hover:bg-red-50"
-                                      title="Remover da fila"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
+                                    {!DEFAULT_STATUS_SLUGS.includes(s.slug) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeStatusFromQueue(s.id)}
+                                        className="rounded p-1 text-red-600 hover:bg-red-50"
+                                        title="Remover da fila"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </button>
+                                    )}
                                   </>
                                 )}
                               </div>

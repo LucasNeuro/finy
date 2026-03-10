@@ -4,9 +4,14 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
+const DEFAULT_SLUGS = ["open", "in_queue", "in_progress", "closed"] as const;
+
+type StatusRow = { id: string; name: string; slug: string; color_hex: string | null; sort_order: number; is_closed: boolean };
+
 /**
  * GET /api/queues/[id]/ticket-statuses
- * Lista statuses configurados para a fila.
+ * Lista statuses da fila: SEMPRE os 4 padrão (Novo, Fila, Em atendimento, Encerrados) primeiro,
+ * depois os statuses exclusivos da fila na ordem configurada.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -25,6 +30,38 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const supabase = await createClient();
 
+  const { data: queueRow } = await supabase
+    .from("queues")
+    .select("id")
+    .eq("id", queueId)
+    .eq("company_id", companyId)
+    .single();
+  if (!queueRow) {
+    return NextResponse.json({ error: "Fila não encontrada" }, { status: 404 });
+  }
+
+  const { data: defaultRows, error: defaultErr } = await supabase
+    .from("company_ticket_statuses")
+    .select("id, name, slug, color_hex, sort_order, is_closed")
+    .eq("company_id", companyId)
+    .is("queue_id", null)
+    .in("slug", [...DEFAULT_SLUGS])
+    .order("sort_order", { ascending: true });
+
+  if (defaultErr || !defaultRows?.length) {
+    return NextResponse.json({ error: "Statuses padrão da empresa não encontrados" }, { status: 500 });
+  }
+
+  const defaultList: StatusRow[] = defaultRows.map((s) => ({
+    id: s.id,
+    name: s.name,
+    slug: s.slug,
+    color_hex: s.color_hex ?? "#64748B",
+    sort_order: s.sort_order,
+    is_closed: !!s.is_closed,
+  }));
+  const defaultIds = new Set(defaultList.map((s) => s.id));
+
   const { data: qRows, error: qErr } = await supabase
     .from("queue_ticket_statuses")
     .select("ticket_status_id, sort_order")
@@ -35,69 +72,58 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: qErr.message }, { status: 500 });
   }
 
-  const statusIds = (qRows ?? []).map((r: { ticket_status_id: string }) => r.ticket_status_id);
+  const customIdsFromQueue = (qRows ?? []).map((r: { ticket_status_id: string }) => r.ticket_status_id).filter((id: string) => !defaultIds.has(id));
+  const allIds = [...defaultList.map((s) => s.id), ...customIdsFromQueue];
 
-  if (statusIds.length === 0) {
-    const { data: queueSpecific, error: qsErr } = await supabase
+  let byId = new Map<string, StatusRow>(defaultList.map((s) => [s.id, { ...s, color_hex: s.color_hex ?? "#64748B" }]));
+
+  if (customIdsFromQueue.length > 0) {
+    const { data: customStatuses, error: sErr } = await supabase
       .from("company_ticket_statuses")
       .select("id, name, slug, color_hex, sort_order, is_closed")
-      .eq("company_id", companyId)
-      .eq("queue_id", queueId)
-      .order("sort_order", { ascending: true });
-    if (qsErr) return NextResponse.json([]);
-    const list = (queueSpecific ?? []).map((s, i) => ({
-      id: s.id,
-      name: s.name,
-      slug: s.slug,
-      color_hex: s.color_hex ?? "#64748B",
-      is_closed: !!s.is_closed,
-      sort_order: i,
-    }));
-    return NextResponse.json(list);
+      .in("id", customIdsFromQueue)
+      .eq("company_id", companyId);
+    if (!sErr && customStatuses?.length) {
+      customStatuses.forEach((s: StatusRow) => {
+        byId.set(s.id, {
+          id: s.id,
+          name: s.name,
+          slug: s.slug,
+          color_hex: s.color_hex ?? "#64748B",
+          sort_order: s.sort_order,
+          is_closed: !!s.is_closed,
+        });
+      });
+    }
   }
 
-  const { data: statuses, error: sErr } = await supabase
-    .from("company_ticket_statuses")
-    .select("id, name, slug, color_hex, sort_order, is_closed")
-    .in("id", statusIds)
-    .eq("company_id", companyId);
-
-  if (sErr) {
-    return NextResponse.json({ error: sErr.message }, { status: 500 });
-  }
-
-  const byId = new Map((statuses ?? []).map((s) => [s.id, s]));
-  const list = (qRows ?? []).map((r: { ticket_status_id: string; sort_order: number }) => {
-    const s = byId.get(r.ticket_status_id);
-    if (!s) return null;
-    return {
-      id: s.id,
-      name: s.name,
-      slug: s.slug,
-      color_hex: s.color_hex ?? "#64748B",
-      is_closed: !!s.is_closed,
-      sort_order: r.sort_order,
-    };
-  }).filter((x): x is NonNullable<typeof x> => x != null);
-
-  const idsInList = new Set(list.map((x) => x.id));
-  const { data: queueSpecificData, error: qsErr } = await supabase
+  const { data: queueExclusiveData } = await supabase
     .from("company_ticket_statuses")
     .select("id, name, slug, color_hex, sort_order, is_closed")
     .eq("company_id", companyId)
     .eq("queue_id", queueId)
     .order("sort_order", { ascending: true });
-  const queueSpecific = qsErr ? [] : (queueSpecificData ?? []);
-  const orphans = queueSpecific.filter((s: { id: string }) => !idsInList.has(s.id));
-  const maxOrder = list.length > 0 ? Math.max(...list.map((x) => x.sort_order)) : -1;
-  orphans.forEach((s, i) => {
+  const queueExclusives = (queueExclusiveData ?? []).filter((s: { id: string }) => !byId.has(s.id));
+
+  const list: { id: string; name: string; slug: string; color_hex: string; is_closed: boolean; sort_order: number }[] = [];
+  let order = 0;
+  defaultList.forEach((s) => {
+    list.push({ ...s, color_hex: s.color_hex ?? "#64748B", sort_order: order++ });
+  });
+  (qRows ?? [])
+    .filter((r: { ticket_status_id: string }) => !defaultIds.has(r.ticket_status_id))
+    .forEach((r: { ticket_status_id: string }) => {
+      const s = byId.get(r.ticket_status_id);
+      if (s) list.push({ ...s, color_hex: s.color_hex ?? "#64748B", sort_order: order++ });
+    });
+  queueExclusives.forEach((s: StatusRow) => {
     list.push({
       id: s.id,
       name: s.name,
       slug: s.slug,
       color_hex: s.color_hex ?? "#64748B",
       is_closed: !!s.is_closed,
-      sort_order: maxOrder + 1 + i,
+      sort_order: order++,
     });
   });
 
@@ -106,7 +132,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
 /**
  * PUT /api/queues/[id]/ticket-statuses
- * Define quais statuses a fila usa e em que ordem. Requer queues.manage.
+ * Define a ordem dos statuses da fila. Os 4 statuses padrão (open, in_queue, in_progress, closed)
+ * nunca são removidos: se não vierem no body, são acrescentados ao final.
  * Body: { ticket_status_ids: string[] }
  */
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -131,9 +158,21 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
 
-  const ticketStatusIds = Array.isArray(body.ticket_status_ids) ? body.ticket_status_ids.filter(Boolean) : [];
-
   const supabase = await createClient();
+
+  const { data: defaultRows } = await supabase
+    .from("company_ticket_statuses")
+    .select("id")
+    .eq("company_id", companyId)
+    .is("queue_id", null)
+    .in("slug", [...DEFAULT_SLUGS])
+    .order("sort_order", { ascending: true });
+  const defaultIds = (defaultRows ?? []).map((r: { id: string }) => r.id);
+
+  let ticketStatusIds = Array.isArray(body.ticket_status_ids) ? body.ticket_status_ids.filter(Boolean) : [];
+  defaultIds.forEach((id) => {
+    if (!ticketStatusIds.includes(id)) ticketStatusIds.push(id);
+  });
 
   const { error: delErr } = await supabase
     .from("queue_ticket_statuses")
