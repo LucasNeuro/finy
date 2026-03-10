@@ -4,8 +4,24 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { withMetricsHeaders } from "@/lib/api/metrics";
 import { getCachedConversationList, setCachedConversationList } from "@/lib/redis/inbox-state";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+
+/** Busca nomes dos atendentes (bypass RLS — profiles só permite SELECT do próprio perfil). */
+async function fetchAssignedNames(companyId: string, assignedIds: string[]): Promise<Record<string, string>> {
+  if (assignedIds.length === 0) return {};
+  const admin = createServiceRoleClient();
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("user_id, full_name")
+    .eq("company_id", companyId)
+    .in("user_id", assignedIds);
+  return (profiles ?? []).reduce(
+    (acc, p) => ({ ...acc, [p.user_id]: (p.full_name ?? "").trim() || "—" }),
+    {} as Record<string, string>
+  );
+}
 
 function formatGroupJidForDisplay(jid: string): string {
   const raw = (jid || "").replace(/@.*$/, "").trim();
@@ -123,18 +139,7 @@ export async function GET(request: Request) {
       const needNames = cachedList.some((c) => c.assigned_to && (c.assigned_to_name == null || c.assigned_to_name === ""));
       if (needNames) {
         const assignedIds = [...new Set(cachedList.map((c) => c.assigned_to).filter(Boolean))] as string[];
-        let assignedNames: Record<string, string> = {};
-        if (assignedIds.length > 0) {
-          const { data: profiles } = await supabase
-            .from("profiles")
-            .select("user_id, full_name")
-            .eq("company_id", companyId)
-            .in("user_id", assignedIds);
-          assignedNames = (profiles ?? []).reduce(
-            (acc, p) => ({ ...acc, [(p as { user_id: string }).user_id]: ((p as { full_name?: string }).full_name ?? "").trim() || "—" }),
-            {} as Record<string, string>
-          );
-        }
+        const assignedNames = await fetchAssignedNames(companyId, assignedIds);
         sorted = cachedList.map((c) => ({
           ...c,
           assigned_to_name: c.assigned_to ? assignedNames[c.assigned_to] ?? null : null,
@@ -191,11 +196,7 @@ export async function GET(request: Request) {
       if (groupErr) return NextResponse.json({ error: groupErr.message }, { status: 500 });
       const list = filteredByChannel((groupData ?? []) as ConvRow[]);
       const gAssignedIds = [...new Set(list.map((c) => c.assigned_to).filter(Boolean))] as string[];
-      let gAssignedNames: Record<string, string> = {};
-      if (gAssignedIds.length > 0) {
-        const { data: gProfiles } = await supabase.from("profiles").select("user_id, full_name").eq("company_id", companyId).in("user_id", gAssignedIds);
-        gAssignedNames = (gProfiles ?? []).reduce((acc, p) => ({ ...acc, [(p as { user_id: string }).user_id]: ((p as { full_name?: string }).full_name ?? "").trim() || "—" }), {} as Record<string, string>);
-      }
+      const gAssignedNames = await fetchAssignedNames(companyId, gAssignedIds);
       const listWithNames = list.map((c) => ({ ...c, assigned_to_name: c.assigned_to ? gAssignedNames[c.assigned_to] ?? null : null }));
       const gConvIds = listWithNames.map((c) => c.id);
       let gLastByConv: Record<string, { content: string; message_type?: string }> = {};
@@ -239,18 +240,7 @@ export async function GET(request: Request) {
   }
 
   const assignedIds = [...new Set(result.map((c) => c.assigned_to).filter(Boolean))] as string[];
-  let assignedNames: Record<string, string> = {};
-  if (assignedIds.length > 0) {
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("user_id, full_name")
-      .eq("company_id", companyId)
-      .in("user_id", assignedIds);
-    assignedNames = (profiles ?? []).reduce(
-      (acc, p) => ({ ...acc, [(p as { user_id: string }).user_id]: ((p as { full_name?: string }).full_name ?? "").trim() || "—" }),
-      {} as Record<string, string>
-    );
-  }
+  const assignedNames = await fetchAssignedNames(companyId, assignedIds);
   const dataWithNames = result.map((c) => ({
     ...c,
     assigned_to_name: c.assigned_to ? assignedNames[c.assigned_to] ?? null : null,
