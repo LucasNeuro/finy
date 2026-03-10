@@ -51,12 +51,6 @@ export async function POST(
   }
 
   const externalId = (message as { external_id?: string | null }).external_id;
-  if (!externalId) {
-    return NextResponse.json(
-      { error: "Esta mensagem não possui ID externo; não é possível reagir." },
-      { status: 400 }
-    );
-  }
 
   const { data: conversation, error: convErr } = await supabase
     .from("conversations")
@@ -78,37 +72,6 @@ export async function POST(
     );
   }
 
-  const { data: channel, error: chErr } = await supabase
-    .from("channels")
-    .select("id, uazapi_token_encrypted")
-    .eq("id", conversation.channel_id)
-    .eq("company_id", companyId)
-    .single();
-
-  if (chErr || !channel?.uazapi_token_encrypted) {
-    return NextResponse.json({ error: "Canal não configurado" }, { status: 400 });
-  }
-
-  const isGroup = !!conversation.is_group;
-  const number =
-    isGroup && conversation.wa_chat_jid
-      ? conversation.wa_chat_jid
-      : normalizePhoneForSend(conversation.customer_phone, isGroup);
-
-  const result = await sendReaction(
-    channel.uazapi_token_encrypted,
-    number,
-    externalId,
-    emoji
-  );
-
-  if (!result.ok) {
-    return NextResponse.json(
-      { error: result.error ?? "Falha ao enviar reação." },
-      { status: 502 }
-    );
-  }
-
   const { error: updateErr } = await supabase
     .from("messages")
     .update({ reaction: emoji || null })
@@ -117,9 +80,27 @@ export async function POST(
 
   if (updateErr) {
     return NextResponse.json(
-      { error: "Reação enviada, mas falha ao atualizar localmente." },
+      { error: "Falha ao salvar reação." },
       { status: 500 }
     );
+  }
+
+  if (externalId) {
+    const { data: channel } = await supabase
+      .from("channels")
+      .select("uazapi_token_encrypted")
+      .eq("id", conversation.channel_id)
+      .eq("company_id", companyId)
+      .single();
+
+    if (channel?.uazapi_token_encrypted) {
+      const isGroup = !!conversation.is_group;
+      const number =
+        isGroup && conversation.wa_chat_jid
+          ? conversation.wa_chat_jid
+          : normalizePhoneForSend(conversation.customer_phone, isGroup);
+      await sendReaction(channel.uazapi_token_encrypted, number, externalId, emoji);
+    }
   }
 
   await Promise.all([

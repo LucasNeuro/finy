@@ -575,6 +575,32 @@ function mediaTypeLabel(type: string): string {
   }
 }
 
+/** Retorna o tipo de arquivo para badge (PDF, DOC, XLS, etc.) a partir do filename. */
+function getDocumentTypeBadge(fileName: string | null | undefined): string {
+  const fn = (fileName ?? "").toLowerCase();
+  if (fn.endsWith(".pdf")) return "PDF";
+  if (fn.endsWith(".doc") || fn.endsWith(".docx")) return "DOC";
+  if (fn.endsWith(".xls") || fn.endsWith(".xlsx")) return "XLS";
+  if (fn.endsWith(".ppt") || fn.endsWith(".pptx")) return "PPT";
+  if (fn.endsWith(".txt")) return "TXT";
+  if (fn.endsWith(".csv")) return "CSV";
+  return "DOC";
+}
+
+/** Verifica se o arquivo é PDF (para exibir miniatura em iframe). */
+function isPdfFile(fileName: string | null | undefined): boolean {
+  return (fileName ?? "").toLowerCase().endsWith(".pdf");
+}
+
+/** Documentos sem extensão ou genéricos: tentar preview como PDF (extratos, boletos costumam ser PDF). */
+function mayBePdf(fileName: string | null | undefined): boolean {
+  const fn = (fileName ?? "").toLowerCase().trim();
+  if (!fn || fn === "documento") return true;
+  if (fn.endsWith(".pdf")) return true;
+  if (fn.endsWith(".doc") || fn.endsWith(".docx") || fn.endsWith(".xls") || fn.endsWith(".xlsx")) return false;
+  return true; // extensão desconhecida: tentar PDF
+}
+
 function MessageBubble({
   m,
   name,
@@ -714,9 +740,11 @@ function MessageBubble({
           ? "bg-[#E2E8F0] border border-[#CBD5E1] text-[#1E293B]"
           : "bg-white border border-[#E2E8F0] text-[#1E293B]"
       } ${
-        ["video", "audio", "ptt", "image"].includes(resolvedDisplayType)
-          ? "max-w-[73%] min-w-0 w-full px-1 py-0.5"
-          : "max-w-[69%] px-3 py-2"
+        resolvedDisplayType === "document"
+          ? "max-w-[41%] min-w-0 w-full px-1 py-0.5"
+          : ["video", "audio", "ptt", "image"].includes(resolvedDisplayType)
+            ? "max-w-[73%] min-w-0 w-full px-1 py-0.5"
+            : "max-w-[69%] px-3 py-2"
       }`}
     >
       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
@@ -800,69 +828,103 @@ function MessageBubble({
         </div>
       )}
       {resolvedDisplayType === "document" && (
-        <div className="w-full space-y-0.5">
-          {/* Documento estilo WhatsApp Web: nome + Abrir + Salvar como */}
-          <div
-            className={`flex items-center gap-2 rounded-lg border border-[#E2E8F0] py-2 px-2.5 min-w-0 w-full ${m.direction === "out" ? "bg-[#E2E8F0]" : "bg-white"}`}
-          >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-100 text-red-600">
-              <FileText className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[#1E293B]">
-                {m.file_name || "Documento"}
-              </p>
-              <div className="flex items-center gap-3 mt-1">
-                {effectiveMediaUrl ? (
-                  (() => {
-                    const docUrl = effectiveMediaUrl || "#";
-                    return (
-                      <>
-                        <a
-                          href={docUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-medium text-clicvend-orange hover:underline"
-                        >
-                          Abrir
-                        </a>
-                        <a
-                          href={docUrl}
-                          download={m.file_name || "documento"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-medium text-clicvend-orange hover:underline"
-                        >
-                          Salvar como…
-                        </a>
-                      </>
-                    );
-                  })()
-                ) : needsDownloadForDocument ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleDownloadClick}
-                      disabled={downloadLoading}
-                      className="text-xs font-medium text-clicvend-orange hover:underline disabled:opacity-50"
-                    >
-                      {downloadLoading ? "Carregando…" : "Abrir"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownloadClick}
-                      disabled={downloadLoading}
-                      className="text-xs font-medium text-clicvend-orange hover:underline disabled:opacity-50"
-                    >
-                      {downloadLoading ? "…" : "Salvar como…"}
-                    </button>
-                  </>
-                ) : null}
+        <div className="w-full space-y-0 min-w-0">
+          {/* Miniatura: preview do PDF ou ícone genérico */}
+          <div className="rounded-t-lg overflow-hidden border border-b-0 border-[#E2E8F0] bg-white">
+            {effectiveMediaUrl && mayBePdf(m.file_name) ? (
+              <div className="relative w-full h-[200px] bg-white overflow-hidden">
+                <iframe
+                  src={effectiveMediaUrl}
+                  title={m.file_name || "Documento"}
+                  className="w-full h-full border-0"
+                />
               </div>
+            ) : effectiveMediaUrl ? (
+              <div className="flex items-center justify-center h-[140px] bg-[#F8FAFC]">
+                <div className="flex flex-col items-center gap-2 text-[#94A3B8]">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-red-100 text-red-600">
+                    <FileText className="h-7 w-7" />
+                  </div>
+                  <span className="text-xs font-medium text-[#64748B]">{getDocumentTypeBadge(m.file_name)}</span>
+                </div>
+              </div>
+            ) : needsDownloadForDocument && downloadLoading ? (
+              <div className="flex items-center justify-center h-[140px] bg-[#F8FAFC]">
+                <Loader2 className="h-8 w-8 animate-spin text-clicvend-orange" />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-[140px] bg-[#F8FAFC]">
+                <div className="flex flex-col items-center gap-2 text-[#94A3B8]">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-red-100 text-red-600">
+                    <FileText className="h-7 w-7" />
+                  </div>
+                  <span className="text-xs font-medium text-[#64748B]">{getDocumentTypeBadge(m.file_name)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* Info: badge do tipo e nome do arquivo (sem botões) */}
+          <div
+            className={`flex items-center gap-3 border-x border-[#E2E8F0] py-2.5 px-3 min-w-0 ${
+              m.direction === "out" ? "bg-[#E2E8F0]" : "bg-[#F1F5F9]"
+            }`}
+          >
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-white text-xs font-bold">
+              {getDocumentTypeBadge(m.file_name)}
             </div>
+            <p className="truncate text-sm font-medium text-[#1E293B] min-w-0 flex-1">
+              {m.file_name || "Documento"}
+            </p>
+          </div>
+          {/* Footer: botões Abrir e Salvar como */}
+          <div
+            className={`flex items-center justify-end gap-4 rounded-b-lg border border-[#E2E8F0] py-2.5 px-3 ${
+              m.direction === "out" ? "bg-[#E2E8F0]" : "bg-[#F1F5F9]"
+            }`}
+          >
+            {effectiveMediaUrl ? (
+              <>
+                <a
+                  href={effectiveMediaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-medium text-clicvend-orange hover:underline"
+                >
+                  Abrir
+                </a>
+                <a
+                  href={effectiveMediaUrl}
+                  download={m.file_name || "documento"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-medium text-clicvend-orange hover:underline"
+                >
+                  Salvar como…
+                </a>
+              </>
+            ) : needsDownloadForDocument ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleDownloadClick}
+                  disabled={downloadLoading}
+                  className="text-xs font-medium text-clicvend-orange hover:underline disabled:opacity-50"
+                >
+                  {downloadLoading ? "Carregando…" : "Abrir"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadClick}
+                  disabled={downloadLoading}
+                  className="text-xs font-medium text-clicvend-orange hover:underline disabled:opacity-50"
+                >
+                  {downloadLoading ? "…" : "Salvar como…"}
+                </button>
+              </>
+            ) : null}
           </div>
           {needsDownloadForDocument && !effectiveMediaUrl && !downloadLoading && (
-            <div className="flex gap-3 mt-1">
+            <div className="flex justify-end gap-4 py-2">
               <button type="button" onClick={handleDownloadClick} className="text-xs font-medium text-clicvend-orange hover:underline">
                 Abrir
               </button>
@@ -871,7 +933,9 @@ function MessageBubble({
               </button>
             </div>
           )}
-          {caption && caption !== "[document]" && caption !== "[media]" && !isPlaceholderCaption && m.file_name !== caption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+          {caption && caption !== "[document]" && caption !== "[media]" && !isPlaceholderCaption && m.file_name !== caption && (
+            <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>
+          )}
         </div>
       )}
       {displayType === "sticker" && effectiveMediaUrl && (
@@ -936,7 +1000,7 @@ function MessageBubble({
               )}
             </div>
           )}
-          {conversationId && apiHeaders && m.external_id && onReaction && (
+          {conversationId && apiHeaders && onReaction && !String(m.id).startsWith("temp-") && (
             <div className="relative" ref={pickerRef}>
               <button
                 type="button"
