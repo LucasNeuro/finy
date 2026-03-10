@@ -88,6 +88,7 @@ export default function TicketsPage() {
   });
 
   const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const currentUserId = (permissionsData as { user_id?: string } | undefined)?.user_id ?? null;
   const canAccessTickets = permissions.includes("tickets.view");
   const canManageTickets = permissions.includes("inbox.manage_tickets") || permissions.includes("inbox.see_all");
   const canManageStatuses = permissions.includes("queues.manage");
@@ -651,7 +652,11 @@ export default function TicketsPage() {
                             : "—"}
                         </td>
                         <td className="px-4 py-3 text-[#64748B]">
-                          {t.assigned_to_name ?? "—"}
+                          {t.assigned_to_name && t.assigned_to_name.trim() !== ""
+                            ? t.assigned_to_name
+                            : t.assigned_to && t.assigned_to === currentUserId
+                              ? "Você"
+                              : "—"}
                         </td>
                         <td className="px-4 py-3 text-[#64748B]">
                           {new Date(t.created_at).toLocaleDateString("pt-BR", {
@@ -885,9 +890,27 @@ export default function TicketsPage() {
                             {t.channel_name}
                           </span>
                         )}
-                        <span className="inline-flex items-center gap-1 ml-auto" title={t.assigned_to_name ? `Atendente: ${t.assigned_to_name}` : "Ninguém pegou ainda"}>
+                        <span
+                          className="inline-flex items-center gap-1 ml-auto"
+                          title={
+                            t.assigned_to
+                              ? t.assigned_to_name && t.assigned_to_name.trim() !== ""
+                                ? `Atendente: ${t.assigned_to_name}`
+                                : t.assigned_to === currentUserId
+                                  ? "Atendente: Você"
+                                  : "Atendente: —"
+                              : "Ninguém pegou ainda"
+                          }
+                        >
                           <UserCheck className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
-                          <span className="truncate max-w-[72px]"><span className="text-[#94A3B8]">Atendente:</span> {t.assigned_to_name ?? "—"}</span>
+                          <span className="truncate max-w-[72px]">
+                            <span className="text-[#94A3B8]">Atendente:</span>{" "}
+                            {t.assigned_to_name && t.assigned_to_name.trim() !== ""
+                              ? t.assigned_to_name
+                              : t.assigned_to && t.assigned_to === currentUserId
+                                ? "Você"
+                                : "—"}
+                          </span>
                         </span>
                       </footer>
                     </Link>
