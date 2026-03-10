@@ -2,6 +2,8 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { NextResponse } from "next/server";
 
 const MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions";
+/** Modelo mais barato/leve por padrão. Override com MISTRAL_MODEL no .env (ex.: mistral-tiny, open-mistral-7b). */
+const DEFAULT_MISTRAL_MODEL = "mistral-tiny";
 const MAX_DESCRIPTION_LENGTH = 512;
 const MAX_GROUP_NAME_LENGTH = 25;
 const MAX_COMMUNITY_NAME_LENGTH = 100;
@@ -170,7 +172,7 @@ export async function POST(request: Request) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "mistral-small-latest",
+        model: process.env.MISTRAL_MODEL?.trim() || DEFAULT_MISTRAL_MODEL,
         messages,
         max_tokens: field === "name" ? 60 : 256,
         temperature: 0.5,

@@ -53,6 +53,7 @@ Em **Environment** (Environment Variables) do Web Service, adicione as mesmas va
 | `NEXT_PUBLIC_APP_URL` | **URL do app no Render** (ex: `https://clicvend.onrender.com`) |
 | **`APP_URL`** | **Mesma URL do app** (ex: `https://clicvend.onrender.com`) — usada pelo webhook para chamar sync de histórico ao conectar |
 | **`INTERNAL_SYNC_SECRET`** | **Senha secreta** (ex: string longa aleatória) — autentica a chamada interna de sync (só o servidor deve saber) |
+| **`MISTRAL_API_KEY`** | **Chave da API Mistral** (em [console.mistral.ai](https://console.mistral.ai)) — usada em **Respostas rápidas** no botão **Sugerir com IA**. Sem ela, o botão retorna erro "Chave da API Mistral inválida ou expirada". |
 
 **Importante:** depois do primeiro deploy, o Render mostra a URL do serviço (ex: `https://clicvend.onrender.com`). Use essa URL em `NEXT_PUBLIC_APP_URL` e em `APP_URL`.
 
