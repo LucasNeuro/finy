@@ -10,10 +10,13 @@ export function useLogin() {
   const returnUrl = searchParams.get("returnUrl");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   async function login(email: string, password: string) {
     setError(null);
     setLoading(true);
+    setSuccess(false);
+
     const supabase = createClient();
     const { data, error: signError } = await supabase.auth.signInWithPassword({
       email,
@@ -32,6 +35,10 @@ export function useLogin() {
       setLoading(false);
       return;
     }
+    
+    // Sucesso no login - iniciando busca de perfil e redirecionamento
+    setSuccess(true);
+    
     // Buscar primeiro company slug do usuário (perfis)
     const { data: profiles } = await supabase
       .from("profiles")
@@ -42,7 +49,10 @@ export function useLogin() {
       profiles?.[0] && profiles[0].companies && typeof (profiles[0].companies as { slug?: string }).slug === "string"
         ? (profiles[0].companies as unknown as { slug: string }).slug
         : null;
-    setLoading(false);
+
+    // Não desativar loading no sucesso; esperar redirecionamento
+    // setLoading(false);
+    
     let target = slug ? `/${slug}` : "/sem-empresa";
     if (returnUrl && returnUrl.startsWith("/") && !returnUrl.startsWith("//")) {
       target = returnUrl.endsWith("/login") ? returnUrl.replace(/\/login$/, "") || "/" : returnUrl;
@@ -51,5 +61,5 @@ export function useLogin() {
     router.refresh();
   }
 
-  return { login, error, loading };
+  return { login: (e: string, p: string) => login(e, p).catch(() => { setLoading(false); setSuccess(false); }), error, loading, success };
 }

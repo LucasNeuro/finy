@@ -14,6 +14,7 @@ import {
   Upload,
   ChevronLeft,
   ChevronRight,
+  Link2,
 } from "lucide-react";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -92,6 +93,9 @@ export default function RespostasRapidasPage() {
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<QuickReplyRow | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
+  const [showBulkLink, setShowBulkLink] = useState(false);
+  const [bulkLinkQueueIds, setBulkLinkQueueIds] = useState<string[]>([]);
+  const [bulkLinkLoading, setBulkLinkLoading] = useState(false);
   const PAGE_SIZE = 50;
 
   const apiHeaders = useMemo(
@@ -606,6 +610,39 @@ export default function RespostasRapidasPage() {
     }
   };
 
+  const handleBulkLinkSubmit = async () => {
+    if (!slug || selectedIds.size === 0 || bulkLinkQueueIds.length === 0) return;
+    setBulkLinkLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/quick-replies/bulk-link", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiHeaders ?? {}),
+        },
+        body: JSON.stringify({
+          quick_reply_ids: Array.from(selectedIds),
+          queue_ids: bulkLinkQueueIds,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error ?? "Falha ao vincular filas.");
+        return;
+      }
+      setShowBulkLink(false);
+      setBulkLinkQueueIds([]);
+      setSelectedIds(new Set());
+      fetchQuickReplies();
+    } catch {
+      setError("Erro de rede ao vincular filas.");
+    } finally {
+      setBulkLinkLoading(false);
+    }
+  };
+
   const toggleSelectAll = () => {
     if (rows.every((r) => selectedIds.has(r.id))) {
       setSelectedIds(new Set());
@@ -710,6 +747,16 @@ export default function RespostasRapidasPage() {
                 {selectedIds.size} resposta(s) rápida(s) selecionada(s)
               </span>
               <div className="inline-flex flex-wrap rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
+                <button
+                  type="button"
+                  disabled={bulkActionLoading}
+                  onClick={() => setShowBulkLink(true)}
+                  className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                  title="Vincular filas às respostas selecionadas."
+                >
+                  <Link2 className="h-4 w-4" />
+                  Vincular
+                </button>
                 <button
                   type="button"
                   disabled={bulkActionLoading}
@@ -895,6 +942,72 @@ export default function RespostasRapidasPage() {
           </div>
         </div>
       )}
+
+      <SideOver
+        open={showBulkLink}
+        onClose={() => setShowBulkLink(false)}
+        title={`Vincular ${selectedIds.size} resposta(s) a filas`}
+        width={500}
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-[#64748B]">
+            Selecione as filas que deseja vincular às respostas rápidas selecionadas.
+            Isso tornará essas respostas disponíveis para os agentes dessas filas.
+          </p>
+
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-[#334155]">Filas disponíveis</label>
+            {queues.length === 0 ? (
+              <p className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-3 text-sm text-[#64748B]">
+                Nenhuma fila encontrada.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2 rounded-lg border border-[#E2E8F0] p-2 max-h-[300px] overflow-y-auto">
+                {queues.map((q) => (
+                  <label key={q.id} className="flex items-center gap-2 p-2 hover:bg-[#F8FAFC] rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={bulkLinkQueueIds.includes(q.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setBulkLinkQueueIds((prev) => [...prev, q.id]);
+                        } else {
+                          setBulkLinkQueueIds((prev) => prev.filter((id) => id !== q.id));
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                    />
+                    <span className="text-sm text-[#1E293B]">{q.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex justify-end gap-2 border-t border-[#E2E8F0] pt-4">
+            <button
+              type="button"
+              onClick={() => setShowBulkLink(false)}
+              className="rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkLinkSubmit}
+              disabled={bulkLinkLoading || bulkLinkQueueIds.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+            >
+              {bulkLinkLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Link2 className="h-4 w-4" />
+              )}
+              Vincular Filas
+            </button>
+          </div>
+        </div>
+      </SideOver>
 
       <SideOver
         open={showForm}

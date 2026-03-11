@@ -3,11 +3,11 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
-import { Eye, EyeOff, LogIn } from "lucide-react";
+import { Eye, EyeOff, LogIn, Loader2, CheckCircle } from "lucide-react";
 import { useLogin } from "@/lib/auth/use-login";
 
 function LoginForm() {
-  const { login, error, loading } = useLogin();
+  const { login, error, loading, success } = useLogin();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -80,24 +80,26 @@ function LoginForm() {
             </div>
           </div>
 
-          <div className="flex justify-end">
-            <Link
-              href="/recuperar-senha"
-              className="text-sm font-medium text-[#64748B] transition-colors hover:text-[#34B097]"
-            >
-              Esqueci minha senha
-            </Link>
-          </div>
+
 
           {error && <p className="text-sm font-medium text-[#EF4444]">{error}</p>}
+          {success && <p className="text-sm font-medium text-emerald-600 text-center animate-pulse">Login realizado com sucesso! Redirecionando...</p>}
 
           <button
             type="submit"
-            disabled={!isValid || loading}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#34B097] py-3.5 font-semibold text-white shadow-lg transition-all hover:bg-[#2D9B85] disabled:cursor-not-allowed disabled:bg-[#94A3B8] disabled:shadow-none"
+            disabled={!isValid || loading || success}
+            className={`w-full inline-flex items-center justify-center gap-2 rounded-xl py-3.5 font-semibold text-white shadow-lg transition-all disabled:cursor-not-allowed disabled:bg-[#94A3B8] disabled:shadow-none ${
+              success ? "bg-emerald-500 hover:bg-emerald-600" : "bg-[#34B097] hover:bg-[#2D9B85]"
+            }`}
           >
-            <LogIn className="h-4 w-4" />
-            {loading ? "Entrando…" : "Entrar"}
+            {success ? (
+              <CheckCircle className="h-4 w-4" />
+            ) : loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogIn className="h-4 w-4" />
+            )}
+            {success ? "Sucesso!" : loading ? "Entrando…" : "Entrar"}
           </button>
         </form>
         </div>
