@@ -259,6 +259,31 @@ export async function GET(
     }
   }
 
+  // Buscar internal_notes e mesclar
+  const notesClient = process.env.SUPABASE_SERVICE_ROLE_KEY 
+    ? createServiceRoleClient() 
+    : supabase;
+
+  const { data: notes } = await notesClient
+    .from("internal_notes")
+    .select("id, content, created_at, author_id")
+    .eq("conversation_id", id)
+    .order("created_at", { ascending: true });
+
+  if (notes && notes.length > 0) {
+    const formattedNotes = notes.map((n) => ({
+      id: n.id,
+      direction: "out",
+      content: n.content,
+      sent_at: n.created_at,
+      message_type: "internal_note",
+      created_at: n.created_at,
+    }));
+    messages = [...messages, ...formattedNotes].sort((a: any, b: any) => 
+      new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+    );
+  }
+
   // Remover duplicatas por id, por external_id e por (direction + conteúdo + mesmo segundo)
   const seenIds = new Set<string>();
   const seenExternal = new Set<string>();
