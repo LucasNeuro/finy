@@ -258,7 +258,6 @@ export async function GET(
       await supabase.from("conversations").update({ messages_snapshot: toStore, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
     }
   }
-
   // Buscar internal_notes e mesclar
   const notesClient = process.env.SUPABASE_SERVICE_ROLE_KEY 
     ? createServiceRoleClient() 
