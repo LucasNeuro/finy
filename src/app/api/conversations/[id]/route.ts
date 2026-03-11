@@ -178,33 +178,49 @@ export async function GET(
     if (row?.phone?.trim()) contact_phone_from_cc = row.phone.trim();
   }
 
-  // Se ainda não temos nome (nem na conversa nem em channel_contacts), buscar na UAZAPI e gravar
+  // Se ainda não temos nome ou foto (nem na conversa nem em channel_contacts), buscar na UAZAPI e gravar
   const effectiveNameSoFar = contact_name_from_cc || (conversation.customer_name?.trim() || null);
-  if (!effectiveNameSoFar && conversation.channel_id && jids.length > 0) {
+  if ((!effectiveNameSoFar || !contact_avatar_url) && conversation.channel_id && jids.length > 0) {
     try {
       const resolved = await getChannelToken(conversation.channel_id, companyId);
       if (resolved) {
         const numberForApi = jidNorm || canonicalDigits || conversation.customer_phone || jid;
         const detailRes = await getChatDetails(resolved.token, numberForApi, { preview: true });
-        const data = detailRes.data as { wa_contactName?: string; wa_name?: string; name?: string } | undefined;
+        const data = detailRes.data as { wa_contactName?: string; wa_name?: string; name?: string; imagePreview?: string; image?: string; picture?: string } | undefined;
+        
         const fetchedName = (data?.wa_contactName ?? data?.wa_name ?? data?.name)?.trim() || null;
-        if (fetchedName) {
-          contact_name_from_cc = fetchedName;
+        const fetchedImage = (data?.imagePreview ?? data?.image ?? data?.picture)?.trim() || null;
+
+        if (fetchedName || fetchedImage) {
+          if (fetchedName) contact_name_from_cc = fetchedName;
+          if (fetchedImage) contact_avatar_url = fetchedImage;
+
+          const updatePayload: any = {
+            synced_at: new Date().toISOString(),
+          };
+          if (fetchedName) {
+            updatePayload.contact_name = fetchedName;
+            updatePayload.first_name = fetchedName;
+          }
+          if (fetchedImage) {
+            updatePayload.avatar_url = fetchedImage;
+          }
+
           await supabase
             .from("channel_contacts")
-            .update({
-              contact_name: fetchedName,
-              first_name: fetchedName,
-              synced_at: new Date().toISOString(),
-            })
+            .update(updatePayload)
             .eq("channel_id", conversation.channel_id)
             .eq("company_id", companyId)
             .in("jid", jids);
-          await supabase
-            .from("conversations")
-            .update({ customer_name: fetchedName, updated_at: new Date().toISOString() })
-            .eq("id", id)
-            .eq("company_id", companyId);
+
+          if (fetchedName) {
+            await supabase
+              .from("conversations")
+              .update({ customer_name: fetchedName, updated_at: new Date().toISOString() })
+              .eq("id", id)
+              .eq("company_id", companyId);
+          }
+          
           await invalidateConversationList(companyId);
           await invalidateConversationDetail(id);
         }
