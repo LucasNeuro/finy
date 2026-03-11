@@ -85,7 +85,7 @@ function GenerateDescriptionButton({
       }}
       disabled={disabled || loading}
       className={`shrink-0 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-50 inline-flex items-center gap-1.5 ${className}`}
-      title={field === "name" ? "Gerar nome com Mistral AI" : "Gerar descrição com Mistral AI"}
+      title={field === "name" ? "Gerar nome com IA" : "Gerar descrição com IA"}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
       {label}

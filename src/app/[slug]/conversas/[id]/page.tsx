@@ -1,9 +1,9 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
 import { SideOver } from "@/components/SideOver";
@@ -686,6 +686,23 @@ function MessageBubble({
     }
   }
 
+  if (displayType === "internal_note") {
+    return (
+      <div className="rounded-lg bg-purple-50 border border-purple-100 text-[#1E293B] max-w-[69%] px-3 py-2">
+        <div className="flex items-center gap-1.5 mb-1 text-purple-600">
+          <FileText className="h-3 w-3" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Comentário Interno</span>
+        </div>
+        <div className="whitespace-pre-wrap text-sm">{m.content}</div>
+        <div className="mt-1 flex items-center justify-end gap-1">
+          <span className="text-[10px] text-purple-400">
+            {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`rounded-lg ${
@@ -1012,28 +1029,30 @@ function MessageBubble({
               >
                 <Smile className="h-4 w-4" />
               </button>
+              {reactionPickerOpen && (
+                <div
+                  ref={pickerPortalRef}
+                  className={`absolute top-0 z-50 rounded-xl bg-white border border-[#E2E8F0] shadow-xl overflow-hidden w-[300px] ${
+                    m.direction === "out" ? "right-full mr-2" : "left-full ml-2"
+                  }`}
+                  role="dialog"
+                  aria-label="Escolher reação"
+                >
+                  <div className="max-h-[320px] overflow-auto">
+                    <EmojiReactionPicker
+                      onSelect={(emoji) => {
+                        onReaction(m.id, m.reaction === emoji ? "" : emoji);
+                        setReactionPickerOpen(false);
+                      }}
+                      onClose={() => setReactionPickerOpen(false)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       </footer>
-      {conversationId && apiHeaders && onReaction && !String(m.id).startsWith("temp-") && reactionPickerOpen && (
-        <div
-          ref={pickerPortalRef}
-          className="mt-2 rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden w-full max-w-[352px]"
-          role="dialog"
-          aria-label="Escolher reação"
-        >
-          <div className="max-h-[320px] overflow-auto">
-            <EmojiReactionPicker
-              onSelect={(emoji) => {
-                onReaction(m.id, m.reaction === emoji ? "" : emoji);
-                setReactionPickerOpen(false);
-              }}
-              onClose={() => setReactionPickerOpen(false)}
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1096,6 +1115,8 @@ export default function ConversaThreadPage({
   const slug = resolved?.slug ?? pathname?.split("/")[1] ?? "";
   const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+
+
   const focusMode = useInboxStore((s) => s.focusMode);
   const setFocusMode = useInboxStore((s) => s.setFocusMode);
   const queryClient = useQueryClient();
@@ -1141,6 +1162,75 @@ export default function ConversaThreadPage({
     refetchOnWindowFocus: false, // Evita refetch ao fechar picker de reação (reação sumia e voltava)
   });
 
+  const [quickSearch, setQuickSearch] = useState<string | null>(null);
+  const [quickIndex, setQuickIndex] = useState(0);
+  const [inputTab, setInputTab] = useState<'write' | 'quick' | 'note'>('write');
+  const [quickReplySearch, setQuickReplySearch] = useState('');
+  const [correctingText, setCorrectingText] = useState(false);
+
+  const { data: quickReplies } = useQuery({
+    queryKey: ["quick-replies", slug],
+    queryFn: () => fetch("/api/quick-replies", { headers: apiHeaders }).then((r) => r.json()).then((json) => Array.isArray(json?.data) ? json.data : []),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const filteredQuickReplies = useMemo(() => {
+    // Se não há termo de busca (quickSearch é null), não retorna nada
+    if (quickSearch === null || !Array.isArray(quickReplies)) return [];
+    
+    const currentQueueId = conv?.queue_id;
+    const term = quickSearch.toLowerCase();
+    
+    return quickReplies.filter((qr: any) => {
+      // 1. Filtrar por texto/atalho (apenas se o termo não estiver vazio)
+      // Se term for "", exibe todos (comportamento ao digitar apenas /)
+      const matchesTerm = term === "" || qr.shortCut?.toLowerCase().includes(term) || (qr.text && qr.text.toLowerCase().includes(term));
+      if (!matchesTerm) return false;
+
+      // 2. Filtrar por fila (Queue)
+      // Se a resposta não tem filas vinculadas, é global -> Exibir
+      const isGlobal = !qr.queueIds || qr.queueIds.length === 0;
+      if (isGlobal) return true;
+
+      // Se tem filas, exibir apenas se a conversa pertence a uma dessas filas
+      if (currentQueueId && qr.queueIds.includes(currentQueueId)) return true;
+
+      // Se tem filas mas a conversa não é de nenhuma delas (ou não tem fila), esconder
+      return false;
+    }).slice(0, 50);
+  }, [quickReplies, quickSearch, conv?.queue_id]);
+
+  const tabQuickReplies = useMemo(() => {
+    if (!Array.isArray(quickReplies)) return [];
+    
+    const currentQueueId = conv?.queue_id;
+    const term = quickReplySearch.toLowerCase();
+    
+    return quickReplies.filter((qr: any) => {
+      const matchesTerm = term === "" || qr.shortCut?.toLowerCase().includes(term) || (qr.text && qr.text.toLowerCase().includes(term));
+      if (!matchesTerm) return false;
+
+      // Se tem filas, exibir apenas se a conversa pertence a uma dessas filas
+      if (qr.queueIds && Array.isArray(qr.queueIds) && qr.queueIds.length > 0) {
+        // Normalizar para string para evitar mismatch de tipos
+        const allowedQueues = qr.queueIds.map(String);
+        const currentQueue = String(currentQueueId || "");
+        
+        if (!currentQueue || !allowedQueues.includes(currentQueue)) return false;
+      }
+      return true;
+    });
+  }, [quickReplies, quickReplySearch, conv?.queue_id]);
+
+  function selectQuickReply(qr: any) {
+    if (qr.text) {
+      setSendValue(qr.text);
+    }
+    setQuickSearch(null);
+    setQuickIndex(0);
+  }
+
   useEffect(() => {
     if (resolved?.id) setHasMoreOlderMessages(true);
   }, [resolved?.id]);
@@ -1152,6 +1242,28 @@ export default function ConversaThreadPage({
 
   const claimAttemptedRef = useRef(false);
   const contactDetailsFetchedForRef = useRef<string | null>(null);
+
+  async function handleAICorrection() {
+    if (!sendValue.trim()) return;
+    setCorrectingText(true);
+    try {
+        const res = await fetch("/api/ai/correct-text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({ text: sendValue }),
+        });
+        const data = await res.json();
+        if (res.ok && data.corrected) {
+            setSendValue(data.corrected);
+        } else {
+            setError(data.error || "Falha ao corrigir texto");
+        }
+    } catch {
+        setError("Erro ao conectar com IA");
+    } finally {
+        setCorrectingText(false);
+    }
+  }
 
   const loadOlderMessages = useCallback(async () => {
     if (!resolved?.id || !conv?.messages?.length || loadingOlderMessages || !hasMoreOlderMessages) return;
@@ -1405,7 +1517,11 @@ export default function ConversaThreadPage({
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const sentAt = new Date().toISOString();
-    const msgType = isMedia ? (payload!.type === "ptt" ? "ptt" : payload!.type) : "text";
+    
+    // Se for nota interna, tipo é 'internal_note'
+    const isNote = inputTab === 'note';
+    const msgType = isNote ? "internal_note" : (isMedia ? (payload!.type === "ptt" ? "ptt" : payload!.type) : "text");
+    
     const content = isMedia ? (payload!.caption || `[${msgType}]`) : text;
     const optimistic: Message = {
       id: tempId,
@@ -1427,7 +1543,8 @@ export default function ConversaThreadPage({
 
     const body = isMedia
       ? { type: payload!.type, file: payload!.file, caption: payload!.caption || "", docName: payload!.docName || "" }
-      : { content: text };
+      : { content: text, type: isNote ? "internal_note" : undefined };
+    
     fetch(`/api/conversations/${resolved.id}/messages`, {
       method: "POST",
       credentials: "include",
@@ -2123,7 +2240,7 @@ export default function ConversaThreadPage({
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-[#E2E8F0] bg-white p-2">
+        <div className={`shrink-0 border-t border-[#E2E8F0] p-2 ${inputTab === 'note' ? 'bg-yellow-50' : 'bg-white'}`}>
           {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
           {recording ? (
             <RecordingInProgressBar
@@ -2140,129 +2257,313 @@ export default function ConversaThreadPage({
             />
           ) : (
           <>
-          <form onSubmit={(e) => { if (!canSendMessages) e.preventDefault(); else handleSend(e); }} className={`flex gap-2 items-center ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => onFileChoose("image", e)}
-            />
-            <input
-              type="file"
-              ref={audioInputRef}
-              accept="audio/*"
-              className="hidden"
-              onChange={(e) => onFileChoose("audio", e)}
-            />
-            <input
-              type="file"
-              ref={docInputRef}
-              accept=".pdf,.doc,.docx,.xls,.xlsx"
-              className="hidden"
-              onChange={(e) => onFileChoose("document", e)}
-            />
-            <input
-              type="file"
-              ref={videoInputRef}
-              accept="video/*"
-              className="hidden"
-              onChange={(e) => onFileChoose("video", e)}
-            />
-            <div className="flex shrink-0 items-center gap-0.5 border border-[#E2E8F0] rounded-lg overflow-hidden bg-white">
-              <button
-                type="button"
-                onClick={() => setAttachOpen(!attachOpen)}
-                className="p-2 text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B]"
-                aria-label="Anexar"
-              >
-                <Paperclip className="h-5 w-5" />
-              </button>
-              {attachOpen && (
-                <div className="flex items-center border-l border-[#E2E8F0] flex-wrap">
-                  <button type="button" onClick={() => { fileInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Imagem</button>
-                  <button type="button" onClick={() => { videoInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Vídeo</button>
-                  <button type="button" onClick={() => { startRecordingVideo(); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC] flex items-center gap-1">
-                    <Video className="h-3.5 w-3.5" /> Gravar vídeo
-                  </button>
-                  <button type="button" onClick={() => { audioInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Áudio</button>
-                  <button type="button" onClick={() => { docInputRef.current?.click(); setAttachOpen(false); }} className="px-2 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC]">Documento</button>
-                </div>
-              )}
+<div className={`flex flex-col rounded-lg border border-[#E2E8F0] bg-white shadow-sm overflow-hidden ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
+  <div className="flex items-center border-b border-[#E2E8F0] bg-[#F8FAFC]">
+    <button
+      type="button"
+      onClick={() => setInputTab('write')}
+      className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${inputTab === 'write' ? 'border-clicvend-orange text-clicvend-orange bg-white' : 'border-transparent text-[#64748B] hover:text-[#1E293B] hover:bg-gray-50'}`}
+    >
+      <MessageSquare className="h-4 w-4" />
+      Responder
+    </button>
+    <button
+      type="button"
+      onClick={() => setInputTab('quick')}
+      className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${inputTab === 'quick' ? 'border-clicvend-orange text-clicvend-orange bg-white' : 'border-transparent text-[#64748B] hover:text-[#1E293B] hover:bg-gray-50'}`}
+    >
+      <Zap className="h-4 w-4" />
+      Respostas Rápidas
+    </button>
+    <button
+      type="button"
+      onClick={() => setInputTab('note')}
+      className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${inputTab === 'note' ? 'border-purple-500 text-purple-600 bg-purple-50' : 'border-transparent text-[#64748B] hover:text-[#1E293B] hover:bg-gray-50'}`}
+    >
+      <FileText className="h-4 w-4" />
+      Comentário Interno
+    </button>
+  </div>
+
+  <div className="p-0 relative bg-white">
+    {inputTab === 'write' || inputTab === 'note' ? (
+      <>
+        <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onFileChoose("image", e)}
+        />
+        <input
+            type="file"
+            ref={audioInputRef}
+            accept="audio/*"
+            className="hidden"
+            onChange={(e) => onFileChoose("audio", e)}
+        />
+        <input
+            type="file"
+            ref={docInputRef}
+            accept=".pdf,.doc,.docx,.xls,.xlsx"
+            className="hidden"
+            onChange={(e) => onFileChoose("document", e)}
+        />
+        <input
+            type="file"
+            ref={videoInputRef}
+            accept="video/*"
+            className="hidden"
+            onChange={(e) => onFileChoose("video", e)}
+        />
+
+        {quickSearch !== null && filteredQuickReplies.length > 0 && (
+            <div className="absolute bottom-full left-0 mb-2 w-full rounded-xl bg-white border border-[#E2E8F0] shadow-xl overflow-hidden max-h-[300px] overflow-y-auto z-50">
+                {filteredQuickReplies.map((qr: any, i: number) => (
+                <button
+                    key={qr.id}
+                    type="button"
+                    onClick={() => selectQuickReply(qr)}
+                    className={`w-full text-left px-4 py-2 text-sm hover:bg-[#F8FAFC] flex items-center justify-between gap-2 border-b border-[#F1F5F9] last:border-0 ${i === quickIndex ? "bg-[#F1F5F9]" : ""}`}
+                >
+                    <span className="font-medium text-[#1E293B] shrink-0">/{qr.shortCut}</span>
+                    <span className="truncate text-[#64748B] flex-1 min-w-0 text-xs">{qr.text}</span>
+                </button>
+                ))}
             </div>
-            <div className="shrink-0">
-              <button
-                ref={inputEmojiButtonRef}
-                type="button"
-                onClick={() => setInputEmojiPickerOpen((v) => !v)}
-                className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#E2E8F0] bg-white text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B]"
-                aria-label="Inserir emoji"
-              >
-                <Smile className="h-5 w-5" />
-              </button>
-            </div>
-            <input
-              type="text"
-              value={sendValue}
-              onChange={(e) => setSendValue(e.target.value)}
-              onFocus={() => {
-                if (resolved?.id && apiHeaders && canSendMessages) {
+        )}
+
+        <textarea
+          value={sendValue}
+          onChange={(e) => {
+              const v = e.target.value;
+              setSendValue(v);
+              const lastLine = v.split('\n').pop() || '';
+              if (lastLine.trim().startsWith("/")) {
+                  setQuickSearch(lastLine.trim().slice(1));
+                  setQuickIndex(0);
+              } else {
+                  setQuickSearch(null);
+              }
+          }}
+          onKeyDown={(e) => {
+              if (quickSearch !== null && filteredQuickReplies.length > 0) {
+                  if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setQuickIndex((i) => Math.max(0, i - 1));
+                      return;
+                  } else if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setQuickIndex((i) => Math.min(filteredQuickReplies.length - 1, i + 1));
+                      return;
+                  } else if (e.key === "Enter" || e.key === "Tab") {
+                      e.preventDefault();
+                      selectQuickReply(filteredQuickReplies[quickIndex]);
+                      return;
+                  } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setQuickSearch(null);
+                      return;
+                  }
+              }
+
+              if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (sendValue.trim() && !sending && !isLoading) handleSend(e);
+              }
+          }}
+          onFocus={() => {
+              if (resolved?.id && apiHeaders && canSendMessages) {
                   fetch(`/api/conversations/${resolved.id}/presence`, {
-                    method: "POST",
-                    credentials: "include",
-                    headers: { "Content-Type": "application/json", ...apiHeaders },
-                    body: JSON.stringify({ presence: "composing" }),
+                      method: "POST",
+                      credentials: "include",
+                      headers: { "Content-Type": "application/json", ...apiHeaders },
+                      body: JSON.stringify({ presence: "composing" }),
                   }).catch(() => {});
-                }
-              }}
-              onBlur={() => {
-                if (resolved?.id && apiHeaders) {
+              }
+          }}
+          onBlur={() => {
+              if (resolved?.id && apiHeaders) {
                   fetch(`/api/conversations/${resolved.id}/presence`, {
-                    method: "POST",
-                    credentials: "include",
-                    headers: { "Content-Type": "application/json", ...apiHeaders },
-                    body: JSON.stringify({ presence: "paused" }),
+                      method: "POST",
+                      credentials: "include",
+                      headers: { "Content-Type": "application/json", ...apiHeaders },
+                      body: JSON.stringify({ presence: "paused" }),
                   }).catch(() => {});
-                }
-              }}
-              placeholder="Digite sua mensagem…"
-              className="flex-1 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-              disabled={sending || isLoading}
-            />
-            {!recording && (
-              <button
-                type="button"
-                onClick={startRecording}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
-                aria-label="Gravar áudio"
-              >
-                <Mic className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              type="submit"
-              disabled={!sendValue.trim() || sending || isLoading}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:bg-[#94A3B8] disabled:cursor-not-allowed transition-colors"
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {sending ? "Enviando…" : "Enviar"}
-            </button>
-          </form>
-          {inputEmojiPickerOpen && (
-            <div
-              ref={inputEmojiPickerRef}
-              className="mt-2 rounded-xl bg-white border border-[#E2E8F0] shadow-lg overflow-hidden w-full max-w-[352px]"
-            >
-              <div className="max-h-[320px] overflow-auto">
-                <EmojiReactionPicker
-                  onSelect={(emoji) => {
-                    setSendValue((prev) => prev + emoji);
-                  }}
-                  onClose={() => setInputEmojiPickerOpen(false)}
-                />
-              </div>
+              }
+          }}
+          placeholder={inputTab === 'note' ? "Escreva um comentário interno (não será enviado ao cliente)..." : "Digite sua mensagem…"}
+          className={`w-full resize-none border-0 p-4 text-sm text-[#1E293B] placeholder-[#94A3B8] focus:ring-0 min-h-[56px] focus:outline-none ${inputTab === 'note' ? 'bg-purple-50' : 'bg-[#F0FDF4]'}`}
+          disabled={sending || isLoading}
+        />
+        
+        <div className={`flex items-center justify-between px-3 py-2 border-t border-[#E2E8F0] bg-[#F8FAFC]`}>
+            <div className="flex items-center gap-2">
+                 <div className="flex shrink-0 items-center gap-0.5 border border-[#E2E8F0] rounded-lg overflow-hidden bg-white">
+                    <button
+                        type="button"
+                        onClick={() => setAttachOpen(!attachOpen)}
+                        className="p-2 text-[#64748B] hover:bg-[#E2E8F0] transition-colors"
+                        title="Anexar arquivo"
+                        disabled={inputTab === 'note'}
+                    >
+                        <Paperclip className="h-5 w-5" />
+                    </button>
+                     {attachOpen && (
+                        <div className="flex items-center border-l border-[#E2E8F0] flex-wrap">
+                            <button type="button" onClick={() => { fileInputRef.current?.click(); setAttachOpen(false); }} className="px-3 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC] font-medium">Imagem</button>
+                            <button type="button" onClick={() => { videoInputRef.current?.click(); setAttachOpen(false); }} className="px-3 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC] font-medium">Vídeo</button>
+                            <button type="button" onClick={() => { startRecordingVideo(); }} className="px-3 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC] flex items-center gap-1 font-medium">
+                                <Video className="h-3.5 w-3.5" /> Gravar vídeo
+                            </button>
+                            <button type="button" onClick={() => { audioInputRef.current?.click(); setAttachOpen(false); }} className="px-3 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC] font-medium">Áudio</button>
+                            <button type="button" onClick={() => { docInputRef.current?.click(); setAttachOpen(false); }} className="px-3 py-1.5 text-xs text-[#64748B] hover:bg-[#F8FAFC] font-medium">Documento</button>
+                        </div>
+                    )}
+                 </div>
+
+                 <div className="relative">
+                    <button
+                        ref={inputEmojiButtonRef}
+                        type="button"
+                        onClick={() => setInputEmojiPickerOpen((v) => !v)}
+                        className="p-2 text-[#64748B] hover:bg-[#E2E8F0] rounded-lg transition-colors"
+                        title="Inserir emoji"
+                    >
+                        <Smile className="h-5 w-5" />
+                    </button>
+                    {inputEmojiPickerOpen && (
+                        <div
+                            ref={inputEmojiPickerRef}
+                            className="absolute bottom-full left-0 mb-2 z-50 rounded-xl bg-white border border-[#E2E8F0] shadow-xl overflow-hidden w-[320px]"
+                        >
+                             <div className="max-h-[320px] overflow-auto">
+                                <EmojiReactionPicker
+                                    onSelect={(emoji) => {
+                                        setSendValue((prev) => prev + emoji);
+                                    }}
+                                    onClose={() => setInputEmojiPickerOpen(false)}
+                                />
+                             </div>
+                        </div>
+                    )}
+                 </div>
+
+                 {!recording && (
+                     <button
+                        type="button"
+                        onClick={startRecording}
+                        className="p-2 text-[#64748B] hover:bg-[#E2E8F0] rounded-lg transition-colors"
+                        title="Gravar áudio"
+                     >
+                         <Mic className="h-5 w-5" />
+                     </button>
+                 )}
+
+                 <div className="h-5 w-px bg-[#E2E8F0] mx-1" />
+
+                 <button
+                    type="button"
+                    onClick={handleAICorrection}
+                    disabled={correctingText || !sendValue.trim()}
+                    className="p-2 text-[#64748B] hover:text-clicvend-orange hover:bg-[#E2E8F0] rounded-lg transition-colors group disabled:opacity-50"
+                    title="Corrigir com IA"
+                 >
+                     {correctingText ? <Loader2 className="h-5 w-5 animate-spin" /> : <Sparkles className="h-5 w-5" />}
+                 </button>
             </div>
-          )}
+
+            <div className="flex items-center gap-2">
+                 <button
+            type="button"
+            onClick={(e) => { if (sendValue.trim() && !sending && !isLoading) handleSend(e); }}
+            disabled={!sendValue.trim() || sending || isLoading}
+            className={`flex h-10 w-10 items-center justify-center rounded-full text-white transition-all shadow-sm disabled:cursor-not-allowed ${
+              inputTab === 'note' 
+                ? 'bg-purple-600 hover:bg-purple-700 disabled:bg-purple-300' 
+                : 'bg-clicvend-orange hover:bg-clicvend-orange-dark disabled:bg-[#94A3B8]'
+            }`}
+            title={inputTab === 'note' ? "Salvar comentário" : "Enviar"}
+          >
+            {sending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5 ml-0.5" />}
+          </button>
+            </div>
+        </div>
+      </>
+    ) : (
+       <div className="flex flex-col h-[300px]">
+          <div className="flex-1 overflow-y-auto">
+             {tabQuickReplies.length > 0 ? (
+                 <table className="w-full text-sm text-left">
+                     <thead className="text-xs text-[#64748B] uppercase bg-[#F8FAFC] sticky top-0 z-10">
+                         <tr>
+                             <th className="px-4 py-2 font-medium w-1/4">Atalho</th>
+                             <th className="px-4 py-2 font-medium">Mensagem</th>
+                             <th className="px-4 py-2 font-medium w-[140px]">Criado em</th>
+                             <th className="px-4 py-2 font-medium w-[140px]">Atualizado em</th>
+                             <th className="px-4 py-2 font-medium w-10"></th>
+                         </tr>
+                     </thead>
+                     <tbody className="divide-y divide-[#F1F5F9]">
+                         {tabQuickReplies.map((qr: any) => (
+                             <tr 
+                                 key={qr.id} 
+                                 className="hover:bg-[#F1F5F9] cursor-pointer group transition-colors"
+                                 onClick={() => {
+                                     selectQuickReply(qr);
+                                     setInputTab('write');
+                                 }}
+                             >
+                                 <td className="px-4 py-2 font-medium text-[#1E293B]">
+                                     <div className="flex items-center gap-2">
+                                         <span>/{qr.shortCut}</span>
+                                         <button
+                                             type="button"
+                                             onClick={(e) => {
+                                                 e.stopPropagation();
+                                                 navigator.clipboard.writeText(`/${qr.shortCut}`);
+                                             }}
+                                             className="text-[#94A3B8] hover:text-[#1E293B] opacity-0 group-hover:opacity-100 transition-opacity"
+                                             title="Copiar atalho"
+                                         >
+                                             <Copy className="h-3.5 w-3.5" />
+                                         </button>
+                                     </div>
+                                 </td>
+                                 <td className="px-4 py-2 text-[#64748B]">
+                                     <div className="relative group/tooltip">
+                                         <span className="line-clamp-1 max-w-[300px]">{qr.text}</span>
+                                         <div className="absolute left-0 bottom-full mb-2 hidden w-[300px] rounded-lg bg-[#1E293B] p-2 text-xs text-white shadow-lg group-hover/tooltip:block z-50 whitespace-pre-wrap">
+                                             {qr.text}
+                                             <div className="absolute -bottom-1 left-4 h-2 w-2 rotate-45 bg-[#1E293B]"></div>
+                                         </div>
+                                     </div>
+                                 </td>
+                                 <td className="px-4 py-2 text-xs text-[#64748B]">
+                                     {qr.createdAt ? new Date(qr.createdAt).toLocaleDateString("pt-BR") : "—"}
+                                 </td>
+                                 <td className="px-4 py-2 text-xs text-[#64748B]">
+                                     {qr.updatedAt ? new Date(qr.updatedAt).toLocaleDateString("pt-BR") : "—"}
+                                 </td>
+                                 <td className="px-4 py-2 text-right">
+                                     <button type="button" className="text-clicvend-orange opacity-0 group-hover:opacity-100 transition-opacity" title="Usar resposta">
+                                         <Check className="h-4 w-4" />
+                                     </button>
+                                 </td>
+                             </tr>
+                         ))}
+                     </tbody>
+                 </table>
+             ) : (
+                 <div className="flex flex-col items-center justify-center h-full text-[#94A3B8] text-sm gap-2">
+                     <p>Nenhuma resposta encontrada.</p>
+                 </div>
+             )}
+          </div>
+       </div>
+     )}
+  </div>
+</div>
           </>
           )}
         </div>

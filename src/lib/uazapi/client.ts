@@ -317,7 +317,8 @@ export async function listQuickReplies(
 
 /**
  * Cria, atualiza ou exclui uma resposta rápida.
- * Body segue o schema da UAZAPI: { id?, delete?, shortCut, type, text?, file? }
+ * Body segue o schema da UAZAPI: { id?, delete?, shortCut, type, text?, file?, docName? }
+ * Resposta 200: { message, quickReplies: [ {...} ] } — normalizamos para o primeiro item.
  */
 export async function editQuickReply(
   token: string,
@@ -328,17 +329,36 @@ export async function editQuickReply(
     type: string;
     text?: string;
     file?: string;
+    docName?: string;
   }
 ): Promise<{ ok: boolean; data?: QuickReply; error?: string }> {
-  const { data, ok, error, status } = await uazapiFetch<QuickReply>("/quickreply/edit", {
+  const body = { ...payload };
+  if (body.id === undefined) delete body.id;
+  if (body.delete === undefined) delete body.delete;
+  if (body.text === undefined) delete body.text;
+  if (body.file === undefined) delete body.file;
+  if (body.docName === undefined) delete body.docName;
+
+  type UazapiEditResponse = { message?: string; quickReplies?: QuickReply[] };
+  const { data: raw, ok, error, status } = await uazapiFetch<QuickReply | UazapiEditResponse>("/quickreply/edit", {
     method: "POST",
     token,
-    body: payload,
+    body,
   });
+
+  if (!ok) {
+    return {
+      ok: false,
+      error: error ?? `HTTP ${status}`,
+    };
+  }
+
+  const qr: QuickReply | undefined = Array.isArray((raw as UazapiEditResponse)?.quickReplies)
+    ? (raw as UazapiEditResponse).quickReplies![0]
+    : (raw as QuickReply);
   return {
-    ok,
-    data: ok ? data : undefined,
-    error: ok ? undefined : (error ?? `HTTP ${status}`),
+    ok: true,
+    data: qr,
   };
 }
 

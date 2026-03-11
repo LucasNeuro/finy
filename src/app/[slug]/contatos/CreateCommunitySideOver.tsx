@@ -226,7 +226,7 @@ export function CreateCommunitySideOver({
             }}
             disabled={loading || generatingDesc}
             className="mt-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange disabled:opacity-50 inline-flex items-center gap-1.5"
-            title="Gerar descrição com Mistral AI"
+            title="Gerar descrição com IA"
           >
             {generatingDesc ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             Gerar com IA

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
+  Download,
   Loader2,
   MessageSquare,
   Plus,
@@ -10,13 +11,16 @@ import {
   Settings,
   Sparkles,
   Trash2,
+  Upload,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 type QuickReplyRow = {
   id: string;
-  uazapiId: string;
+  uazapiId: string | null;
   shortCut: string;
   type: string;
   text: string | null;
@@ -27,6 +31,7 @@ type QuickReplyRow = {
   queueIds: string[];
   createdAt: string;
   updatedAt: string;
+  channels: { id: string; name: string }[];
 };
 
 type Channel = { id: string; name: string };
@@ -71,12 +76,23 @@ export default function RespostasRapidasPage() {
   const [channelQueues, setChannelQueues] = useState<Queue[]>([]);
   const [channelQueuesLoading, setChannelQueuesLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [sideOverTab, setSideOverTab] = useState<"form" | "ativas">("form");
+  const [sideOverTab, setSideOverTab] = useState<"form" | "ativas" | "import">("form");
   const [form, setForm] = useState<QuickReplyFormState>(EMPTY_FORM);
+  const [bulkChannelId, setBulkChannelId] = useState("");
+  const [bulkQueueIds, setBulkQueueIds] = useState<string[]>([]);
+  const [bulkParsedRows, setBulkParsedRows] = useState<{ shortCut: string; type: string; text: string; filas: string }[]>([]);
+  const [bulkImporting, setBulkImporting] = useState(false);
+  const [bulkImportResult, setBulkImportResult] = useState<{ ok: number; fail: number } | null>(null);
+  const [bulkImportError, setBulkImportError] = useState<string | null>(null);
+  const [bulkIdea, setBulkIdea] = useState("");
+  const [bulkGeneratingAI, setBulkGeneratingAI] = useState(false);
+  const [formAiError, setFormAiError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [deleteConfirmRow, setDeleteConfirmRow] = useState<QuickReplyRow | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
+  const PAGE_SIZE = 50;
 
   const apiHeaders = useMemo(
     () => (slug ? { "X-Company-Slug": slug } : undefined),
@@ -161,12 +177,14 @@ export default function RespostasRapidasPage() {
   }, [fetchChannels, fetchQueues]);
 
   useEffect(() => {
-    if (showForm && form.channelId) {
+    if (showForm && form.channelId && sideOverTab !== "import") {
       fetchQueuesForChannel(form.channelId);
-    } else {
+    } else if (showForm && sideOverTab === "import" && bulkChannelId) {
+      fetchQueuesForChannel(bulkChannelId);
+    } else if (!showForm || (sideOverTab === "form" && !form.channelId) || (sideOverTab === "import" && !bulkChannelId)) {
       setChannelQueues([]);
     }
-  }, [showForm, form.channelId, fetchQueuesForChannel]);
+  }, [showForm, form.channelId, sideOverTab, bulkChannelId, fetchQueuesForChannel]);
 
   useEffect(() => {
     fetchQuickReplies();
@@ -177,11 +195,19 @@ export default function RespostasRapidasPage() {
       ...EMPTY_FORM,
       channelId: channels.length > 0 ? channels[0].id : "",
     });
+    setBulkChannelId(channels.length > 0 ? channels[0].id : "");
+    setBulkQueueIds([]);
+    setBulkParsedRows([]);
+    setBulkImportResult(null);
+    setBulkImportError(null);
+    setBulkIdea("");
+    setFormAiError(null);
     setSideOverTab("form");
     setShowForm(true);
   };
 
   const openEditForm = (row: QuickReplyRow) => {
+    setFormAiError(null);
     setForm({
       id: row.id,
       uazapiId: row.uazapiId,
@@ -201,10 +227,193 @@ export default function RespostasRapidasPage() {
     setForm((c) => ({ ...c, channelId, queueIds: [] }));
   };
 
+  const CSV_SEP = ";";
+  const TEMPLATE_HEADER = "atalho;tipo;texto;filas";
+  const TEMPLATE_EXAMPLE = "saudacao;text;Olá! Como posso ajudar hoje?;COMERCIAL";
+
+  /** Separa uma linha CSV respeitando aspas duplas (campos com ; ou , dentro de aspas). */
+  const parseCSVLine = (line: string, sep: string): string[] => {
+    const parts: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        inQuotes = !inQuotes;
+      } else if (!inQuotes && c === sep) {
+        parts.push(current.trim());
+        current = "";
+      } else {
+        current += c;
+      }
+    }
+    parts.push(current.trim());
+    return parts;
+  };
+
+  const handleDownloadTemplate = () => {
+    const bom = "\uFEFF";
+    const content = [TEMPLATE_HEADER, TEMPLATE_EXAMPLE, "obrigado;text;Agradecemos por utilizar nossos serviços!;COMERCIAL,ATENDIMENTOS GERAIS"].join("\n");
+    const blob = new Blob([bom + content], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "modelo-respostas-rapidas.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const parseBulkFile = (file: File): Promise<{ shortCut: string; type: string; text: string; filas: string }[]> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = String(reader.result ?? "");
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        if (lines.length < 2) {
+          resolve([]);
+          return;
+        }
+        const headerLine = lines[0].toLowerCase();
+        const sep = headerLine.includes(";") ? ";" : ",";
+        const headerParts = parseCSVLine(lines[0], sep).map((p) => p.toLowerCase().replace(/^"|"$/g, "").trim());
+        const dataLines = lines.slice(1);
+        const idxAtalho = headerParts.findIndex((h) => h === "atalho");
+        const idxTipo = headerParts.findIndex((h) => h === "tipo");
+        const idxTexto = headerParts.findIndex((h) => h === "texto");
+        const idxFilas = headerParts.findIndex((h) => h === "filas");
+        const rows: { shortCut: string; type: string; text: string; filas: string }[] = [];
+        for (const line of dataLines) {
+          const parts = parseCSVLine(line, sep).map((p) => p.replace(/^"|"$/g, "").trim());
+          const shortCut = idxAtalho >= 0 ? (parts[idxAtalho] ?? "") : parts[0] ?? "";
+          const type = idxTipo >= 0 ? (parts[idxTipo] ?? "text") : parts[1] ?? "text";
+          const text = idxTexto >= 0 ? (parts[idxTexto] ?? "") : parts[2] ?? "";
+          const filas = idxFilas >= 0 ? (parts[idxFilas] ?? "") : parts[3] ?? "";
+          if (shortCut) rows.push({ shortCut, type: type || "text", text, filas });
+        }
+        resolve(rows);
+      };
+      reader.onerror = () => reject(new Error("Erro ao ler arquivo"));
+      reader.readAsText(file, "UTF-8");
+    });
+  };
+
+  const handleBulkFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBulkImportResult(null);
+    setBulkImportError(null);
+    try {
+      const parsed = await parseBulkFile(file);
+      setBulkParsedRows(parsed);
+    } catch {
+      setError("Erro ao processar o arquivo. Use o modelo em CSV (separador ; ou ,).");
+    }
+  };
+
+  const handleGenerateBulkWithAI = async () => {
+    const idea = bulkIdea.trim();
+    if (!idea || !slug) return;
+    setBulkGeneratingAI(true);
+    setBulkImportError(null);
+    setBulkImportResult(null);
+    try {
+      const res = await fetch("/api/ai/generate-bulk-quick-replies", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
+        body: JSON.stringify({ idea, count: 8 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBulkImportError(data?.error ?? "Falha ao gerar sugestões com IA.");
+        return;
+      }
+      const list = Array.isArray(data?.suggestions) ? data.suggestions : [];
+      setBulkParsedRows(
+        list.map((s: { shortCut?: string; type?: string; text?: string }) => ({
+          shortCut: s.shortCut ?? "resposta",
+          type: s.type ?? "text",
+          text: s.text ?? "",
+          filas: "",
+        }))
+      );
+    } catch {
+      setBulkImportError("Erro de rede ao gerar sugestões.");
+    } finally {
+      setBulkGeneratingAI(false);
+    }
+  };
+
+  const handleBulkImport = async () => {
+    if (!slug || !bulkChannelId || bulkParsedRows.length === 0) return;
+    const invalidRows = bulkParsedRows.filter((r, i) => (r.type === "text" || !r.type) && !(r.text ?? "").trim());
+    if (invalidRows.length > 0) {
+      setBulkImportError(
+        "Para tipo 'text', a coluna 'texto' é obrigatória. Preencha o texto nas linhas: " +
+          invalidRows.map((r) => r.shortCut).slice(0, 5).join(", ") +
+          (invalidRows.length > 5 ? "…" : "") +
+          "."
+      );
+      return;
+    }
+    setBulkImporting(true);
+    setError(null);
+    setBulkImportResult(null);
+    setBulkImportError(null);
+    let ok = 0;
+    let fail = 0;
+    let firstErrorMessage: string | null = null;
+    const delayMs = 500; // Pequena pausa entre cada criação para evitar 502/timeout na UAZAPI
+    for (let i = 0; i < bulkParsedRows.length; i++) {
+      const row = bulkParsedRows[i];
+      const queueIds = bulkQueueIds.length > 0
+        ? bulkQueueIds
+        : row.filas
+          ? row.filas.split(",").map((f) => f.trim()).filter(Boolean)
+              .map((name) => channelQueues.find((q) => q.name.trim().toLowerCase() === name.toLowerCase())?.id)
+              .filter((id): id is string => Boolean(id))
+          : [];
+      try {
+        const res = await fetch("/api/quick-replies", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
+          body: JSON.stringify({
+            channel_id: bulkChannelId,
+            shortCut: row.shortCut,
+            type: row.type || "text",
+            text: row.text || undefined,
+            queueIds,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          ok++;
+        } else {
+          fail++;
+          if (!firstErrorMessage && typeof data?.error === "string") firstErrorMessage = data.error;
+        }
+        if (i < bulkParsedRows.length - 1) await new Promise((r) => setTimeout(r, delayMs));
+      } catch (e) {
+        fail++;
+        if (!firstErrorMessage) firstErrorMessage = e instanceof Error ? e.message : "Erro de rede.";
+      }
+    }
+    setBulkImportResult({ ok, fail });
+    if (firstErrorMessage) setBulkImportError(firstErrorMessage);
+    setBulkImporting(false);
+    if (ok > 0) {
+      fetchQuickReplies();
+      setBulkParsedRows([]);
+    }
+  };
+
   const closeForm = () => {
     setShowForm(false);
     setSideOverTab("form");
     setForm(EMPTY_FORM);
+    setFormAiError(null);
   };
 
   const handleToggleEnabled = async (row: QuickReplyRow) => {
@@ -236,7 +445,7 @@ export default function RespostasRapidasPage() {
   const handleGenerateWithAI = async () => {
     if (!slug) return;
     setSaving(true);
-    setError(null);
+    setFormAiError(null);
     try {
       const queueNames = form.queueIds
         .map((qid) => channelQueues.find((q) => q.id === qid)?.name)
@@ -261,12 +470,15 @@ export default function RespostasRapidasPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.text) {
-        setError(data?.error ?? "Falha ao gerar sugestão com IA.");
+        setFormAiError(
+          data?.error ?? "Falha ao gerar sugestão. Verifique MISTRAL_API_KEY no .env ou ignore este botão."
+        );
         return;
       }
       setForm((cur) => ({ ...cur, text: data.text as string }));
+      setFormAiError(null);
     } catch {
-      setError("Erro de rede ao chamar IA.");
+      setFormAiError("Erro de rede. Você pode preencher o texto manualmente.");
     } finally {
       setSaving(false);
     }
@@ -282,8 +494,8 @@ export default function RespostasRapidasPage() {
       setError("Preencha o texto da resposta rápida.");
       return;
     }
-    if (!form.channelId.trim()) {
-      setError("Selecione uma conexão para salvar na UAZAPI.");
+    if (!form.channelId.trim() && form.queueIds.length === 0) {
+      setError("Selecione uma conexão para escolher as filas.");
       return;
     }
 
@@ -298,8 +510,8 @@ export default function RespostasRapidasPage() {
           ...(apiHeaders ?? {}),
         },
         body: JSON.stringify({
-          channel_id: form.channelId,
-          id: form.uazapiId ?? undefined,
+          ...(form.id ? { quick_reply_id: form.id } : {}),
+          ...(form.channelId ? { channel_id: form.channelId } : {}),
           shortCut: form.shortCut.trim(),
           type: form.type,
           text: form.type === "text" ? form.text.trim() : undefined,
@@ -313,8 +525,9 @@ export default function RespostasRapidasPage() {
         setError(data?.error ?? "Falha ao salvar resposta rápida.");
         return;
       }
-      closeForm();
       fetchQuickReplies();
+      setForm({ ...EMPTY_FORM, channelId: form.channelId });
+      setFormAiError(null);
     } catch {
       setError("Erro de rede ao salvar.");
     } finally {
@@ -323,13 +536,7 @@ export default function RespostasRapidasPage() {
   };
 
   const doDeleteOne = async (row: QuickReplyRow) => {
-    if (!slug || !row.uazapiId) return;
-    const channelId = form.channelId || channels[0]?.id;
-    if (!channelId) {
-      setError("Selecione uma conexão para excluir da UAZAPI.");
-      setDeleteConfirmRow(null);
-      return;
-    }
+    if (!slug) return;
     setDeleting(row.id);
     setError(null);
     setDeleteConfirmRow(null);
@@ -342,8 +549,7 @@ export default function RespostasRapidasPage() {
           ...(apiHeaders ?? {}),
         },
         body: JSON.stringify({
-          channel_id: channelId,
-          id: row.uazapiId,
+          quick_reply_id: row.id,
           delete: true,
           shortCut: row.shortCut,
           type: row.type,
@@ -369,12 +575,7 @@ export default function RespostasRapidasPage() {
 
   const doBulkDelete = async () => {
     if (!slug || selectedIds.size === 0) return;
-    const channelId = channels[0]?.id;
-    if (!channelId) {
-      setError("Cadastre uma conexão para excluir respostas rápidas da UAZAPI.");
-      return;
-    }
-    const toDelete = rows.filter((r) => selectedIds.has(r.id) && r.uazapiId);
+    const toDelete = rows.filter((r) => selectedIds.has(r.id));
     setBulkActionLoading(true);
     setError(null);
     try {
@@ -388,8 +589,7 @@ export default function RespostasRapidasPage() {
               ...(apiHeaders ?? {}),
             },
             body: JSON.stringify({
-              channel_id: channelId,
-              id: row.uazapiId,
+              quick_reply_id: row.id,
               delete: true,
               shortCut: row.shortCut,
               type: row.type,
@@ -537,10 +737,10 @@ export default function RespostasRapidasPage() {
             </div>
           )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px]">
-              <thead>
-                <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+          <div className="overflow-auto max-h-[60vh] min-h-[200px]">
+            <table className="w-full min-w-[640px] border-collapse">
+              <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+                <tr className="border-b border-[#E2E8F0]">
                   <th className="w-10 px-4 py-3 text-left">
                     <input
                       type="checkbox"
@@ -565,13 +765,16 @@ export default function RespostasRapidasPage() {
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
                     Filas
                   </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                    Canais
+                  </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">
                     Ações
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {rows.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE).map((row) => (
                   <tr
                     key={row.id}
                     className="border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC]"
@@ -588,14 +791,21 @@ export default function RespostasRapidasPage() {
                     <td className="px-4 py-3">
                       <div>
                         <p className="font-semibold text-[#1E293B]">{row.shortCut}</p>
-                        {row.uazapiId && (
+                        {row.uazapiId ? (
                           <p
-                            className="font-mono text-xs text-[#94A3B8]"
-                            title={row.uazapiId}
+                            className="font-mono text-[10px] text-[#94A3B8]"
+                            title={`ID UAZAPI: ${row.uazapiId}`}
                           >
                             {row.uazapiId.length > 16
                               ? `${row.uazapiId.slice(0, 12)}…`
                               : row.uazapiId}
+                          </p>
+                        ) : (
+                          <p
+                            className="font-mono text-[10px] text-[#94A3B8] opacity-60"
+                            title={`ID Interno: ${row.id}`}
+                          >
+                            Local: #{row.id.slice(0, 8)}
                           </p>
                         )}
                       </div>
@@ -610,15 +820,24 @@ export default function RespostasRapidasPage() {
                     </td>
                     <td className="px-4 py-3">
                       {row.onWhatsApp ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#DCFCE7] px-2.5 py-0.5 text-xs font-medium text-[#16A34A]">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 uppercase">
                           WhatsApp
                         </span>
                       ) : (
-                        <span className="text-sm text-[#94A3B8]">—</span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600 uppercase">
+                          Aplicação
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-[#64748B]">
                       {queueNames(row.queueIds)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-[#64748B]">
+                      {row.channels && row.channels.length > 0 ? (
+                        row.channels.map((c) => c.name).join(", ")
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
@@ -651,6 +870,29 @@ export default function RespostasRapidasPage() {
               </tbody>
             </table>
           </div>
+          <div className="flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
+            <span className="text-sm text-[#64748B]">
+              Página {pageIndex + 1} de {Math.ceil(rows.length / PAGE_SIZE) || 1} ({rows.length} item{rows.length !== 1 ? "s" : ""})
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+                disabled={pageIndex === 0}
+                className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageIndex((p) => Math.min(Math.ceil(rows.length / PAGE_SIZE) - 1, p + 1))}
+                disabled={pageIndex >= Math.ceil(rows.length / PAGE_SIZE) - 1}
+                className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:opacity-40 disabled:pointer-events-none"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -658,9 +900,9 @@ export default function RespostasRapidasPage() {
         open={showForm}
         onClose={closeForm}
         title={form.id ? `Editar resposta rápida: ${form.shortCut || "…"}` : "Nova resposta rápida"}
-        width={560}
+          width={500}
       >
-        <div className="mb-4 flex gap-2 border-b border-[#E2E8F0] pb-3">
+        <div className="mb-4 flex flex-wrap gap-2 border-b border-[#E2E8F0] pb-3">
           <button
             type="button"
             onClick={() => setSideOverTab("form")}
@@ -674,6 +916,17 @@ export default function RespostasRapidasPage() {
           </button>
           <button
             type="button"
+            onClick={() => setSideOverTab("import")}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+              sideOverTab === "import"
+                ? "bg-clicvend-orange/10 text-clicvend-orange"
+                : "text-[#64748B] hover:bg-[#F1F5F9]"
+            }`}
+          >
+            Importar em massa
+          </button>
+          <button
+            type="button"
             onClick={() => setSideOverTab("ativas")}
             className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
               sideOverTab === "ativas"
@@ -681,15 +934,14 @@ export default function RespostasRapidasPage() {
                 : "text-[#64748B] hover:bg-[#F1F5F9]"
             }`}
           >
-            Ativas
+            Respostas ativas
           </button>
         </div>
 
         {sideOverTab === "form" && (
           <>
             <p className="mb-4 text-sm text-[#64748B]">
-              Escolha a conexão e as filas em que esta resposta rápida ficará disponível. O atalho e
-              o texto são enviados à UAZAPI.
+              Escolha a conexão e as filas em que esta resposta rápida ficará disponível no chat para os agentes.
             </p>
 
             <label className="mb-1 block text-sm font-medium text-[#334155]">Conexão</label>
@@ -709,7 +961,7 @@ export default function RespostasRapidasPage() {
             <label className="mb-1 block text-sm font-medium text-[#334155]">Filas (opcional)</label>
             <p className="mb-2 text-xs text-[#64748B]">
               Filas vinculadas a esta conexão. Respostas vinculadas a uma fila ficam disponíveis para
-              agentes dessa fila no chat.
+              agentes dessa fila no chat (até 40 respostas por fila).
             </p>
             {!form.channelId ? (
               <p className="mb-4 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-3 text-sm text-[#64748B]">
@@ -764,7 +1016,7 @@ export default function RespostasRapidasPage() {
               type="button"
               disabled={saving}
               onClick={handleGenerateWithAI}
-              className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+              className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
             >
               {saving ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -773,6 +1025,15 @@ export default function RespostasRapidasPage() {
               )}
               Sugerir com IA
             </button>
+            {formAiError && (
+              <p className="mb-4 text-xs text-amber-700">
+                {formAiError}
+                {formAiError.includes("Mistral") && (
+                  <span className="block mt-1 text-[#64748B]">Você pode preencher o texto manualmente e salvar.</span>
+                )}
+              </p>
+            )}
+            {!formAiError && <div className="mb-4" />}
 
             <div className="flex justify-end gap-2">
               <button
@@ -809,7 +1070,7 @@ export default function RespostasRapidasPage() {
             </p>
             {rows.length === 0 ? (
               <p className="py-4 text-center text-sm text-[#94A3B8]">
-                Nenhuma resposta rápida cadastrada. Crie na aba Configuração.
+                Nenhuma resposta rápida cadastrada. Crie na aba Configuração ou importe em massa.
               </p>
             ) : (
               rows.map((row) => (
@@ -855,6 +1116,200 @@ export default function RespostasRapidasPage() {
                   </button>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {sideOverTab === "import" && (
+          <div className="space-y-4">
+            <p className="text-sm text-[#64748B]">
+              Escolha a conexão e as filas abaixo (igual à configuração individual). Baixe o modelo em CSV, preencha atalho, tipo e texto — ou descreva uma ideia e use a IA para gerar sugestões na tabela. Depois importe em massa.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]"
+              >
+                <Download className="h-4 w-4" />
+                Baixar modelo (CSV)
+              </button>
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]">
+                <Upload className="h-4 w-4" />
+                Enviar planilha preenchida
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="sr-only"
+                  onChange={handleBulkFileChange}
+                />
+              </label>
+            </div>
+
+            <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+              <label className="block text-sm font-medium text-[#334155]">Gerar sugestões com IA</label>
+              <p className="mt-0.5 text-xs text-[#64748B]">
+                Descreva as respostas que deseja (ex.: saudação, estoque, horário de atendimento, despedida). A IA preenche a tabela abaixo.
+              </p>
+              <textarea
+                value={bulkIdea}
+                onChange={(e) => setBulkIdea(e.target.value)}
+                placeholder="Ex.: saudação inicial, consulta de estoque, horário de funcionamento, pedido de feedback"
+                rows={2}
+                className="mt-2 w-full resize-none rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+              />
+              <button
+                type="button"
+                disabled={bulkGeneratingAI || !bulkIdea.trim()}
+                onClick={handleGenerateBulkWithAI}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+              >
+                {bulkGeneratingAI ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
+                )}
+                Gerar sugestões com IA
+              </button>
+            </div>
+
+            <label className="block text-sm font-medium text-[#334155]">Conexão para importar</label>
+            <select
+              value={bulkChannelId}
+              onChange={(e) => {
+                setBulkChannelId(e.target.value);
+                setBulkQueueIds([]);
+              }}
+              className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="">Selecionar conexão…</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>
+                  {ch.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-[#64748B]">
+              As respostas serão vinculadas às filas selecionadas e ficarão disponíveis no chat. Escolha as filas abaixo.
+            </p>
+
+            <label className="mt-4 block text-sm font-medium text-[#334155]">Filas (opcional)</label>
+            <p className="mt-1 text-xs text-[#64748B]">
+              Filas vinculadas a esta conexão. As respostas importadas ficarão disponíveis para as filas que você selecionar (até 40 por fila).
+            </p>
+            {!bulkChannelId ? (
+              <p className="mt-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-3 text-sm text-[#64748B]">
+                Selecione uma conexão para ver e escolher as filas.
+              </p>
+            ) : channelQueuesLoading ? (
+              <p className="mt-1 flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-3 text-sm text-[#64748B]">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Carregando filas…
+              </p>
+            ) : channelQueues.length === 0 ? (
+              <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                Nenhuma fila vinculada a esta conexão. Vincule filas em Configurar na tela de Conexões.
+              </p>
+            ) : (
+              <select
+                multiple
+                value={bulkQueueIds}
+                onChange={(e) => {
+                  const selected = Array.from(e.target.selectedOptions, (o) => o.value);
+                  setBulkQueueIds(selected);
+                }}
+                className="mt-1 h-24 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+              >
+                {channelQueues.map((q) => (
+                  <option key={q.id} value={q.id}>
+                    {q.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {bulkImportError && !bulkImportResult && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {bulkImportError}
+              </div>
+            )}
+            {bulkImportResult && (
+              <div className={`rounded-lg border px-3 py-2 text-sm ${bulkImportResult.fail > 0 ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                Importação concluída: {bulkImportResult.ok} criada(s), {bulkImportResult.fail} falha(s).
+                {bulkImportError && bulkImportResult.fail > 0 && (
+                  <p className="mt-2 text-xs opacity-90">Motivo: {bulkImportError}</p>
+                )}
+              </div>
+            )}
+
+            {bulkParsedRows.length > 0 && (
+              <>
+                <p className="text-sm font-medium text-[#334155]">
+                  Preview: {bulkParsedRows.length} linha(s) — conexão: {channels.find((c) => c.id === bulkChannelId)?.name ?? "—"}
+                  {bulkQueueIds.length > 0 && (
+                    <> — filas: {channelQueues.filter((q) => bulkQueueIds.includes(q.id)).map((q) => q.name).join(", ")}</>
+                  )}
+                </p>
+                <div className="max-h-48 overflow-auto rounded-lg border border-[#E2E8F0]">
+                  <table className="min-w-full text-xs">
+                    <thead className="sticky top-0 bg-[#F8FAFC]">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Atalho</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Tipo</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Texto</th>
+                        <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Filas</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E2E8F0]">
+                      {bulkParsedRows.slice(0, 20).map((row, i) => (
+                        <tr key={i}>
+                          <td className="px-2 py-1.5 text-[#1E293B]">{row.shortCut}</td>
+                          <td className="px-2 py-1.5 text-[#64748B]">{row.type}</td>
+                          <td className="max-w-[200px] truncate px-2 py-1.5 text-[#64748B]">{row.text}</td>
+                          <td className="px-2 py-1.5 text-[#64748B]">
+                            {bulkQueueIds.length > 0
+                              ? channelQueues.filter((q) => bulkQueueIds.includes(q.id)).map((q) => q.name).join(", ")
+                              : row.filas || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {bulkParsedRows.length > 20 && (
+                    <p className="px-2 py-1 text-[11px] text-[#94A3B8]">
+                      … e mais {bulkParsedRows.length - 20} linha(s).
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleBulkImport}
+                    disabled={bulkImporting || !bulkChannelId}
+                    className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
+                  >
+                    {bulkImporting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Importando…
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Importar {bulkParsedRows.length} resposta(s)
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setBulkParsedRows([]); setBulkImportResult(null); setBulkImportError(null); }}
+                    className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}

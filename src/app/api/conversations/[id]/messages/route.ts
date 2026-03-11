@@ -72,6 +72,36 @@ export async function GET(
     messages = Array.isArray(res.data) ? res.data : [];
   }
 
+  // Buscar internal_notes e mesclar
+  const { data: notes } = await supabase
+    .from("internal_notes")
+    .select("id, content, created_at, author_id")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true })
+    .limit(limit);
+
+  if (notes && notes.length > 0) {
+    const formattedNotes = notes.map((n: { id: string; content: string; created_at: string; author_id: string }) => ({
+      id: n.id,
+      direction: "out",
+      content: n.content,
+      sent_at: n.created_at,
+      message_type: "internal_note",
+      created_at: n.created_at,
+      // Se necessário, você pode adicionar o author_id para identificar quem escreveu a nota
+    }));
+    
+    // Mesclar e ordenar por data
+    messages = [...messages, ...formattedNotes].sort((a: any, b: any) => 
+      new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+    );
+    
+    // Se tiver limite e paginação, aplicar novamente após mesclar (simplificado)
+    if (messages.length > limit) {
+      messages = messages.slice(-limit);
+    }
+  }
+
   return NextResponse.json({ messages });
 }
 
@@ -137,6 +167,35 @@ export async function POST(
       { error: "Atribua esta conversa a você para enviar mensagens." },
       { status: 403 }
     );
+  }
+
+  // Se for nota interna, salva em internal_notes e retorna
+  if (type === "internal_note") {
+    const { data: note, error: noteErr } = await supabase
+      .from("internal_notes")
+      .insert({
+        conversation_id: conversationId,
+        content: content,
+        author_id: user?.id,
+      })
+      .select("id, content, created_at, author_id")
+      .single();
+
+    if (noteErr) {
+      return NextResponse.json({ error: noteErr.message }, { status: 500 });
+    }
+
+    // Retorna estrutura compatível com Message para o frontend mesclar
+    const fakeMessage = {
+      id: note.id,
+      direction: "out",
+      content: note.content,
+      sent_at: note.created_at,
+      message_type: "internal_note",
+      created_at: note.created_at,
+    };
+
+    return NextResponse.json({ ok: true, message: fakeMessage });
   }
 
   if (!conversation.channel_id) {

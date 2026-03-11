@@ -1,9 +1,10 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { NextResponse } from "next/server";
 
-const MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions";
-/** Modelo mais barato/leve por padrão. Override com MISTRAL_MODEL no .env (ex.: mistral-tiny, open-mistral-7b). */
-const DEFAULT_MISTRAL_MODEL = "mistral-tiny";
+const AI_BASE_URL = process.env.AI_BASE_URL?.replace(/\/+$/, "") || "https://api.mistral.ai/v1";
+const AI_COMPLETIONS_URL = `${AI_BASE_URL}/chat/completions`;
+/** Modelo barato para sugestão de texto (respostas rápidas, descrições). Override com AI_MODEL ou MISTRAL_MODEL no .env. */
+const DEFAULT_AI_MODEL = "ministral-3b-latest";
 const MAX_DESCRIPTION_LENGTH = 512;
 const MAX_GROUP_NAME_LENGTH = 25;
 const MAX_COMMUNITY_NAME_LENGTH = 100;
@@ -124,12 +125,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = process.env.MISTRAL_API_KEY?.trim();
-  if (!apiKey) {
+  const apiKey = process.env.AI_API_KEY?.trim() || process.env.MISTRAL_API_KEY?.trim();
+  // Se for OpenAI-compatible local (ex: Ollama), pode não precisar de chave, mas vamos avisar se não tiver nenhuma configurada e não for localhost
+  const isLocal = AI_BASE_URL.includes("localhost") || AI_BASE_URL.includes("127.0.0.1");
+
+  if (!apiKey && !isLocal) {
     return NextResponse.json(
       {
         error:
-          "MISTRAL_API_KEY não configurada. Adicione no .env (ex.: MISTRAL_API_KEY=sua_chave) e reinicie o servidor (npm run dev).",
+          "AI_API_KEY ou MISTRAL_API_KEY não configurada. Adicione no .env e reinicie o servidor.",
       },
       { status: 503 }
     );
@@ -164,18 +168,18 @@ export async function POST(request: Request) {
         : MAX_DESCRIPTION_LENGTH;
 
   try {
-    const res = await fetch(MISTRAL_URL, {
+    const res = await fetch(AI_COMPLETIONS_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: apiKey ? `Bearer ${apiKey}` : "",
       },
       body: JSON.stringify({
-        model: process.env.MISTRAL_MODEL?.trim() || DEFAULT_MISTRAL_MODEL,
+        model: process.env.AI_MODEL?.trim() || process.env.MISTRAL_MODEL?.trim() || DEFAULT_AI_MODEL,
         messages,
-        max_tokens: field === "name" ? 60 : 256,
-        temperature: 0.5,
+        max_tokens: maxLength,
+        temperature: 0.7,
       }),
     });
 
@@ -188,11 +192,15 @@ export async function POST(request: Request) {
           return null;
         }
       })();
-      const detail = errJson?.detail ?? errJson?.message ?? errJson?.error;
-      const isUnauthorized = res.status === 401 || (typeof detail === "string" && /unauthorized/i.test(detail));
+      const detail = errJson?.detail ?? errJson?.message ?? errJson?.error ?? errJson?.msg;
+      const detailStr = typeof detail === "string" ? detail : JSON.stringify(detail ?? errText);
+      const isUnauthorized = res.status === 401 || (typeof detailStr === "string" && /unauthorized|invalid.*key|invalid.*token/i.test(detailStr));
+      const hint = isUnauthorized
+        ? " Verifique se a chave está correta no .env."
+        : "";
       const message = isUnauthorized
-        ? "Chave da API Mistral inválida ou expirada. Verifique MISTRAL_API_KEY no .env."
-        : (typeof detail === "string" ? detail : errText) || `Mistral API ${res.status}`;
+        ? `Chave da API AI recusada (${res.status}). ${detailStr || "Verifique AI_API_KEY no .env."}${hint}`
+        : (detailStr || errText || `AI API ${res.status}`).slice(0, 300);
       return NextResponse.json(
         { error: `Falha ao gerar: ${message}` },
         { status: res.status >= 500 ? 502 : 400 }

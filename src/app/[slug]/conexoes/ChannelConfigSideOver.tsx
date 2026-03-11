@@ -191,12 +191,22 @@ export function ChannelConfigSideOver({
       try {
         const [tRes, qRes] = await Promise.all([
           fetch(`/api/uazapi/trigger?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders }),
-          fetch(`/api/uazapi/quickreply?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders }),
+          fetch("/api/quick-replies", { credentials: "include", headers: apiHeaders }),
         ]);
         const tData = await tRes.json();
         const qData = await qRes.json();
         if (tRes.ok && Array.isArray(tData)) setTriggers(tData);
-        if (qRes.ok && Array.isArray(qData)) setQuickReplies(qData);
+        if (qRes.ok && qData?.data && Array.isArray(qData.data)) {
+          setQuickReplies(
+            qData.data.map((item: { id: string; shortCut: string; text?: string | null; type?: string; onWhatsApp?: boolean }) => ({
+              id: item.id,
+              shortCut: item.shortCut,
+              text: item.text ?? undefined,
+              type: item.type ?? "text",
+              onWhatsApp: item.onWhatsApp ?? false,
+            }))
+          );
+        }
       } catch {
         // silencioso; erro geral já vai para setError em ações específicas
       } finally {
@@ -375,14 +385,18 @@ export function ChannelConfigSideOver({
     setChatbotInnerSaving(true);
     setError("");
     try {
-      const r = await fetch("/api/uazapi/quickreply", {
+      const queuesRes = await fetch(`/api/channels/${encodeURIComponent(channelId)}/queues`, { credentials: "include", headers: apiHeaders });
+      const queuesData = await queuesRes.json();
+      const queueIds = Array.isArray(queuesData) ? queuesData.map((q: { id: string }) => q.id) : [];
+
+      const r = await fetch("/api/quick-replies", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({
-          channel_id: channelId,
           shortCut: newQuickReply.shortCut.trim(),
           type: "text",
-          text: newQuickReply.text,
+          text: newQuickReply.text.trim(),
+          queueIds,
         }),
         credentials: "include",
       });
@@ -392,9 +406,19 @@ export function ChannelConfigSideOver({
         setChatbotInnerSaving(false);
         return;
       }
-      const qRes = await fetch(`/api/uazapi/quickreply?channel_id=${encodeURIComponent(channelId)}`, { credentials: "include", headers: apiHeaders });
-      const qData = await qRes.json();
-      if (qRes.ok && Array.isArray(qData)) setQuickReplies(qData);
+      const qRes = await fetch("/api/quick-replies", { credentials: "include", headers: apiHeaders });
+      const qResData = await qRes.json();
+      if (qRes.ok && qResData?.data && Array.isArray(qResData.data)) {
+        setQuickReplies(
+          qResData.data.map((item: { id: string; shortCut: string; text?: string | null; type?: string; onWhatsApp?: boolean }) => ({
+            id: item.id,
+            shortCut: item.shortCut,
+            text: item.text ?? undefined,
+            type: item.type ?? "text",
+            onWhatsApp: item.onWhatsApp ?? false,
+          }))
+        );
+      }
       setNewQuickReply({ shortCut: "", text: "" });
     } catch {
       setError("Erro de rede ao criar resposta rápida");
