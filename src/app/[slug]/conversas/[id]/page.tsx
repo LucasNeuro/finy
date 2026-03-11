@@ -2240,7 +2240,7 @@ export default function ConversaThreadPage({
           </div>
         </div>
 
-        <div className={`shrink-0 border-t border-[#E2E8F0] p-0 ${inputTab === 'note' ? 'bg-yellow-50' : 'bg-white'}`}>
+        <div className="shrink-0 border-t border-[#E2E8F0] p-0 bg-white">
           {error && <p className="mb-2 text-sm text-[#EF4444] px-4 pt-2">{error}</p>}
           {recording ? (
             <RecordingInProgressBar

@@ -73,7 +73,11 @@ export async function GET(
   }
 
   // Buscar internal_notes e mesclar
-  const { data: notes } = await supabase
+  const notesClient = process.env.SUPABASE_SERVICE_ROLE_KEY 
+    ? createServiceRoleClient() 
+    : supabase;
+
+  const { data: notes } = await notesClient
     .from("internal_notes")
     .select("id, content, created_at, author_id")
     .eq("conversation_id", conversationId)
