@@ -193,17 +193,46 @@ export default function HomePage() {
             Recursos poderosos para transformar seu atendimento
           </h2>
           <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURE_CARDS.map(({ title, desc, icon: Icon }) => (
+            {FEATURE_CARDS.map(({ title, desc }) => (
               <div
                 key={title}
-                className="overflow-hidden rounded-2xl border border-[#E2E8F0] bg-white shadow-lg shadow-[#E2E8F0]/30 transition-shadow hover:shadow-xl"
+                className="flex h-full flex-col overflow-hidden rounded-3xl border border-[#E2E8F0] bg-white shadow-lg shadow-[#E2E8F0]/40 transition-all hover:-translate-y-1 hover:shadow-2xl"
               >
-                <div className="border-b border-[#E2E8F0] bg-[#F8FAFC] p-6">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#E8F5E9]">
-                    <Icon className="h-7 w-7 text-[#34B097]" />
+                <div className="relative bg-[#F1F5F9] px-6 pt-6 pb-4">
+                  <div className="absolute inset-x-10 top-4 h-2 rounded-full bg-gradient-to-r from-[#22C55E]/30 via-[#34B097]/40 to-[#22C55E]/30 blur" />
+                  <div className="relative mx-auto max-w-xs rounded-2xl border border-[#E2E8F0] bg-white/95 p-3 shadow-sm">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#22C55E] text-xs font-semibold text-white">
+                          WA
+                        </span>
+                        <div className="text-xs">
+                          <p className="font-semibold text-[#0F172A]">WhatsApp</p>
+                          <p className="text-[10px] text-[#64748B]">Conectado ao ClicVend</p>
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-[#E5F3FF] px-2 py-0.5 text-[10px] font-medium text-[#0369A1]">
+                        Automação ativa
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 text-[11px] leading-snug">
+                      <div className="inline-flex max-w-[80%] flex-col rounded-2xl bg-[#E5E7EB] px-3 py-1.5 text-[#111827]">
+                        <span>Não esqueça os documentos ✉️</span>
+                        <span className="mt-0.5 self-end text-[9px] text-[#6B7280]">17:45</span>
+                      </div>
+                      <div className="flex justify-end">
+                        <div className="inline-flex max-w-[80%] flex-col rounded-2xl bg-[#DCFCE7] px-3 py-1.5 text-[#065F46]">
+                          <span>Obrigada por me lembrar! ✅</span>
+                          <span className="mt-0.5 self-end text-[9px] text-[#16A34A]">17:46</span>
+                        </div>
+                      </div>
+                      <p className="pt-1 text-[10px] text-[#94A3B8]">
+                        Mensagem enviada automaticamente pelo ClicVend.
+                      </p>
+                    </div>
                   </div>
                 </div>
-                <div className="p-6">
+                <div className="flex flex-1 flex-col p-6">
                   <h3 className="text-lg font-bold text-[#1E293B]">{title}</h3>
                   <p className="mt-3 text-sm leading-relaxed text-[#64748B]">{desc}</p>
                 </div>
