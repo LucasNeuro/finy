@@ -669,10 +669,7 @@ export function ConversasSidebar() {
 
   return (
     <aside className="flex min-h-0 w-[25%] min-w-[280px] max-w-[400px] shrink-0 flex-col border-r border-[#E2E8F0]/60 bg-white shadow-sm overflow-hidden self-stretch">
-      <div className="flex shrink-0 items-center p-4">
-        
-      </div>
-      <div className="shrink-0 px-3 pb-3">
+      <div className="shrink-0 px-3 py-3 border-b border-[#E2E8F0]/60">
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
           <input
