@@ -2240,8 +2240,8 @@ export default function ConversaThreadPage({
           </div>
         </div>
 
-        <div className={`shrink-0 border-t border-[#E2E8F0] p-2 ${inputTab === 'note' ? 'bg-yellow-50' : 'bg-white'}`}>
-          {error && <p className="mb-2 text-sm text-[#EF4444]">{error}</p>}
+        <div className={`shrink-0 border-t border-[#E2E8F0] p-0 ${inputTab === 'note' ? 'bg-yellow-50' : 'bg-white'}`}>
+          {error && <p className="mb-2 text-sm text-[#EF4444] px-4 pt-2">{error}</p>}
           {recording ? (
             <RecordingInProgressBar
               seconds={recordingSeconds}
@@ -2257,7 +2257,7 @@ export default function ConversaThreadPage({
             />
           ) : (
           <>
-<div className={`flex flex-col rounded-lg border border-[#E2E8F0] bg-white shadow-sm overflow-hidden ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
+<div className={`flex flex-col bg-white overflow-hidden ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
   <div className="flex items-center border-b border-[#E2E8F0] bg-[#F8FAFC]">
     <button
       type="button"
