@@ -2731,7 +2731,8 @@ export default function ContatosPage() {
           {addContactTab === "bulk" && (
             <div className="space-y-4">
               <p className="text-sm text-[#64748B]">
-                Use uma planilha para importar vários contatos de uma vez. Cada linha deve ter{" "}
+                Use uma planilha para importar vários contatos de uma vez (até{" "}
+                <span className="font-semibold">90 contatos</span> por importação). Cada linha deve ter{" "}
                 <span className="font-mono text-xs text-[#0F172A]">telefone;nome</span>. O cabeçalho é
                 opcional.
               </p>
@@ -2778,6 +2779,12 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                   <p className="text-sm font-medium text-[#334155]">
                     Preview: {bulkContactsRows.length} contato(s) pronto(s) para importar
                   </p>
+                  {bulkContactsRows.length > 90 && (
+                    <p className="text-xs text-red-600">
+                      Limite de <strong>90 contatos</strong> por importação. Serão considerados apenas os
+                      90 primeiros desta lista.
+                    </p>
+                  )}
                   <div className="max-h-48 overflow-auto rounded-lg border border-[#E2E8F0]">
                     <table className="min-w-full text-xs">
                       <thead className="sticky top-0 bg-[#F8FAFC]">
@@ -2894,7 +2901,9 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                     let ok = 0;
                     let fail = 0;
                     let firstError: string | null = null;
-                    for (const row of bulkContactsRows) {
+                    const maxPerBatch = 90;
+                    const rowsToProcess = bulkContactsRows.slice(0, maxPerBatch);
+                    for (const row of rowsToProcess) {
                       const number = row.number.replace(/\D/g, "");
                       const name = row.name.trim() || number;
                       if (!number) {
@@ -2922,6 +2931,9 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                         fail++;
                         if (!firstError) firstError = "Erro de rede ao adicionar um dos contatos.";
                       }
+                    }
+                    if (bulkContactsRows.length > maxPerBatch && !firstError) {
+                      firstError = `Limite de ${maxPerBatch} contatos por importação. Apenas os primeiros ${maxPerBatch} foram processados.`;
                     }
                     setAddContactResult({ ok, fail });
                     if (firstError) setAddContactError(firstError);
