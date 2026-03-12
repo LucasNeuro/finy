@@ -231,8 +231,6 @@ export async function GET(
   }
 
   const MESSAGES_LIMIT = 5000;
-  /** Número de mensagens na primeira carga do chat; o restante é carregado via GET /messages?before= */
-  const INITIAL_MESSAGES_LIMIT = 100;
   const messagesSelect = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
   let messages: unknown[] = [];
 
@@ -322,9 +320,7 @@ export async function GET(
     return true;
   });
 
-  // Processar e enviar só as últimas N mensagens na primeira carga (reduz payload e tempo no servidor)
-  const lastMessages = (messages as unknown[]).slice(-INITIAL_MESSAGES_LIMIT) as Record<string, unknown>[];
-  messages = normalizeMessageTypes(lastMessages);
+  messages = normalizeMessageTypes(messages as Record<string, unknown>[]);
   messages = await enrichMessagesWithCachedMedia(id, messages as Record<string, unknown>[]);
 
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
