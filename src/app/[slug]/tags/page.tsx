@@ -146,10 +146,12 @@ export default function TagsPage() {
       } else {
         setTags(Array.isArray(tagsData?.data) ? (tagsData.data as TagRow[]) : []);
       }
-      if (!formsRes.ok) {
-        setError((prev) => prev ?? formsData?.error ?? "Falha ao carregar formulários.");
-      } else {
+      // Para formulários, se a rota ainda não existir ou falhar,
+      // apenas consideramos como lista vazia (não mostramos erro vermelho).
+      if (formsRes.ok) {
         setForms(Array.isArray(formsData?.data) ? (formsData.data as FormRow[]) : []);
+      } else {
+        setForms([]);
       }
     } catch {
       setError("Erro de rede ao carregar tags e formulários.");
