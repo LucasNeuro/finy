@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, Tag } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
 import { SideOver } from "@/components/SideOver";
@@ -1072,6 +1072,18 @@ export default function ConversaThreadPage({
   const [contactDetails, setContactDetails] = useState<ChatDetails | null>(null);
   const [contactDetailsLoading, setContactDetailsLoading] = useState(false);
   const [contactDetailsError, setContactDetailsError] = useState<string | null>(null);
+  const [contactTags, setContactTags] = useState<{ id: string; name: string; color_hex: string | null; category_name: string }[]>([]);
+  const [contactTagIds, setContactTagIds] = useState<string[]>([]);
+  const [convTags, setConvTags] = useState<{ id: string; name: string; color_hex: string | null }[]>([]);
+  const [convTagIds, setConvTagIds] = useState<string[]>([]);
+  const [convTagIdsDraft, setConvTagIdsDraft] = useState<string[]>([]);
+  const [savingConvTags, setSavingConvTags] = useState(false);
+  const [tabulationForms, setTabulationForms] = useState<{ id: string; name: string; description: string | null; fields: { id: string; label: string; type: string; required: boolean; options?: string[] }[] }[]>([]);
+  const [tabulationAnswers, setTabulationAnswers] = useState<Record<string, { answers: Record<string, unknown>; created_at: string }>>({});
+  const [tabulationLoading, setTabulationLoading] = useState(false);
+  const [formAnswerOpen, setFormAnswerOpen] = useState<string | null>(null);
+  const [formAnswerDraft, setFormAnswerDraft] = useState<Record<string, unknown>>({});
+  const [savingFormAnswer, setSavingFormAnswer] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
@@ -1242,6 +1254,7 @@ export default function ConversaThreadPage({
 
   const claimAttemptedRef = useRef(false);
   const contactDetailsFetchedForRef = useRef<string | null>(null);
+  const tabulationFetchedForRef = useRef<string | null>(null);
 
   async function handleAICorrection() {
     if (!sendValue.trim()) return;
@@ -1360,6 +1373,54 @@ export default function ConversaThreadPage({
       .catch(() => setContactDetailsError("Erro de rede"))
       .finally(() => setContactDetailsLoading(false));
   }, [infoOpen, conv?.id, conv?.channel_id, conv?.is_group, conv?.customer_phone, conv?.external_id, conv?.wa_chat_jid, apiHeaders, resolved?.id]);
+
+  useEffect(() => {
+    if (!infoOpen || !resolved?.id || !conv?.id) {
+      if (!infoOpen) {
+        tabulationFetchedForRef.current = null;
+        setContactTags([]);
+        setContactTagIds([]);
+        setConvTags([]);
+        setConvTagIds([]);
+        setConvTagIdsDraft([]);
+        setTabulationForms([]);
+        setTabulationAnswers({});
+      }
+      return;
+    }
+    if (tabulationFetchedForRef.current === conv.id) return;
+    tabulationFetchedForRef.current = conv.id;
+    setTabulationLoading(true);
+    const number = conv.is_group && conv.wa_chat_jid
+      ? conv.wa_chat_jid
+      : (conv.customer_phone || conv.external_id || "").replace(/\D/g, "").trim() || conv.external_id || conv.customer_phone;
+    const contactTagsUrl = conv.channel_id && number
+      ? `/api/contact-tags?channel_id=${encodeURIComponent(conv.channel_id)}&number=${encodeURIComponent(number)}`
+      : null;
+    Promise.all([
+      contactTagsUrl ? fetch(contactTagsUrl, { credentials: "include", headers: apiHeaders }).then((r) => r.json()) : Promise.resolve({ tags: [], selected_tag_ids: [] }),
+      fetch(`/api/conversations/${resolved.id}/tags`, { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+      fetch(`/api/conversations/${resolved.id}/form-answers`, { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    ])
+      .then(([ctData, convTagsData, formData]) => {
+        if (ctData?.tags) {
+          setContactTags(Array.isArray(ctData.tags) ? ctData.tags : []);
+          setContactTagIds(Array.isArray(ctData.selected_tag_ids) ? ctData.selected_tag_ids : []);
+        }
+        if (convTagsData?.tags != null && Array.isArray(convTagsData.tags)) {
+          setConvTags(convTagsData.tags);
+          const applied = Array.isArray(convTagsData.applied_tag_ids) ? convTagsData.applied_tag_ids : [];
+          setConvTagIds(applied);
+          setConvTagIdsDraft(applied);
+        }
+        if (formData?.forms != null && Array.isArray(formData.forms)) {
+          setTabulationForms(formData.forms);
+          setTabulationAnswers(formData.answers_by_form ?? {});
+        }
+      })
+      .catch(() => {})
+      .finally(() => setTabulationLoading(false));
+  }, [infoOpen, conv?.id, conv?.channel_id, conv?.is_group, conv?.customer_phone, conv?.external_id, conv?.wa_chat_jid, resolved?.id, apiHeaders]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -2694,6 +2755,200 @@ export default function ConversaThreadPage({
                     )}
                   </div>
                 </div>
+
+                {tabulationLoading ? (
+                  <div className="flex items-center gap-2 py-2 text-sm text-[#64748B]">
+                    <Loader2 className="h-4 w-4 animate-spin text-clicvend-orange" />
+                    Carregando tags e formulários…
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2 border-b border-[#E2E8F0] pb-4">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
+                        <Tag className="h-3.5 w-3.5" />
+                        Tags do contato
+                      </h3>
+                      {contactTags.length === 0 && contactTagIds.length === 0 ? (
+                        <p className="text-sm text-[#94A3B8]">Nenhuma tag de contato. Edite em Contatos.</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {contactTags.filter((t) => contactTagIds.includes(t.id)).map((t) => (
+                            <span
+                              key={t.id}
+                              className="inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium text-white"
+                              style={{ backgroundColor: t.color_hex || "#94A3B8" }}
+                            >
+                              {t.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 border-b border-[#E2E8F0] pb-4">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
+                        <Tag className="h-3.5 w-3.5" />
+                        Tags do atendimento
+                      </h3>
+                      {convTags.length === 0 ? (
+                        <p className="text-sm text-[#94A3B8]">Nenhuma tag da fila disponível.</p>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-1.5">
+                            {convTags.map((t) => {
+                              const on = convTagIdsDraft.includes(t.id);
+                              return (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setConvTagIdsDraft((prev) =>
+                                      on ? prev.filter((id) => id !== t.id) : [...prev, t.id]
+                                    );
+                                  }}
+                                  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                                    on ? "border-transparent text-white" : "border-[#E2E8F0] bg-white text-[#64748B] hover:bg-[#F8FAFC]"
+                                  }`}
+                                  style={on && t.color_hex ? { backgroundColor: t.color_hex } : undefined}
+                                >
+                                  {t.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={savingConvTags}
+                            onClick={async () => {
+                              if (!resolved?.id || !apiHeaders) return;
+                              setSavingConvTags(true);
+                              try {
+                                const res = await fetch(`/api/conversations/${resolved.id}/tags`, {
+                                  method: "POST",
+                                  credentials: "include",
+                                  headers: { "Content-Type": "application/json", ...apiHeaders },
+                                  body: JSON.stringify({ tag_ids: convTagIdsDraft }),
+                                });
+                                if (res.ok) setConvTagIds(convTagIdsDraft);
+                              } finally {
+                                setSavingConvTags(false);
+                              }
+                            }}
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                          >
+                            {savingConvTags ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                            Salvar tags
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 border-b border-[#E2E8F0] pb-4">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B] flex items-center gap-1.5">
+                        <FileText className="h-3.5 w-3.5" />
+                        Formulários de tabulação
+                      </h3>
+                      {tabulationForms.length === 0 ? (
+                        <p className="text-sm text-[#94A3B8]">Nenhum formulário vinculado à fila.</p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {tabulationForms.map((form) => {
+                            const answered = tabulationAnswers[form.id];
+                            const isOpen = formAnswerOpen === form.id;
+                            return (
+                              <li key={form.id} className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-sm font-medium text-[#1E293B]">{form.name}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setFormAnswerOpen(isOpen ? null : form.id);
+                                      if (!isOpen && answered) setFormAnswerDraft(answered.answers as Record<string, unknown>);
+                                      else if (!isOpen) setFormAnswerDraft({});
+                                    }}
+                                    className="text-xs font-medium text-clicvend-orange hover:underline"
+                                  >
+                                    {answered ? "Ver / Editar" : "Preencher"}
+                                  </button>
+                                </div>
+                                {answered && !isOpen && (
+                                  <p className="mt-1 text-[11px] text-[#64748B]">
+                                    Preenchido em {new Date(answered.created_at).toLocaleString("pt-BR")}
+                                  </p>
+                                )}
+                                {isOpen && (
+                                  <div className="mt-3 space-y-2 border-t border-[#E2E8F0] pt-2">
+                                    {form.fields.map((field) => (
+                                      <div key={field.id}>
+                                        <label className="block text-xs font-medium text-[#64748B]">{field.label}{field.required ? " *" : ""}</label>
+                                        {field.type === "text" || field.type === "number" ? (
+                                          <input
+                                            type={field.type}
+                                            value={String(formAnswerDraft[field.id] ?? "")}
+                                            onChange={(e) => setFormAnswerDraft((d) => ({ ...d, [field.id]: e.target.value }))}
+                                            className="mt-0.5 w-full rounded border border-[#E2E8F0] px-2 py-1.5 text-sm"
+                                          />
+                                        ) : (
+                                          <select
+                                            value={String(formAnswerDraft[field.id] ?? "")}
+                                            onChange={(e) => setFormAnswerDraft((d) => ({ ...d, [field.id]: e.target.value }))}
+                                            className="mt-0.5 w-full rounded border border-[#E2E8F0] px-2 py-1.5 text-sm"
+                                          >
+                                            <option value="">Selecione</option>
+                                            {(field.options ?? []).map((opt) => (
+                                              <option key={opt} value={opt}>{opt}</option>
+                                            ))}
+                                          </select>
+                                        )}
+                                      </div>
+                                    ))}
+                                    <div className="flex gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => { setFormAnswerOpen(null); setFormAnswerDraft({}); }}
+                                        className="rounded border border-[#E2E8F0] px-2 py-1 text-xs font-medium text-[#64748B] hover:bg-[#F1F5F9]"
+                                      >
+                                        Cancelar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={savingFormAnswer}
+                                        onClick={async () => {
+                                          if (!resolved?.id || !apiHeaders) return;
+                                          setSavingFormAnswer(true);
+                                          try {
+                                            const res = await fetch(`/api/conversations/${resolved.id}/form-answers`, {
+                                              method: "POST",
+                                              credentials: "include",
+                                              headers: { "Content-Type": "application/json", ...apiHeaders },
+                                              body: JSON.stringify({ tag_form_id: form.id, answers: formAnswerDraft }),
+                                            });
+                                            if (res.ok) {
+                                              setTabulationAnswers((a) => ({ ...a, [form.id]: { answers: formAnswerDraft, created_at: new Date().toISOString() } }));
+                                              setFormAnswerOpen(null);
+                                              setFormAnswerDraft({});
+                                            }
+                                          } finally {
+                                            setSavingFormAnswer(false);
+                                          }
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded bg-clicvend-orange px-2 py-1 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                                      >
+                                        {savingFormAnswer ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                                        Salvar
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  </>
+                )}
+
                 <div className="space-y-3">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Mídias e documentos</h3>
                   {(() => {
@@ -2743,10 +2998,6 @@ export default function ConversaThreadPage({
                       </div>
                     );
                   })()}
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Pessoa</h3>
-                  <p className="text-sm text-[#94A3B8]">Selecione</p>
                 </div>
                 {contactDetails && (
                   <div className="space-y-3">

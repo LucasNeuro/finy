@@ -21,8 +21,26 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const channelContactId = url.searchParams.get("channel_contact_id");
+  const channelIdParam = url.searchParams.get("channel_id");
+  const numberParam = url.searchParams.get("number");
 
   const supabase = await createClient();
+
+  let resolvedContactId: string | null = channelContactId;
+  if (!resolvedContactId && channelIdParam && numberParam) {
+    const digits = numberParam.replace(/\D/g, "").trim();
+    const jid = digits ? `${digits}@s.whatsapp.net` : "";
+    if (jid) {
+      const { data: cc } = await supabase
+        .from("channel_contacts")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("channel_id", channelIdParam.trim())
+        .eq("jid", jid)
+        .maybeSingle();
+      if (cc?.id) resolvedContactId = cc.id as string;
+    }
+  }
 
   const { data, error } = await supabase
     .from("tags")
@@ -65,7 +83,7 @@ export async function GET(request: Request) {
       category_name: string;
     }[];
 
-  if (!channelContactId) {
+  if (!resolvedContactId) {
     return NextResponse.json({
       tags: allContactTags,
       selected_tag_ids: [] as string[],
@@ -76,7 +94,7 @@ export async function GET(request: Request) {
     .from("contact_tags")
     .select("tag_id")
     .eq("company_id", companyId)
-    .eq("channel_contact_id", channelContactId);
+    .eq("channel_contact_id", resolvedContactId);
 
   if (ctError) {
     return NextResponse.json({ error: ctError.message }, { status: 500 });
