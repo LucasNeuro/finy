@@ -111,6 +111,8 @@ export default function TagsPage() {
   const [savingForm, setSavingForm] = useState(false);
   const [tagToDelete, setTagToDelete] = useState<TagRow | null>(null);
   const [formToDelete, setFormToDelete] = useState<FormRow | null>(null);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [selectedFormIds, setSelectedFormIds] = useState<Set<string>>(new Set());
 
   const fetchQueues = useCallback(async () => {
     if (!apiHeaders) return;
@@ -217,6 +219,24 @@ export default function TagsPage() {
       fields: [],
     });
     setFormSideOverOpen(true);
+  };
+
+  const toggleSelectForm = (id: string) => {
+    setSelectedFormIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectTag = (id: string) => {
+    setSelectedTagIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const handleSaveTag = async () => {
@@ -339,6 +359,52 @@ export default function TagsPage() {
       setError("Erro de rede ao excluir formulário.");
     } finally {
       setFormToDelete(null);
+    }
+  };
+
+  const handleBulkUpdateForms = async (active: boolean | null) => {
+    if (!apiHeaders || selectedFormIds.size === 0) return;
+    setError(null);
+    try {
+      await Promise.all(
+        Array.from(selectedFormIds).map((id) =>
+          fetch("/api/tag-forms", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify(
+              active === null ? { id, delete: true } : { id, active }
+            ),
+          })
+        )
+      );
+      setSelectedFormIds(new Set());
+      fetchTagsAndForms();
+    } catch {
+      setError("Erro ao aplicar ação em massa nos formulários.");
+    }
+  };
+
+  const handleBulkUpdateTags = async (active: boolean | null) => {
+    if (!apiHeaders || selectedTagIds.size === 0) return;
+    setError(null);
+    try {
+      await Promise.all(
+        Array.from(selectedTagIds).map((id) =>
+          fetch("/api/tags", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify(
+              active === null ? { id, delete: true } : { id, active }
+            ),
+          })
+        )
+      );
+      setSelectedTagIds(new Set());
+      fetchTagsAndForms();
+    } catch {
+      setError("Erro ao aplicar ação em massa nas tags.");
     }
   };
 
@@ -594,7 +660,7 @@ export default function TagsPage() {
                         <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
                               setFormBuilder({
                                 id: row.id,
                                 name: row.name,
@@ -602,8 +668,9 @@ export default function TagsPage() {
                                 queueIds: row.queues.map((q) => q.id),
                                 active: row.active,
                                 fields: row.fields ?? [],
-                              })
-                            }
+                              });
+                              setFormSideOverOpen(true);
+                            }}
                             className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
                             title="Editar formulário"
                           >

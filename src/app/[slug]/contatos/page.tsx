@@ -719,6 +719,11 @@ export default function ContatosPage() {
   const [bulkContactsText, setBulkContactsText] = useState("");
   const [bulkContactsRows, setBulkContactsRows] = useState<{ number: string; name: string }[]>([]);
   const [bulkContactsImporting, setBulkContactsImporting] = useState(false);
+  const [contactTagsLoading, setContactTagsLoading] = useState(false);
+  const [availableContactTags, setAvailableContactTags] = useState<
+    { id: string; name: string; color_hex: string | null; category_name: string; active: boolean }[]
+  >([]);
+  const [selectedNewContactTagIds, setSelectedNewContactTagIds] = useState<Set<string>>(new Set());
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -726,6 +731,46 @@ export default function ContatosPage() {
       .then((data) => setChannels(Array.isArray(data) ? data : []))
       .catch(() => setChannels([]));
   }, [slug]);
+
+  // Carrega tags de contato para uso no formulário "Um por vez"
+  useEffect(() => {
+    const loadContactTags = async () => {
+      if (!slug) return;
+      setContactTagsLoading(true);
+      try {
+        const r = await fetch("/api/tags", { credentials: "include", headers: apiHeaders });
+        const data = await r.json();
+        if (r.ok && data && Array.isArray(data.data)) {
+          const contactTags = (data.data as any[])
+            .filter((t) => t.category_type === "contact")
+            .map((t) => ({
+              id: t.id as string,
+              name: t.name as string,
+              color_hex: (t.color_hex as string | null) ?? null,
+              category_name: (t.category_name as string) ?? "",
+              active: t.active !== false,
+            }));
+          setAvailableContactTags(contactTags);
+        } else {
+          setAvailableContactTags([]);
+        }
+      } catch {
+        setAvailableContactTags([]);
+      } finally {
+        setContactTagsLoading(false);
+      }
+    };
+    loadContactTags();
+  }, [slug, apiHeaders]);
+
+  const toggleNewContactTag = (id: string) => {
+    setSelectedNewContactTagIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const contactsKey = useMemo(() => ["contacts", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
   const groupsKey = useMemo(() => ["groups", slug, filterChannelId || ""] as const, [slug, filterChannelId]);

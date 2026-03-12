@@ -170,6 +170,12 @@ export function ContactDetailSideOver({
   const [showAddToAgendaName, setShowAddToAgendaName] = useState(false);
   const [addToAgendaName, setAddToAgendaName] = useState("");
   const [addToAgendaLoading, setAddToAgendaLoading] = useState(false);
+  const [tagLoading, setTagLoading] = useState(false);
+  const [availableTags, setAvailableTags] = useState<
+    { id: string; name: string; color_hex: string | null; category_name: string; active: boolean }[]
+  >([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [savingTags, setSavingTags] = useState(false);
 
   const apiHeaders = useMemo(
     () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
@@ -205,8 +211,81 @@ export function ContactDetailSideOver({
       setDetails(null);
       setError(null);
       setImageError(false);
+      setAvailableTags([]);
+      setSelectedTagIds(new Set());
     }
   }, [open, contact, fetchDetails]);
+
+  // Carrega tags de contato para este contato específico
+  useEffect(() => {
+    const loadTags = async () => {
+      if (!open || !contact) return;
+      setTagLoading(true);
+      try {
+        const params = new URLSearchParams({ channel_contact_id: contact.id });
+        const r = await fetch(`/api/contact-tags?${params.toString()}`, {
+          credentials: "include",
+          headers: apiHeaders,
+        });
+        const data = await r.json();
+        if (r.ok && data && Array.isArray(data.tags)) {
+          setAvailableTags(
+            data.tags.map((t: any) => ({
+              id: t.id as string,
+              name: t.name as string,
+              color_hex: (t.color_hex as string | null) ?? null,
+              category_name: (t.category_name as string) ?? "",
+              active: t.active !== false,
+            }))
+          );
+          const initialSelected = Array.isArray(data.selected_tag_ids)
+            ? new Set<string>(data.selected_tag_ids as string[])
+            : new Set<string>();
+          setSelectedTagIds(initialSelected);
+        } else {
+          setAvailableTags([]);
+          setSelectedTagIds(new Set());
+        }
+      } catch {
+        setAvailableTags([]);
+        setSelectedTagIds(new Set());
+      } finally {
+        setTagLoading(false);
+      }
+    };
+    loadTags();
+  }, [open, contact, apiHeaders]);
+
+  const toggleTag = (id: string) => {
+    setSelectedTagIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSaveTags = async () => {
+    if (!contact) return;
+    setSavingTags(true);
+    try {
+      const r = await fetch("/api/contact-tags", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_contact_id: contact.id,
+          tag_ids: Array.from(selectedTagIds),
+        }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => null);
+        setError(data?.error ?? "Falha ao salvar tags do contato");
+      }
+    } finally {
+      setSavingTags(false);
+    }
+  };
 
   const handleBlockToggle = async () => {
     if (!contact) return;
@@ -383,6 +462,102 @@ export function ContactDetailSideOver({
                     </div>
                   )}
                 </div>
+              </div>
+              {/* Tags do contato */}
+              <div className="border-t border-[#E2E8F0] pt-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-[#334155]">Tags do contato</p>
+                    <p className="text-xs text-[#64748B]">
+                      Use tags para classificar o tipo de contato.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveTags}
+                    disabled={savingTags || tagLoading}
+                    className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                  >
+                    {savingTags ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                    Salvar
+                  </button>
+                </div>
+                {tagLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-[#64748B]">
+                    <Loader2 className="h-3 w-3 animate-spin text-clicvend-orange" />
+                    Carregando tags…
+                  </div>
+                ) : availableTags.length === 0 ? (
+                  <p className="text-xs text-[#94A3B8]">
+                    Nenhuma tag de contato cadastrada ainda. Crie em{" "}
+                    <span className="font-medium">Tags e formulários</span>.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {availableTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleTag(tag.id)}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                            selectedTagIds.has(tag.id)
+                              ? "border-transparent text-white"
+                              : "border-[#E2E8F0] text-[#475569] bg-white hover:bg-[#F8FAFC]"
+                          }`}
+                          style={
+                            selectedTagIds.has(tag.id) && tag.color_hex
+                              ? { backgroundColor: tag.color_hex }
+                              : undefined
+                          }
+                        >
+                          <span className="truncate">{tag.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {selectedTagIds.size > 0 && (
+                      <div className="rounded-lg border border-[#E2E8F0] bg-white">
+                        <div className="flex items-center justify-between border-b border-[#E2E8F0] px-3 py-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">
+                            Tags atribuídas ({selectedTagIds.size})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTagIds(new Set())}
+                            className="text-[11px] font-medium text-[#64748B] hover:text-[#0F172A]"
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                        <div className="divide-y divide-[#F1F5F9]">
+                          {availableTags
+                            .filter((t) => selectedTagIds.has(t.id))
+                            .map((tag) => (
+                              <div
+                                key={tag.id}
+                                className="flex items-center justify-between px-3 py-2 text-xs"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="h-2 w-2 rounded-full"
+                                    style={{
+                                      backgroundColor: tag.color_hex || "#CBD5F5",
+                                    }}
+                                  />
+                                  <span className="font-medium text-[#0F172A]">
+                                    {tag.name}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] uppercase tracking-wide text-[#94A3B8]">
+                                  {tag.category_name}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
               {showAddToAgendaName && contact && (
                 <div className="border-t border-[#E2E8F0] pt-4">
