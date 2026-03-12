@@ -504,38 +504,38 @@ export default function TagsPage() {
           ) : (
             <>
               {selectedTagIds.size > 0 && (
-                <div className="flex items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/70 px-4 py-2 text-xs text-emerald-800">
-                  <span>
+                <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-clicvend-orange/10 border-b border-[#E2E8F0]">
+                  <span className="text-sm font-medium text-[#1E293B]">
                     {selectedTagIds.size} tag
                     {selectedTagIds.size > 1 ? "s" : ""} selecionada
                     {selectedTagIds.size > 1 ? "s" : ""}.
                   </span>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex flex-wrap rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
                     <button
                       type="button"
                       onClick={() => handleBulkUpdateTags(true)}
-                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white hover:bg-emerald-700"
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
                     >
                       Ativar
                     </button>
                     <button
                       type="button"
                       onClick={() => handleBulkUpdateTags(false)}
-                      className="inline-flex items-center gap-1 rounded-md bg-slate-700 px-2.5 py-1 font-medium text-white hover:bg-slate-800"
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
                       Desativar
                     </button>
                     <button
                       type="button"
                       onClick={() => handleBulkUpdateTags(null)}
-                      className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 font-medium text-white hover:bg-red-700"
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
                     >
                       Excluir
                     </button>
                     <button
                       type="button"
                       onClick={() => setSelectedTagIds(new Set())}
-                      className="text-[11px] font-medium text-emerald-900/80 underline-offset-2 hover:underline"
+                      className="px-3 py-2 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]"
                     >
                       Limpar seleção
                     </button>
@@ -675,38 +675,38 @@ export default function TagsPage() {
           ) : (
             <>
               {selectedFormIds.size > 0 && (
-                <div className="flex items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/70 px-4 py-2 text-xs text-emerald-800">
-                  <span>
+                <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-clicvend-orange/10 border-b border-[#E2E8F0]">
+                  <span className="text-sm font-medium text-[#1E293B]">
                     {selectedFormIds.size} formulário
                     {selectedFormIds.size > 1 ? "s" : ""} selecionado
                     {selectedFormIds.size > 1 ? "s" : ""}.
                   </span>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex flex-wrap rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
                     <button
                       type="button"
                       onClick={() => handleBulkUpdateForms(true)}
-                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white hover:bg-emerald-700"
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
                     >
                       Ativar
                     </button>
                     <button
                       type="button"
                       onClick={() => handleBulkUpdateForms(false)}
-                      className="inline-flex items-center gap-1 rounded-md bg-slate-700 px-2.5 py-1 font-medium text-white hover:bg-slate-800"
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
                       Desativar
                     </button>
                     <button
                       type="button"
                       onClick={() => handleBulkUpdateForms(null)}
-                      className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 font-medium text-white hover:bg-red-700"
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
                     >
                       Excluir
                     </button>
                     <button
                       type="button"
                       onClick={() => setSelectedFormIds(new Set())}
-                      className="text-[11px] font-medium text-emerald-900/80 underline-offset-2 hover:underline"
+                      className="px-3 py-2 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]"
                     >
                       Limpar seleção
                     </button>
