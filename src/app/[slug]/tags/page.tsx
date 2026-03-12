@@ -418,10 +418,10 @@ export default function TagsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
+        <div className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
-            <input
-              type="search"
+          <input
+            type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={
