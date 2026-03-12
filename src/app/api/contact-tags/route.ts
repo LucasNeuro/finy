@@ -76,7 +76,7 @@ export async function GET(request: Request) {
     .from("contact_tags")
     .select("tag_id")
     .eq("company_id", companyId)
-    .eq("contact_id", channelContactId);
+    .eq("channel_contact_id", channelContactId);
 
   if (ctError) {
     return NextResponse.json({ error: ctError.message }, { status: 500 });
@@ -184,12 +184,12 @@ export async function POST(request: Request) {
     .from("contact_tags")
     .delete()
     .eq("company_id", companyId)
-    .eq("contact_id", contactId);
+    .eq("channel_contact_id", contactId);
 
   if (tagIds.length > 0) {
     const rows = tagIds.map((tagId: string) => ({
       company_id: companyId,
-      contact_id: contactId!,
+      channel_contact_id: contactId!,
       tag_id: tagId,
     }));
     const { error } = await supabase.from("contact_tags").insert(rows);
