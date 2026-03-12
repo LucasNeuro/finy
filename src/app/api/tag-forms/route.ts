@@ -7,6 +7,7 @@ type FormFieldInput = {
   label: string;
   type: "select" | "multiselect" | "text" | "number";
   required: boolean;
+  options?: string[];
 };
 
 type FormBody = {
@@ -35,7 +36,8 @@ export async function GET(request: Request) {
         name,
         description,
         is_active,
-        tag_form_queues ( queue_id, queues ( id, name ) )
+        tag_form_queues ( queue_id, queues ( id, name ) ),
+        tag_form_fields ( id, label, field_type, required, sort_order, config )
       `
     )
     .eq("company_id", companyId)
@@ -56,12 +58,29 @@ export async function GET(request: Request) {
         })
         .filter(Boolean) as { id: string; name: string }[];
 
+      const fieldsRaw = Array.isArray(row.tag_form_fields) ? row.tag_form_fields : [];
+      const fields = fieldsRaw
+        .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((f: any) => {
+          const cfg = (f.config ?? {}) as { options?: string[] };
+          return {
+            id: String(f.id),
+            label: String(f.label ?? ""),
+            type: (f.field_type ?? "select") as "select" | "multiselect" | "text" | "number",
+            required: !!f.required,
+            options: Array.isArray(cfg.options)
+              ? cfg.options.map((o) => String(o))
+              : [],
+          };
+        });
+
       return {
         id: row.id as string,
         name: row.name as string,
         description: row.description as string | null,
         active: row.is_active !== false,
         queues,
+        fields,
       };
     }) ?? [];
 
@@ -188,7 +207,10 @@ export async function POST(request: Request) {
       field_type: f.type,
       required: !!f.required,
       sort_order: index,
-      config: {}, // opções futuras (ex.: lista de opções para selects)
+      config:
+        f.type === "select" || f.type === "multiselect"
+          ? { options: Array.isArray(f.options) ? f.options.filter(Boolean) : [] }
+          : {},
     }));
     const { error: ffErr } = await supabase.from("tag_form_fields").insert(rows);
     if (ffErr) {

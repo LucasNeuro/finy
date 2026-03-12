@@ -36,6 +36,7 @@ type FormRow = {
   description: string | null;
   queues: Queue[];
   active: boolean;
+  fields?: FormBuilderField[];
 };
 
 type TagFormState = {
@@ -53,6 +54,7 @@ type FormBuilderField = {
   label: string;
   type: "select" | "multiselect" | "text" | "number";
   required: boolean;
+  options: string[];
 };
 
 type FormBuilderState = {
@@ -599,7 +601,7 @@ export default function TagsPage() {
                                 description: row.description ?? "",
                                 queueIds: row.queues.map((q) => q.id),
                                 active: row.active,
-                                fields: formBuilder.fields, // preenchido ao abrir via API em versões futuras
+                                fields: row.fields ?? [],
                               })
                             }
                             className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
@@ -853,6 +855,7 @@ export default function TagsPage() {
                         label: `Campo ${cur.fields.length + 1}`,
                         type: "select",
                         required: false,
+                      options: [],
                       },
                     ],
                   }))
@@ -877,7 +880,7 @@ export default function TagsPage() {
                     <span className="mt-1 text-xs font-medium text-[#94A3B8]">
                       {index + 1}.
                     </span>
-                    <div className="flex-1 space-y-1">
+                    <div className="flex-1 space-y-2">
                       <input
                         type="text"
                         value={field.label}
@@ -941,6 +944,91 @@ export default function TagsPage() {
                           Obrigatório
                         </label>
                       </div>
+                      {(field.type === "select" || field.type === "multiselect") && (
+                        <div className="space-y-1 rounded-lg border border-dashed border-[#CBD5E1] bg-white px-3 py-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-[#334155]">
+                              Opções ({field.options.length || 0})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFormBuilder((cur) => ({
+                                  ...cur,
+                                  fields: cur.fields.map((f) =>
+                                    f.id === field.id
+                                      ? {
+                                          ...f,
+                                          options: [...(f.options ?? []), ""],
+                                        }
+                                      : f
+                                  ),
+                                }))
+                              }
+                              className="inline-flex items-center gap-1 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-1 text-[11px] font-medium text-[#334155] hover:bg-[#E2E8F0]"
+                            >
+                              <Plus className="h-3 w-3" />
+                              Adicionar opção
+                            </button>
+                          </div>
+                          {field.options.length === 0 ? (
+                            <p className="text-[11px] text-[#94A3B8]">
+                              Adicione opções como &quot;Sim&quot;, &quot;Não&quot;, &quot;Parcialmente&quot;…
+                            </p>
+                          ) : (
+                            <div className="space-y-1">
+                              {field.options.map((opt, idx) => (
+                                <div key={idx} className="flex items-center gap-2">
+                                  <span className="w-4 text-[11px] text-[#94A3B8]">
+                                    {idx + 1}.
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={opt}
+                                    onChange={(e) =>
+                                      setFormBuilder((cur) => ({
+                                        ...cur,
+                                        fields: cur.fields.map((f) =>
+                                          f.id === field.id
+                                            ? {
+                                                ...f,
+                                                options: f.options.map((o, i) =>
+                                                  i === idx ? e.target.value : o
+                                                ),
+                                              }
+                                            : f
+                                        ),
+                                      }))
+                                    }
+                                    placeholder="Texto da opção"
+                                    className="flex-1 rounded-lg border border-[#E2E8F0] px-2 py-1 text-xs text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setFormBuilder((cur) => ({
+                                        ...cur,
+                                        fields: cur.fields.map((f) =>
+                                          f.id === field.id
+                                            ? {
+                                                ...f,
+                                                options: f.options.filter((_, i) => i !== idx),
+                                              }
+                                            : f
+                                        ),
+                                      }))
+                                    }
+                                    className="rounded-full p-1 text-[#64748B] hover:bg-red-50 hover:text-red-600"
+                                    title="Remover opção"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <button
                       type="button"
