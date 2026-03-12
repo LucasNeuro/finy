@@ -736,6 +736,8 @@ export default function ContatosPage() {
   useEffect(() => {
     const loadContactTags = async () => {
       if (!slug) return;
+      // Evita refetch infinito: se já carregou uma vez, não busca de novo
+      if (availableContactTags.length > 0 || contactTagsLoading) return;
       setContactTagsLoading(true);
       try {
         const r = await fetch("/api/tags", { credentials: "include", headers: apiHeaders });
@@ -761,7 +763,7 @@ export default function ContatosPage() {
       }
     };
     loadContactTags();
-  }, [slug, apiHeaders]);
+  }, [slug]);
 
   const toggleNewContactTag = (id: string) => {
     setSelectedNewContactTagIds((prev) => {
