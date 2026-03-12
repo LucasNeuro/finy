@@ -502,92 +502,164 @@ export default function TagsPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-auto max-h-[60vh] min-h-[200px]">
-              <table className="w-full min-w-[640px] border-collapse">
-                <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
-                  <tr className="border-b border-[#E2E8F0]">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Tag
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Categoria
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Tipo
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Filas
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Ações
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTags.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC]"
+            <>
+              {selectedTagIds.size > 0 && (
+                <div className="flex items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/70 px-4 py-2 text-xs text-emerald-800">
+                  <span>
+                    {selectedTagIds.size} tag
+                    {selectedTagIds.size > 1 ? "s" : ""} selecionada
+                    {selectedTagIds.size > 1 ? "s" : ""}.
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleBulkUpdateTags(true)}
+                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white hover:bg-emerald-700"
                     >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="inline-flex h-5 w-5 items-center justify-center rounded-full"
-                            style={{ backgroundColor: row.color_hex ?? "#0EA5E9" }}
-                          />
-                          <span className="font-semibold text-[#1E293B]">{row.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-[#64748B]">
-                        {row.category_name}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-[#64748B]">
-                        {row.category_type === "contact" ? "Contato" : "Atendimento"}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-[#64748B]">
-                        {row.queues.length === 0
-                          ? "Todas as filas"
-                          : row.queues.map((q) => q.name).join(", ")}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                            row.active
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-100 text-slate-600"
-                          }`}
-                        >
-                          {row.active ? "Ativa" : "Inativa"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openEditTag(row)}
-                            className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
-                            title="Editar tag"
-                          >
-                            <Edit3 className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setTagToDelete(row)}
-                            className="rounded-lg p-2 text-[#64748B] hover:bg-red-50 hover:text-red-600"
-                            title="Excluir tag"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
+                      Ativar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkUpdateTags(false)}
+                      className="inline-flex items-center gap-1 rounded-md bg-slate-700 px-2.5 py-1 font-medium text-white hover:bg-slate-800"
+                    >
+                      Desativar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkUpdateTags(null)}
+                      className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 font-medium text-white hover:bg-red-700"
+                    >
+                      Excluir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTagIds(new Set())}
+                      className="text-[11px] font-medium text-emerald-900/80 underline-offset-2 hover:underline"
+                    >
+                      Limpar seleção
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="overflow-auto max-h-[60vh] min-h-[200px]">
+                <table className="w-full min-w-[640px] border-collapse">
+                  <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+                    <tr className="border-b border-[#E2E8F0]">
+                      <th className="w-10 px-3 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-[#CBD5E1] text-clicvend-orange focus:ring-clicvend-orange"
+                          checked={
+                            filteredTags.length > 0 &&
+                            selectedTagIds.size === filteredTags.length
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedTagIds(
+                                new Set(filteredTags.map((t) => t.id))
+                              );
+                            } else {
+                              setSelectedTagIds(new Set());
+                            }
+                          }}
+                        />
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Tag
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Categoria
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Tipo
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Filas
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Ações
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredTags.map((row) => (
+                      <tr
+                        key={row.id}
+                        className="border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC]"
+                      >
+                        <td className="px-3 py-3">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-[#CBD5E1] text-clicvend-orange focus:ring-clicvend-orange"
+                            checked={selectedTagIds.has(row.id)}
+                            onChange={() => toggleSelectTag(row.id)}
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+                              style={{ backgroundColor: row.color_hex ?? "#0EA5E9" }}
+                            />
+                            <span className="font-semibold text-[#1E293B]">
+                              {row.name}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-[#64748B]">
+                          {row.category_name}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-[#64748B]">
+                          {row.category_type === "contact"
+                            ? "Contato"
+                            : "Atendimento"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-[#64748B]">
+                          {row.queues.length === 0
+                            ? "Todas as filas"
+                            : row.queues.map((q) => q.name).join(", ")}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                              row.active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {row.active ? "Ativa" : "Inativa"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openEditTag(row)}
+                              className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
+                              title="Editar tag"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setTagToDelete(row)}
+                              className="rounded-lg p-2 text-[#64748B] hover:bg-red-50 hover:text-red-600"
+                              title="Excluir tag"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       ) : (
@@ -601,96 +673,166 @@ export default function TagsPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-auto max-h-[60vh] min-h-[200px]">
-              <table className="w-full min-w-[640px] border-collapse">
-                <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
-                  <tr className="border-b border-[#E2E8F0]">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Formulário
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Filas
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Ações
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredForms.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC]"
+            <>
+              {selectedFormIds.size > 0 && (
+                <div className="flex items-center justify-between gap-3 border-b border-emerald-100 bg-emerald-50/70 px-4 py-2 text-xs text-emerald-800">
+                  <span>
+                    {selectedFormIds.size} formulário
+                    {selectedFormIds.size > 1 ? "s" : ""} selecionado
+                    {selectedFormIds.size > 1 ? "s" : ""}.
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleBulkUpdateForms(true)}
+                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white hover:bg-emerald-700"
                     >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E0F2FE] text-[#0369A1]">
-                            <FileText className="h-4 w-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-[#1E293B]">{row.name}</p>
-                            {row.description && (
-                              <p className="mt-0.5 line-clamp-2 text-xs text-[#64748B]">
-                                {row.description}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-[#64748B]">
-                        {row.queues.length === 0
-                          ? "Todas as filas"
-                          : row.queues.map((q) => q.name).join(", ")}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                            row.active
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-100 text-slate-600"
-                          }`}
-                        >
-                          {row.active ? "Ativo" : "Inativo"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormBuilder({
-                                id: row.id,
-                                name: row.name,
-                                description: row.description ?? "",
-                                queueIds: row.queues.map((q) => q.id),
-                                active: row.active,
-                                fields: row.fields ?? [],
-                              });
-                              setFormSideOverOpen(true);
-                            }}
-                            className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
-                            title="Editar formulário"
-                          >
-                            <Edit3 className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setFormToDelete(row)}
-                            className="rounded-lg p-2 text-[#64748B] hover:bg-red-50 hover:text-red-600"
-                            title="Excluir formulário"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
+                      Ativar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkUpdateForms(false)}
+                      className="inline-flex items-center gap-1 rounded-md bg-slate-700 px-2.5 py-1 font-medium text-white hover:bg-slate-800"
+                    >
+                      Desativar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBulkUpdateForms(null)}
+                      className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 font-medium text-white hover:bg-red-700"
+                    >
+                      Excluir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFormIds(new Set())}
+                      className="text-[11px] font-medium text-emerald-900/80 underline-offset-2 hover:underline"
+                    >
+                      Limpar seleção
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="overflow-auto max-h-[60vh] min-h-[200px]">
+                <table className="w-full min-w-[640px] border-collapse">
+                  <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+                    <tr className="border-b border-[#E2E8F0]">
+                      <th className="w-10 px-3 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-[#CBD5E1] text-clicvend-orange focus:ring-clicvend-orange"
+                          checked={
+                            filteredForms.length > 0 &&
+                            selectedFormIds.size === filteredForms.length
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedFormIds(
+                                new Set(filteredForms.map((f) => f.id))
+                              );
+                            } else {
+                              setSelectedFormIds(new Set());
+                            }
+                          }}
+                        />
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Formulário
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Filas
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Status
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                        Ações
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredForms.map((row) => (
+                      <tr
+                        key={row.id}
+                        className="border-b border-[#E2E8F0] transition-colors hover:bg-[#F8FAFC]"
+                      >
+                        <td className="px-3 py-3">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-[#CBD5E1] text-clicvend-orange focus:ring-clicvend-orange"
+                            checked={selectedFormIds.has(row.id)}
+                            onChange={() => toggleSelectForm(row.id)}
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E0F2FE] text-[#0369A1]">
+                              <FileText className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-[#1E293B]">
+                                {row.name}
+                              </p>
+                              {row.description && (
+                                <p className="mt-0.5 line-clamp-2 text-xs text-[#64748B]">
+                                  {row.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-[#64748B]">
+                          {row.queues.length === 0
+                            ? "Todas as filas"
+                            : row.queues.map((q) => q.name).join(", ")}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                              row.active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {row.active ? "Ativo" : "Inativo"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormBuilder({
+                                  id: row.id,
+                                  name: row.name,
+                                  description: row.description ?? "",
+                                  queueIds: row.queues.map((q) => q.id),
+                                  active: row.active,
+                                  fields: row.fields ?? [],
+                                });
+                                setFormSideOverOpen(true);
+                              }}
+                              className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
+                              title="Editar formulário"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFormToDelete(row)}
+                              className="rounded-lg p-2 text-[#64748B] hover:bg-red-50 hover:text-red-600"
+                              title="Excluir formulário"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

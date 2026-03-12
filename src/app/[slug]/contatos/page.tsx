@@ -861,10 +861,13 @@ export default function ContatosPage() {
 
   const handleDownloadContactsTemplate = () => {
     const bom = "\uFEFF";
-    const header = "telefone;nome";
-    const example1 = "5511999990000;João Silva";
-    const example2 = "5548999991111;Maria - Cliente VIP";
-    const example3 = "5511944442222;Sem Nome (usa número)";
+    // Modelo mais próximo da tabela channel_contacts
+    const header = "phone;contact_name;first_name;avatar_url";
+    const example1 =
+      "5511999990000;João Silva;João;https://exemplo.com/avatar-joao.jpg";
+    const example2 =
+      "5548999991111;Maria - Cliente VIP;Maria;https://exemplo.com/avatar-maria.jpg";
+    const example3 = "5511944442222;Sem Nome (usa número);;";
     const content = [header, example1, example2, example3].join("\n");
     const blob = new Blob([bom + content], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -875,7 +878,9 @@ export default function ContatosPage() {
     URL.revokeObjectURL(url);
   };
 
-  const parseContactsCSVFile = (file: File): Promise<{ number: string; name: string }[]> =>
+  const parseContactsCSVFile = (
+    file: File
+  ): Promise<{ number: string; name: string }[]> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -889,7 +894,11 @@ export default function ContatosPage() {
           return;
         }
         const first = lines[0].toLowerCase();
-        const hasHeader = first.includes("telefone") || first.includes("numero");
+        // Aceita cabeçalho antigo (telefone/número) ou novo (phone;contact_name;first_name;avatar_url)
+        const hasHeader =
+          first.includes("telefone") ||
+          first.includes("numero") ||
+          first.includes("phone");
         const dataLines = hasHeader ? lines.slice(1) : lines;
         const rows: { number: string; name: string }[] = [];
         for (const line of dataLines) {
@@ -897,8 +906,13 @@ export default function ContatosPage() {
           const parts = parseContactsCSVLine(line, sep).map((p) =>
             p.replace(/^"|"$/g, "").trim()
           );
+          // Coluna 0: phone (obrigatório)
+          // Coluna 1: contact_name (opcional)
+          // Coluna 2: first_name (opcional, hoje ignorado)
+          // Coluna 3: avatar_url (opcional, hoje ignorado)
           const number = (parts[0] ?? "").replace(/\D/g, "");
-          const name = (parts[1] ?? "").trim();
+          const contactName = (parts[1] ?? "").trim();
+          const name = contactName;
           if (!number) continue;
           rows.push({ number, name: name || number });
         }
