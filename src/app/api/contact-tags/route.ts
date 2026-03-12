@@ -136,13 +136,36 @@ export async function POST(request: Request) {
     if (contactErr) {
       return NextResponse.json({ error: contactErr.message }, { status: 500 });
     }
-    if (!contactRow?.id) {
-      return NextResponse.json(
-        { error: "Contato não encontrado para atribuir tags" },
-        { status: 404 }
-      );
+
+    if (contactRow?.id) {
+      contactId = contactRow.id as string;
+    } else {
+      // Se ainda não existir em channel_contacts (ex.: recém criado manualmente),
+      // criamos um registro mínimo apenas na nossa base, sem depender da UAZAPI.
+      const now = new Date().toISOString();
+      const { data: inserted, error: insertErr } = await supabase
+        .from("channel_contacts")
+        .insert({
+          company_id: companyId,
+          channel_id: channelId,
+          jid,
+          phone: digits,
+          contact_name: null,
+          first_name: null,
+          synced_at: now,
+        })
+        .select("id")
+        .single();
+
+      if (insertErr || !inserted) {
+        return NextResponse.json(
+          { error: insertErr?.message ?? "Falha ao criar contato para atribuir tags" },
+          { status: 500 }
+        );
+      }
+
+      contactId = inserted.id as string;
     }
-    contactId = contactRow.id as string;
   }
 
   if (!contactId) {
