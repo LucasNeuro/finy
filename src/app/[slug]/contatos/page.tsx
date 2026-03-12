@@ -2603,26 +2603,111 @@ export default function ContatosPage() {
           </div>
 
           {addContactTab === "single" && (
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-[#334155]">Telefone</label>
-                <input
-                  type="tel"
-                  value={addContactPhone}
-                  onChange={(e) => setAddContactPhone(e.target.value)}
-                  placeholder="Ex.: 55 11 99999-0000"
-                  className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-                />
+            <div className="space-y-4">
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-[#334155]">Telefone</label>
+                  <input
+                    type="tel"
+                    value={addContactPhone}
+                    onChange={(e) => setAddContactPhone(e.target.value)}
+                    placeholder="Ex.: 55 11 99999-0000"
+                    className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#334155]">Nome</label>
+                  <input
+                    type="text"
+                    value={addContactName}
+                    onChange={(e) => setAddContactName(e.target.value)}
+                    placeholder="Nome que aparecerá na agenda"
+                    className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-[#334155]">Nome</label>
-                <input
-                  type="text"
-                  value={addContactName}
-                  onChange={(e) => setAddContactName(e.target.value)}
-                  placeholder="Nome que aparecerá na agenda"
-                  className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
-                />
+
+              <div className="border-t border-[#E2E8F0] pt-4">
+                <p className="text-sm font-medium text-[#334155]">Tags do contato</p>
+                <p className="text-xs text-[#64748B] mb-2">
+                  Opcional. Essas tags ajudam a classificar o tipo de contato.
+                </p>
+                {contactTagsLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-[#64748B]">
+                    <Loader2 className="h-3 w-3 animate-spin text-clicvend-orange" />
+                    Carregando tags…
+                  </div>
+                ) : availableContactTags.length === 0 ? (
+                  <p className="text-xs text-[#94A3B8]">
+                    Nenhuma tag de contato cadastrada ainda. Crie em{" "}
+                    <span className="font-medium">Tags e formulários</span>.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {availableContactTags.map((tag) => (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleNewContactTag(tag.id)}
+                          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                            selectedNewContactTagIds.has(tag.id)
+                              ? "border-transparent text-white"
+                              : "border-[#E2E8F0] text-[#475569] bg-white hover:bg-[#F8FAFC]"
+                          }`}
+                          style={
+                            selectedNewContactTagIds.has(tag.id) && tag.color_hex
+                              ? { backgroundColor: tag.color_hex }
+                              : undefined
+                          }
+                        >
+                          <span className="truncate">{tag.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {selectedNewContactTagIds.size > 0 && (
+                      <div className="rounded-lg border border-[#E2E8F0] bg-white">
+                        <div className="flex items-center justify-between border-b border-[#E2E8F0] px-3 py-2">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">
+                            Tags selecionadas ({selectedNewContactTagIds.size})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedNewContactTagIds(new Set())}
+                            className="text-[11px] font-medium text-[#64748B] hover:text-[#0F172A]"
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                        <div className="divide-y divide-[#F1F5F9]">
+                          {availableContactTags
+                            .filter((t) => selectedNewContactTagIds.has(t.id))
+                            .map((tag) => (
+                              <div
+                                key={tag.id}
+                                className="flex items-center justify-between px-3 py-2 text-xs"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="h-2 w-2 rounded-full"
+                                    style={{
+                                      backgroundColor: tag.color_hex || "#CBD5F5",
+                                    }}
+                                  />
+                                  <span className="font-medium text-[#0F172A]">
+                                    {tag.name}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] uppercase tracking-wide text-[#94A3B8]">
+                                  {tag.category_name}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -2752,6 +2837,38 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                       const data = await res.json().catch(() => ({}));
                       setAddContactError(data?.error ?? "Falha ao adicionar contato.");
                     } else {
+                      // Se houver tags selecionadas para o novo contato, aplica após criar na agenda
+                      if (selectedNewContactTagIds.size > 0) {
+                        try {
+                          const tagsRes = await fetch("/api/contact-tags", {
+                            method: "POST",
+                            credentials: "include",
+                            headers: {
+                              "Content-Type": "application/json",
+                              ...(apiHeaders ?? {}),
+                            },
+                            body: JSON.stringify({
+                              channel_id: addContactChannelId,
+                              number,
+                              tag_ids: Array.from(selectedNewContactTagIds),
+                            }),
+                          });
+                          if (!tagsRes.ok) {
+                            const tagsData = await tagsRes.json().catch(() => ({}));
+                            setAddContactError(
+                              tagsData?.error ?? "Contato criado, mas falha ao aplicar tags."
+                            );
+                          } else {
+                            setSelectedNewContactTagIds(new Set());
+                          }
+                        } catch {
+                          setAddContactError(
+                            (prev) =>
+                              prev ??
+                              "Contato criado, mas ocorreu um erro de rede ao aplicar tags."
+                          );
+                        }
+                      }
                       setAddContactResult({ ok: 1, fail: 0 });
                       setAddContactPhone("");
                       setAddContactName("");
