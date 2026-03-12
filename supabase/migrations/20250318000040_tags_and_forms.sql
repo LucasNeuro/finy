@@ -145,4 +145,3 @@ CREATE TABLE public.conversation_form_answers (
 
 CREATE INDEX IF NOT EXISTS conversation_form_answers_conv_idx
   ON public.conversation_form_answers (company_id, conversation_id, tag_form_id);
-
