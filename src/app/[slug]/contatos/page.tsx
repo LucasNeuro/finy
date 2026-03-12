@@ -10,9 +10,10 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Download, Upload } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { SideOver } from "@/components/SideOver";
 import { ContactDetailSideOver, type Contact } from "./ContactDetailSideOver";
 import { GroupDetailSideOver, type Group } from "./GroupDetailSideOver";
 import { GroupManageSideOver } from "./GroupManageSideOver";
@@ -707,6 +708,17 @@ export default function ContatosPage() {
   const [unblockingBulk, setUnblockingBulk] = useState(false);
   const [contactsActionLoading, setContactsActionLoading] = useState(false);
   const [addToAgendaModalOpen, setAddToAgendaModalOpen] = useState(false);
+  const [addContactSideOverOpen, setAddContactSideOverOpen] = useState(false);
+  const [addContactTab, setAddContactTab] = useState<"single" | "bulk">("single");
+  const [addContactChannelId, setAddContactChannelId] = useState<string>("");
+  const [addContactPhone, setAddContactPhone] = useState("");
+  const [addContactName, setAddContactName] = useState("");
+  const [addContactSaving, setAddContactSaving] = useState(false);
+  const [addContactResult, setAddContactResult] = useState<{ ok: number; fail: number } | null>(null);
+  const [addContactError, setAddContactError] = useState<string | null>(null);
+  const [bulkContactsText, setBulkContactsText] = useState("");
+  const [bulkContactsRows, setBulkContactsRows] = useState<{ number: string; name: string }[]>([]);
+  const [bulkContactsImporting, setBulkContactsImporting] = useState(false);
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -779,7 +791,75 @@ export default function ContatosPage() {
       .then((data) => setBlockList(Array.isArray(data?.blockList) ? data.blockList : []))
       .catch(() => setBlockList([]))
       .finally(() => setBlockListLoading(false));
-  }, [filterChannelId, slug]);
+  }, [filterChannelId, apiHeaders]);
+
+  const parseContactsCSVLine = (line: string, sep: string): string[] => {
+    const parts: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        inQuotes = !inQuotes;
+      } else if (!inQuotes && c === sep) {
+        parts.push(current.trim());
+        current = "";
+      } else {
+        current += c;
+      }
+    }
+    parts.push(current.trim());
+    return parts;
+  };
+
+  const handleDownloadContactsTemplate = () => {
+    const bom = "\uFEFF";
+    const header = "telefone;nome";
+    const example1 = "5511999990000;João Silva";
+    const example2 = "5548999991111;Maria - Cliente VIP";
+    const example3 = "5511944442222;Sem Nome (usa número)";
+    const content = [header, example1, example2, example3].join("\n");
+    const blob = new Blob([bom + content], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "modelo-contatos.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const parseContactsCSVFile = (file: File): Promise<{ number: string; name: string }[]> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = String(reader.result ?? "");
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        if (lines.length === 0) {
+          resolve([]);
+          return;
+        }
+        const first = lines[0].toLowerCase();
+        const hasHeader = first.includes("telefone") || first.includes("numero");
+        const dataLines = hasHeader ? lines.slice(1) : lines;
+        const rows: { number: string; name: string }[] = [];
+        for (const line of dataLines) {
+          const sep = line.includes(";") ? ";" : ",";
+          const parts = parseContactsCSVLine(line, sep).map((p) =>
+            p.replace(/^"|"$/g, "").trim()
+          );
+          const number = (parts[0] ?? "").replace(/\D/g, "");
+          const name = (parts[1] ?? "").trim();
+          if (!number) continue;
+          rows.push({ number, name: name || number });
+        }
+        resolve(rows);
+      };
+      reader.onerror = () => reject(new Error("Erro ao ler arquivo"));
+      reader.readAsText(file, "UTF-8");
+    });
 
   useEffect(() => {
     setLoading(true);
@@ -1448,7 +1528,7 @@ export default function ContatosPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <span className="text-sm text-[#64748B]"></span>
             <select
               value={filterChannelId}
@@ -1484,7 +1564,11 @@ export default function ContatosPage() {
                 onClick={() => handleSync(ch.id)}
                 disabled={syncing !== null}
                 className="relative shrink-0 max-w-[120px] overflow-hidden rounded-md bg-clicvend-orange px-2 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
-                title={syncing === ch.id ? "Sincronizando contatos, grupos e comunidades…" : `Sincronizar contatos, grupos e comunidades: ${ch.name}`}
+                title={
+                  syncing === ch.id
+                    ? "Sincronizando contatos, grupos e comunidades…"
+                    : `Sincronizar contatos, grupos e comunidades: ${ch.name}`
+                }
               >
                 <span className="relative z-10 flex items-center justify-center gap-1 truncate">
                   {syncing === ch.id ? (
@@ -1518,6 +1602,24 @@ export default function ContatosPage() {
                 Limpar e sincronizar
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => {
+                setAddContactChannelId(filterChannelId || (channels[0]?.id ?? ""));
+                setAddContactPhone("");
+                setAddContactName("");
+                setBulkContactsText("");
+                setAddContactResult(null);
+                setAddContactError(null);
+                setAddContactTab("single");
+                setAddContactSideOverOpen(true);
+              }}
+              disabled={channels.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-md bg-white px-3 py-1.5 text-xs font-medium text-clicvend-orange hover:bg-[#E2E8F0] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Adicionar contatos
+            </button>
           </div>
           {channels.length === 0 && !loading && (
             <Link
@@ -2403,6 +2505,264 @@ export default function ContatosPage() {
         onSuccess={() => { mutateGroups(); setSelectedContactIds(new Set()); }}
         onError={(msg) => setAlertMessage(msg)}
       />
+
+      <SideOver
+        open={addContactSideOverOpen}
+        onClose={() => setAddContactSideOverOpen(false)}
+        title="Adicionar contatos manualmente"
+        width={520}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-2 border-b border-[#E2E8F0] pb-3">
+            <button
+              type="button"
+              onClick={() => setAddContactTab("single")}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                addContactTab === "single"
+                  ? "bg-clicvend-orange/10 text-clicvend-orange"
+                  : "text-[#64748B] hover:bg-[#F1F5F9]"
+              }`}
+            >
+              Um por vez
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddContactTab("bulk")}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                addContactTab === "bulk"
+                  ? "bg-clicvend-orange/10 text-clicvend-orange"
+                  : "text-[#64748B] hover:bg-[#F1F5F9]"
+              }`}
+            >
+              Em massa
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-[#334155]">Conexão</label>
+            <select
+              value={addContactChannelId}
+              onChange={(e) => setAddContactChannelId(e.target.value)}
+              className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="">Selecionar conexão…</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>
+                  {ch.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-[#64748B]">
+              O contato será criado na agenda do WhatsApp da conexão selecionada.
+            </p>
+          </div>
+
+          {addContactTab === "single" && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-[#334155]">Telefone</label>
+                <input
+                  type="tel"
+                  value={addContactPhone}
+                  onChange={(e) => setAddContactPhone(e.target.value)}
+                  placeholder="Ex.: 55 11 99999-0000"
+                  className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[#334155]">Nome</label>
+                <input
+                  type="text"
+                  value={addContactName}
+                  onChange={(e) => setAddContactName(e.target.value)}
+                  placeholder="Nome que aparecerá na agenda"
+                  className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                />
+              </div>
+            </div>
+          )}
+
+          {addContactTab === "bulk" && (
+            <div className="space-y-4">
+              <p className="text-sm text-[#64748B]">
+                Use uma planilha para importar vários contatos de uma vez. Cada linha deve ter{" "}
+                <span className="font-mono text-xs text-[#0F172A]">telefone;nome</span>. O cabeçalho é
+                opcional.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleDownloadContactsTemplate}
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]"
+                >
+                  <Download className="h-4 w-4" />
+                  Baixar modelo (CSV)
+                </button>
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]">
+                  <Upload className="h-4 w-4" />
+                  Enviar planilha preenchida
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!file) return;
+                      try {
+                        const rows = await parseContactsCSVFile(file);
+                        setBulkContactsRows(rows);
+                        setAddContactResult(null);
+                        setAddContactError(null);
+                      } catch {
+                        setAddContactError("Erro ao processar o arquivo. Use o modelo em CSV.");
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+
+              <pre className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2 text-xs text-[#475569]">
+telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente VIP{"\n"}5511944442222;Sem Nome (usa número)
+              </pre>
+
+              {bulkContactsRows.length > 0 && (
+                <>
+                  <p className="text-sm font-medium text-[#334155]">
+                    Preview: {bulkContactsRows.length} contato(s) pronto(s) para importar
+                  </p>
+                  <div className="max-h-48 overflow-auto rounded-lg border border-[#E2E8F0]">
+                    <table className="min-w-full text-xs">
+                      <thead className="sticky top-0 bg-[#F8FAFC]">
+                        <tr>
+                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Telefone</th>
+                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Nome</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E2E8F0]">
+                        {bulkContactsRows.slice(0, 30).map((row, i) => (
+                          <tr key={i}>
+                            <td className="px-2 py-1.5 text-[#1E293B]">{row.number}</td>
+                            <td className="px-2 py-1.5 text-[#64748B]">{row.name}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {bulkContactsRows.length > 30 && (
+                      <p className="px-2 py-1 text-[11px] text-[#94A3B8]">
+                        … e mais {bulkContactsRows.length - 30} contato(s).
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {addContactError && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {addContactError}
+            </div>
+          )}
+          {addContactResult && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Criados {addContactResult.ok} contato(s)
+              {addContactResult.fail > 0 ? `, ${addContactResult.fail} falha(s).` : "."}
+            </div>
+          )}
+
+          <div className="mt-2 flex justify-end gap-2 border-t border-[#E2E8F0] pt-3">
+            <button
+              type="button"
+              className="rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+              disabled={addContactSaving}
+              onClick={() => setAddContactSideOverOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={
+                addContactSaving ||
+                !addContactChannelId ||
+                (addContactTab === "single" ? !addContactPhone.trim() : bulkContactsRows.length === 0)
+              }
+              onClick={async () => {
+                if (!addContactChannelId) return;
+                setAddContactSaving(true);
+                setAddContactError(null);
+                setAddContactResult(null);
+                try {
+                  if (addContactTab === "single") {
+                    const number = addContactPhone.replace(/\D/g, "");
+                    const name = addContactName.trim() || number;
+                    const res = await fetch("/api/contacts/add-to-agenda", {
+                      method: "POST",
+                      credentials: "include",
+                      headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
+                      body: JSON.stringify({ channel_id: addContactChannelId, number, name }),
+                    });
+                    if (!res.ok) {
+                      const data = await res.json().catch(() => ({}));
+                      setAddContactError(data?.error ?? "Falha ao adicionar contato.");
+                    } else {
+                      setAddContactResult({ ok: 1, fail: 0 });
+                      setAddContactPhone("");
+                      setAddContactName("");
+                      mutateContacts();
+                    }
+                  } else {
+                    let ok = 0;
+                    let fail = 0;
+                    let firstError: string | null = null;
+                    for (const row of bulkContactsRows) {
+                      const number = row.number.replace(/\D/g, "");
+                      const name = row.name.trim() || number;
+                      if (!number) {
+                        fail++;
+                        if (!firstError) firstError = "Telefone inválido em uma das linhas.";
+                        continue;
+                      }
+                      try {
+                        const res = await fetch("/api/contacts/add-to-agenda", {
+                          method: "POST",
+                          credentials: "include",
+                          headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
+                          body: JSON.stringify({ channel_id: addContactChannelId, number, name }),
+                        });
+                        if (res.ok) {
+                          ok++;
+                        } else {
+                          fail++;
+                          if (!firstError) {
+                            const data = await res.json().catch(() => ({}));
+                            firstError = data?.error ?? "Falha ao adicionar um dos contatos.";
+                          }
+                        }
+                      } catch {
+                        fail++;
+                        if (!firstError) firstError = "Erro de rede ao adicionar um dos contatos.";
+                      }
+                    }
+                    setAddContactResult({ ok, fail });
+                    if (firstError) setAddContactError(firstError);
+                    if (ok > 0) {
+                      mutateContacts();
+                    }
+                  }
+                } finally {
+                  setAddContactSaving(false);
+                }
+              }}
+              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+            >
+              {addContactSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Salvar
+            </button>
+          </div>
+        </div>
+      </SideOver>
 
       <ConfirmDialog
         open={!!deleteConfirm}
