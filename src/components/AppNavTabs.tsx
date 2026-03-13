@@ -37,7 +37,7 @@ const ALL_TABS = [
   { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap, requires: "quickreplies.view" as const },
   // Tags
   { href: "/tags", label: "Tags", icon: Tag, requires: "tags.view" as const },
-  { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.manage" as const },
+  { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.view" as const },
   { href: "/perfil", label: "Perfil", icon: Settings, requires: "profile.view" as const },
 ];
 
@@ -57,6 +57,9 @@ export function AppNavTabs() {
   const tabs = useMemo(() => {
     return ALL_TABS.filter((t) => {
       if (!("requires" in t) || !t.requires) return true;
+      if (t.href === "/cargos-usuarios") {
+        return permissions.includes("users.view") || permissions.includes("users.manage");
+      }
       return permissions.includes(t.requires);
     });
   }, [permissions]);

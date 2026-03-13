@@ -223,7 +223,12 @@ export async function GET(request: Request) {
           assigned_to_name: c.assigned_to ? assignedNames[c.assigned_to] ?? null : null,
         })) as typeof sorted;
       }
-      const res = NextResponse.json({ data: sorted, total: (cached.total ?? sorted.length) });
+      const sortedWithStatusVisuals = await enrichWithStatusVisuals(
+        supabase,
+        companyId,
+        sorted as { status?: string; queue_id?: string | null; assigned_to?: string | null }[]
+      );
+      const res = NextResponse.json({ data: sortedWithStatusVisuals, total: (cached.total ?? sortedWithStatusVisuals.length) });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }

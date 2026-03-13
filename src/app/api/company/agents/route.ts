@@ -14,19 +14,20 @@ export async function GET(request: Request) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, user_id, full_name, email")
+    .select("id, user_id, full_name, email, is_active")
     .eq("company_id", companyId)
-    .eq("is_active", true)
     .order("full_name");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  const list = (data ?? []).map((p) => ({
-    id: p.id,
-    user_id: p.user_id,
-    full_name: p.full_name ?? p.email ?? "Sem nome",
-    email: p.email ?? undefined,
-  }));
+  const list = (data ?? [])
+    .filter((p) => (p as { is_active?: boolean | null }).is_active !== false)
+    .map((p) => ({
+      id: p.id,
+      user_id: p.user_id,
+      full_name: p.full_name ?? p.email ?? "Sem nome",
+      email: p.email ?? undefined,
+    }));
   return NextResponse.json(list);
 }

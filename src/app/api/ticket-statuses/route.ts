@@ -160,6 +160,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const queueId = searchParams.get("queue_id")?.trim();
+  const includeAll = searchParams.get("include_all") === "1";
 
   const supabase = await createClient();
   await ensureCompanyDefaultStatuses(supabase, companyId);
@@ -222,6 +223,27 @@ export async function GET(request: Request) {
 
       return NextResponse.json(list);
     }
+  }
+
+  if (includeAll) {
+    const { data: allStatuses, error: allErr } = await supabase
+      .from("company_ticket_statuses")
+      .select("id, name, slug, color_hex, sort_order, is_closed, queue_id")
+      .eq("company_id", companyId)
+      .order("queue_id", { ascending: true, nullsFirst: true })
+      .order("sort_order", { ascending: true });
+    if (allErr) {
+      return NextResponse.json({ error: allErr.message }, { status: 500 });
+    }
+    const list = (allStatuses ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      slug: s.slug,
+      color_hex: s.color_hex ?? "#64748B",
+      is_closed: !!s.is_closed,
+      sort_order: s.sort_order,
+    }));
+    return NextResponse.json(list);
   }
 
   let statuses: { id: string; name: string; slug: string; color_hex?: string; sort_order?: number; is_closed?: boolean }[] | null = null;

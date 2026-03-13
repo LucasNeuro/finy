@@ -9,6 +9,9 @@ type ConvMin = {
   id: string;
   channel_id: string | null;
   queue_id: string | null;
+  status?: string | null;
+  ticket_status_name?: string | null;
+  ticket_status_color_hex?: string | null;
   customer_phone?: string | null;
   external_id?: string | null;
   is_group?: boolean;

@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/query-keys";
 
 /** Debounce (ms): evita enxurrada de invalidações quando muitas mensagens entram. */
-const INVALIDATE_DEBOUNCE_MS = 4000;
+const INVALIDATE_DEBOUNCE_MS = 1200;
 /** Invalidação na aba Meus quando chega mensagem na conversa do agente (para o card subir). */
 const MINE_UPDATE_DEBOUNCE_MS = 200;
 /** Janela (ms) para considerar "mensagem nova" para aviso sonoro e subir card. Ex.: 30 s. */
@@ -124,6 +124,9 @@ export function RealtimeConversations() {
 
           if (id) {
             queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
+          }
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("conversations-status-reset"));
           }
           if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
           debounceTimerRef.current = setTimeout(() => {

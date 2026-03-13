@@ -82,7 +82,7 @@ export function SideOver({
             <X className="h-5 w-5" />
           </button>
         </header>
-        <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-4">{children}</div>
       </aside>
     </>
   );

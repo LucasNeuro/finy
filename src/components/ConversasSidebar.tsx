@@ -77,6 +77,19 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   return s.slice(0, 14) + "…";
 }
 
+function normalizeConversationStatus(c: Conversation): string {
+  const raw = String(c.status || "open").trim().toLowerCase();
+  return raw || "open";
+}
+
+function statusFallbackLabel(status: string): string {
+  if (status === "closed") return "Encerrado";
+  if (status === "in_progress") return "Em atendimento";
+  if (status === "in_queue") return "Fila";
+  if (status === "open") return "Novo";
+  return status;
+}
+
 function withAlpha(hex: string, alphaHex = "1A"): string | null {
   const v = (hex || "").trim();
   if (!/^#[0-9A-Fa-f]{6}$/.test(v)) return null;
@@ -179,7 +192,7 @@ const ConversationListItem = memo(function ConversationListItem({
       :
     c.status === "closed"
       ? "Encerrado"
-      : c.assigned_to
+      : c.status === "in_progress"
         ? "Em atendimento"
         : c.status === "in_queue"
           ? "Fila"
@@ -267,7 +280,7 @@ const ConversationListItem = memo(function ConversationListItem({
                 !badgeTextColor
                   ? c.status === "closed"
                     ? "bg-[#64748B]/10 text-[#64748B]"
-                    : c.assigned_to
+                    : c.status === "in_progress"
                       ? "bg-[#8B5CF6]/10 text-[#7C3AED]"
                       : c.status === "open" || c.status === "in_queue"
                         ? "bg-[#22C55E]/10 text-[#16A34A]"
@@ -453,13 +466,18 @@ export function ConversasSidebar() {
 
   const [activeTab, setActiveTab] = useState<TabId>("mine");
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [unassigning, setUnassigning] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const statusScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [canStatusScrollLeft, setCanStatusScrollLeft] = useState(false);
+  const [canStatusScrollRight, setCanStatusScrollRight] = useState(false);
 
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab);
+    setStatusFilter("all");
   };
   const viewMode: ViewMode =
     activeTab === "queues" ? "queues"
@@ -480,6 +498,14 @@ export function ConversasSidebar() {
     setCanScrollRight(hasScroll && container.scrollLeft < container.scrollWidth - container.clientWidth - 1);
   };
 
+  const checkStatusScroll = () => {
+    const container = statusScrollRef.current;
+    if (!container) return;
+    const hasScroll = container.scrollWidth > container.clientWidth;
+    setCanStatusScrollLeft(hasScroll && container.scrollLeft > 1);
+    setCanStatusScrollRight(hasScroll && container.scrollLeft < container.scrollWidth - container.clientWidth - 1);
+  };
+
   // Scroll dos tabs
   const scrollTabs = (direction: "left" | "right") => {
     const container = tabsScrollRef.current;
@@ -491,6 +517,17 @@ export function ConversasSidebar() {
     });
     // Verificar novamente após o scroll para atualizar os chevrons
     setTimeout(checkTabsScroll, 300);
+  };
+
+  const scrollStatus = (direction: "left" | "right") => {
+    const container = statusScrollRef.current;
+    if (!container) return;
+    const scrollAmount = container.clientWidth * 0.85;
+    container.scrollBy({
+      left: direction === "left" ? -scrollAmount : scrollAmount,
+      behavior: "smooth",
+    });
+    setTimeout(checkStatusScroll, 250);
   };
 
   useEffect(() => {
@@ -506,6 +543,19 @@ export function ConversasSidebar() {
       window.removeEventListener("resize", checkTabsScroll);
     };
   }, [activeTab]); // Re-executar quando a tab ativa mudar
+
+  useEffect(() => {
+    const container = statusScrollRef.current;
+    if (!container) return;
+    const timeoutId = setTimeout(checkStatusScroll, 80);
+    container.addEventListener("scroll", checkStatusScroll);
+    window.addEventListener("resize", checkStatusScroll);
+    return () => {
+      clearTimeout(timeoutId);
+      container.removeEventListener("scroll", checkStatusScroll);
+      window.removeEventListener("resize", checkStatusScroll);
+    };
+  }, [activeTab, statusFilter]);
 
   const { data: permissionsData } = useQuery({
     queryKey: queryKeys.permissions(slug ?? ""),
@@ -617,8 +667,30 @@ export function ConversasSidebar() {
       : allConversations;
     if (typeFilter === "group") list = list.filter((c) => c.is_group === true);
     else if (typeFilter === "individual") list = list.filter((c) => c.is_group !== true);
+    if (statusFilter !== "all") {
+      list = list.filter((c) => normalizeConversationStatus(c) === statusFilter);
+    }
     return list;
   })();
+
+  const statusOptions = (() => {
+    const map = new Map<string, { label: string; color: string | null; count: number }>();
+    for (const c of allConversations) {
+      const key = normalizeConversationStatus(c);
+      const current = map.get(key);
+      const label = c.ticket_status_name?.trim() || statusFallbackLabel(key);
+      const color = c.ticket_status_color_hex?.trim() || null;
+      if (current) {
+        current.count += 1;
+      } else {
+        map.set(key, { label, color, count: 1 });
+      }
+    }
+    return Array.from(map.entries())
+      .map(([key, v]) => ({ key, ...v }))
+      .sort((a, b) => b.count - a.count);
+  })();
+  const showStatusFilters = activeTab !== "contacts" && activeTab !== "groups";
 
   const searchLower = search.trim().toLowerCase();
   const filteredContacts = searchLower
@@ -661,7 +733,7 @@ export function ConversasSidebar() {
   // o usuário abre o painel de informações e chama chat-details. Sem chamadas em loop à UAZAPI.
 
   return (
-    <aside className="flex min-h-0 w-[25%] min-w-[280px] max-w-[400px] shrink-0 flex-col border-r border-[#E2E8F0]/60 bg-white shadow-sm overflow-hidden self-stretch">
+    <aside className="flex min-h-0 w-[32%] min-w-[320px] max-w-[520px] shrink-0 flex-col border-r border-[#E2E8F0]/60 bg-white shadow-sm overflow-hidden self-stretch">
       <div className="shrink-0 px-3 py-3 border-b border-[#E2E8F0]/60">
         <div className="relative">
           <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
@@ -687,7 +759,7 @@ export function ConversasSidebar() {
         </button>
         <div
           ref={tabsScrollRef}
-          className="scroll-tabs flex w-full flex-nowrap items-center gap-1.5 rounded-md bg-white py-0.5 px-1.5 overflow-x-auto touch-pan-x min-w-0"
+          className="scroll-tabs flex w-full flex-nowrap items-center gap-1.5 rounded-md bg-white py-0.5 px-1.5 overflow-x-auto touch-pan-x min-w-0 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
           <button
             type="button"
@@ -809,6 +881,67 @@ export function ConversasSidebar() {
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
+      {showStatusFilters && (
+        <div className="shrink-0 border-b border-[#E2E8F0]/60 px-3 py-2">
+          <div className="flex items-center gap-1 min-w-0">
+            <button
+              type="button"
+              onClick={() => scrollStatus("left")}
+              disabled={!canStatusScrollLeft}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Rolar filtros de status para esquerda"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div
+              ref={statusScrollRef}
+              className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+            >
+              <button
+                type="button"
+                onClick={() => setStatusFilter("all")}
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                  statusFilter === "all"
+                    ? "bg-clicvend-orange/10 text-clicvend-orange border border-clicvend-orange/30"
+                    : "bg-white text-[#64748B] border border-[#E2E8F0] hover:bg-[#F8FAFC]"
+                }`}
+              >
+                Todos
+                <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">{allConversations.length}</span>
+              </button>
+              {statusOptions.map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setStatusFilter(opt.key)}
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                    statusFilter === opt.key
+                      ? "border border-clicvend-orange/30 bg-clicvend-orange/10 text-clicvend-orange"
+                      : "border border-[#E2E8F0] bg-white text-[#64748B] hover:bg-[#F8FAFC]"
+                  }`}
+                  title={`Filtrar por status: ${opt.label}`}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: opt.color || "#94A3B8" }}
+                  />
+                  {opt.label}
+                  <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">{opt.count}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => scrollStatus("right")}
+              disabled={!canStatusScrollRight}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Rolar filtros de status para direita"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
       {activeTab === "mine" && counts.mine > 0 && (
         <div className="shrink-0 border-b border-[#E2E8F0]/60 px-3 py-2.5">
           <button
@@ -864,6 +997,11 @@ export function ConversasSidebar() {
           ) : filteredGroups.length === 0 ? (
             <div className="p-4 text-center text-sm text-[#64748B]">
               <p className="font-medium text-[#1E293B]">Nenhum grupo</p>
+              {counts.groups > 0 && (
+                <p className="mt-1 text-xs text-[#64748B]">
+                  Há {counts.groups} conversa(s) de grupo no inbox, mas sem grupos sincronizados para esta lista.
+                </p>
+              )}
               <p className="mt-1 text-xs">
                 Sincronize em <Link href={`${base}/contatos`} className="text-clicvend-orange hover:underline">Contatos e grupos</Link> (botão do canal) ou conecte o número em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline">Conexões</Link>.
               </p>

@@ -12,8 +12,11 @@ export async function GET(request: Request) {
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const err = await requirePermission(companyId, PERMISSIONS.users.manage);
-  if (err) return NextResponse.json({ error: err.error }, { status: err.status });
+  const viewErr = await requirePermission(companyId, PERMISSIONS.users.view);
+  if (viewErr) {
+    const manageErr = await requirePermission(companyId, PERMISSIONS.users.manage);
+    if (manageErr) return NextResponse.json({ error: viewErr.error }, { status: viewErr.status });
+  }
 
   const supabase = await createClient();
   const { data, error } = await supabase

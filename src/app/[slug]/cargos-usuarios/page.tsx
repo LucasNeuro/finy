@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { UserCog, Users, Plus, Loader2, Settings, Trash2, Briefcase, UserCircle, Eye, EyeOff, List, UserPlus } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { UserCog, Users, Plus, Loader2, Settings, Trash2, Briefcase, UserCircle, Eye, EyeOff, List, UserPlus, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -41,6 +41,8 @@ type UserRow = {
 
 type Channel = { id: string; name: string };
 type ChannelGroup = { id: string; channel_id: string; jid: string; name: string | null; left_at: string | null };
+const ROLES_PAGE_SIZE = 10;
+const USERS_PAGE_SIZE = 6;
 
 export default function CargosUsuariosPage() {
   const pathname = usePathname();
@@ -56,6 +58,16 @@ export default function CargosUsuariosPage() {
   const [userGroupAssignments, setUserGroupAssignments] = useState<{ channel_id: string; group_jid: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [roleSearch, setRoleSearch] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [selectedRoleIds, setSelectedRoleIds] = useState<Set<string>>(new Set());
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [rolesPageIndex, setRolesPageIndex] = useState(0);
+  const [usersPageIndex, setUsersPageIndex] = useState(0);
+  const [bulkQueueSideOverOpen, setBulkQueueSideOverOpen] = useState(false);
+  const [bulkQueueIds, setBulkQueueIds] = useState<string[]>([]);
+  const [bulkQueueMode, setBulkQueueMode] = useState<"add" | "replace">("add");
+  const [bulkQueueSaving, setBulkQueueSaving] = useState(false);
 
   const [roleSideOverOpen, setRoleSideOverOpen] = useState(false);
   const [roleSideOverTab, setRoleSideOverTab] = useState<"cargo" | "usuarios">("cargo");
@@ -394,8 +406,213 @@ export default function CargosUsuariosPage() {
     );
   };
 
+  const filteredRoles = useMemo(() => {
+    const term = roleSearch.trim().toLowerCase();
+    if (!term) return roles;
+    return roles.filter((r) => r.name.toLowerCase().includes(term));
+  }, [roles, roleSearch]);
+
+  const filteredUsers = useMemo(() => {
+    const term = userSearch.trim().toLowerCase();
+    if (!term) return users;
+    return users.filter((u) => {
+      const name = (u.full_name ?? "").toLowerCase();
+      const email = (u.email ?? "").toLowerCase();
+      const phone = (u.phone ?? "").toLowerCase();
+      const roleName = (u.role_name ?? "").toLowerCase();
+      return name.includes(term) || email.includes(term) || phone.includes(term) || roleName.includes(term);
+    });
+  }, [users, userSearch]);
+
+  const rolesPageCount = Math.max(1, Math.ceil(filteredRoles.length / ROLES_PAGE_SIZE));
+  const usersPageCount = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE));
+  const pagedRoles = useMemo(
+    () => filteredRoles.slice(rolesPageIndex * ROLES_PAGE_SIZE, (rolesPageIndex + 1) * ROLES_PAGE_SIZE),
+    [filteredRoles, rolesPageIndex]
+  );
+  const pagedUsers = useMemo(
+    () => filteredUsers.slice(usersPageIndex * USERS_PAGE_SIZE, (usersPageIndex + 1) * USERS_PAGE_SIZE),
+    [filteredUsers, usersPageIndex]
+  );
+
+  useEffect(() => {
+    setSelectedRoleIds((prev) => {
+      const next = new Set<string>();
+      const allowed = new Set(filteredRoles.map((r) => r.id));
+      prev.forEach((id) => {
+        if (allowed.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [filteredRoles]);
+
+  useEffect(() => {
+    setSelectedUserIds((prev) => {
+      const next = new Set<string>();
+      const allowed = new Set(filteredUsers.map((u) => u.id));
+      prev.forEach((id) => {
+        if (allowed.has(id)) next.add(id);
+      });
+      return next;
+    });
+  }, [filteredUsers]);
+
+  useEffect(() => {
+    setRolesPageIndex((prev) => Math.min(prev, Math.max(0, rolesPageCount - 1)));
+  }, [rolesPageCount]);
+
+  useEffect(() => {
+    setUsersPageIndex((prev) => Math.min(prev, Math.max(0, usersPageCount - 1)));
+  }, [usersPageCount]);
+
+  useEffect(() => {
+    setRolesPageIndex(0);
+  }, [roleSearch]);
+
+  useEffect(() => {
+    setUsersPageIndex(0);
+  }, [userSearch]);
+
+  const toggleRoleSelected = (id: string) => {
+    setSelectedRoleIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleUserSelected = (id: string) => {
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllVisibleRoles = () => {
+    setSelectedRoleIds((prev) => {
+      const allSelected = pagedRoles.length > 0 && pagedRoles.every((r) => prev.has(r.id));
+      const next = new Set(prev);
+      if (allSelected) {
+        pagedRoles.forEach((r) => next.delete(r.id));
+      } else {
+        pagedRoles.forEach((r) => next.add(r.id));
+      }
+      return next;
+    });
+  };
+
+  const toggleAllVisibleUsers = () => {
+    setSelectedUserIds((prev) => {
+      const allSelected = pagedUsers.length > 0 && pagedUsers.every((u) => prev.has(u.id));
+      const next = new Set(prev);
+      if (allSelected) {
+        pagedUsers.forEach((u) => next.delete(u.id));
+      } else {
+        pagedUsers.forEach((u) => next.add(u.id));
+      }
+      return next;
+    });
+  };
+
+  const deleteSelectedRoles = async () => {
+    if (selectedRoleIds.size === 0) return;
+    const ids = Array.from(selectedRoleIds);
+    const ok = window.confirm(`Excluir ${ids.length} cargo(s) selecionado(s)?`);
+    if (!ok) return;
+    setError("");
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/roles/${id}`, {
+            method: "DELETE",
+            credentials: "include",
+            headers: apiHeaders,
+          })
+        )
+      );
+      setSelectedRoleIds(new Set());
+      fetchRoles();
+    } catch {
+      setError("Erro de rede ao excluir cargos.");
+    }
+  };
+
+  const bulkSetUsersActive = async (active: boolean) => {
+    if (selectedUserIds.size === 0) return;
+    const selectedRows = users.filter((u) => selectedUserIds.has(u.id) && !u.is_owner);
+    if (selectedRows.length === 0) return;
+    setError("");
+    try {
+      await Promise.all(
+        selectedRows.map((u) =>
+          fetch(`/api/users/${u.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({ is_active: active }),
+            credentials: "include",
+          })
+        )
+      );
+      fetchUsers();
+      setSelectedUserIds(new Set());
+    } catch {
+      setError("Erro de rede ao atualizar usuários.");
+    }
+  };
+
+  const openBulkQueueSideOver = () => {
+    setBulkQueueIds([]);
+    setBulkQueueMode("add");
+    setBulkQueueSideOverOpen(true);
+  };
+
+  const saveBulkQueueAssignment = async () => {
+    if (selectedUserIds.size === 0) {
+      setError("Selecione ao menos um usuário.");
+      return;
+    }
+    const selectedRows = users.filter((u) => selectedUserIds.has(u.id) && !u.is_owner);
+    if (selectedRows.length === 0) {
+      setError("Nenhum usuário elegível para atribuição em massa.");
+      return;
+    }
+    if (bulkQueueIds.length === 0 && bulkQueueMode === "add") {
+      setError("Selecione pelo menos uma fila para adicionar.");
+      return;
+    }
+    setError("");
+    setBulkQueueSaving(true);
+    try {
+      await Promise.all(
+        selectedRows.map((u) => {
+          const currentQueueIds = Array.isArray(u.queues) ? u.queues.map((q) => q.id) : [];
+          const nextQueueIds =
+            bulkQueueMode === "replace"
+              ? [...bulkQueueIds]
+              : Array.from(new Set([...currentQueueIds, ...bulkQueueIds]));
+          return fetch(`/api/users/${u.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({ queue_ids: nextQueueIds }),
+            credentials: "include",
+          });
+        })
+      );
+      await fetchUsers();
+      setBulkQueueSideOverOpen(false);
+      setSelectedUserIds(new Set());
+    } catch {
+      setError("Erro de rede ao atribuir filas em massa.");
+    } finally {
+      setBulkQueueSaving(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="flex flex-col gap-4 bg-[#F1F5F9] p-4 md:p-6">
       <h1 className="text-2xl font-bold text-[#1E293B]">Cargos e usuários</h1>
       <p className="text-sm text-[#64748B]">
         Crie cargos com permissões e cadastre usuários atribuindo cargo e caixas de atendimento.
@@ -435,30 +652,104 @@ export default function CargosUsuariosPage() {
       ) : (
         <>
           {activeTab === "cargos" && (
-            <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between border-b border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
-                <h2 className="text-sm font-semibold text-[#334155]">Cargos</h2>
-                <button
-                  type="button"
-                  onClick={openNewRole}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark"
-                >
-                  <Plus className="h-4 w-4" />
-                  Novo cargo
-                </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between rounded-xl border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-sm font-semibold text-[#334155]">Cargos</h2>
+                  <span className="rounded-full bg-[#E2E8F0] px-2 py-0.5 text-xs font-medium text-[#475569]">
+                    {filteredRoles.length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+                    <input
+                      value={roleSearch}
+                      onChange={(e) => setRoleSearch(e.target.value)}
+                      placeholder="Buscar cargo..."
+                      className="w-52 rounded-lg border border-[#E2E8F0] bg-white py-2 pl-8 pr-3 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openNewRole}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Novo cargo
+                  </button>
+                </div>
               </div>
-              <div className="overflow-x-auto">
+
+              <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
+              {selectedRoleIds.size > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#D9EEF0] bg-[#ECF8FA] px-3 py-2">
+                  <span className="text-sm font-medium text-[#1E293B]">
+                    {selectedRoleIds.size} cargo(s) selecionado(s)
+                  </span>
+                  <div className="inline-flex flex-wrap rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
+                    {selectedRoleIds.size === 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const r = roles.find((x) => selectedRoleIds.has(x.id));
+                          if (r) openEditRole(r);
+                        }}
+                        className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] last:border-r-0"
+                        title="Editar cargo selecionado"
+                      >
+                        Editar
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={deleteSelectedRoles}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 last:border-r-0"
+                      title="Excluir cargos selecionados"
+                    >
+                      Excluir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRoleIds(new Set())}
+                      className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] last:border-r-0"
+                      title="Limpar seleção"
+                    >
+                      Limpar seleção
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="max-h-[60vh] overflow-auto">
                 <table className="w-full min-w-[400px]">
                   <thead>
-                    <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                    <tr className="sticky top-0 z-10 border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                      <th className="w-10 px-2 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          checked={pagedRoles.length > 0 && pagedRoles.every((r) => selectedRoleIds.has(r.id))}
+                          onChange={toggleAllVisibleRoles}
+                          className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                          aria-label="Selecionar todos os cargos visíveis"
+                        />
+                      </th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-[#64748B]">Nome</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-[#64748B]">Permissões</th>
                       <th className="px-4 py-3 text-right text-xs font-semibold uppercase text-[#64748B]">Ações</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {roles.map((r) => (
+                    {pagedRoles.map((r) => (
                       <tr key={r.id} className="border-b border-[#E2E8F0] hover:bg-[#F8FAFC]">
+                        <td className="w-10 px-2 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedRoleIds.has(r.id)}
+                            onChange={() => toggleRoleSelected(r.id)}
+                            className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                            aria-label={`Selecionar cargo ${r.name}`}
+                          />
+                        </td>
                         <td className="px-4 py-3 font-medium text-[#1E293B]">{r.name}</td>
                         <td className="px-4 py-3 text-sm text-[#64748B]">
                           {Array.isArray(r.permissions) ? r.permissions.length : 0} permissões
@@ -486,17 +777,59 @@ export default function CargosUsuariosPage() {
                   </tbody>
                 </table>
               </div>
-              {roles.length === 0 && (
-                <p className="px-4 py-8 text-center text-sm text-[#94A3B8]">Nenhum cargo cadastrado.</p>
+              <div className="flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
+                <span className="text-sm text-[#64748B]">
+                  Página {rolesPageIndex + 1} de {rolesPageCount} ({filteredRoles.length} cargo{filteredRoles.length !== 1 ? "s" : ""})
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRolesPageIndex((i) => Math.max(0, i - 1))}
+                    disabled={rolesPageIndex === 0}
+                    className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:pointer-events-none disabled:opacity-40"
+                    aria-label="Página anterior de cargos"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRolesPageIndex((i) => Math.min(rolesPageCount - 1, i + 1))}
+                    disabled={rolesPageIndex >= rolesPageCount - 1}
+                    className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:pointer-events-none disabled:opacity-40"
+                    aria-label="Próxima página de cargos"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              {filteredRoles.length === 0 && (
+                <p className="px-4 py-8 text-center text-sm text-[#94A3B8]">
+                  {roleSearch.trim() ? "Nenhum cargo encontrado para a busca." : "Nenhum cargo cadastrado."}
+                </p>
               )}
+            </div>
             </div>
           )}
 
           {activeTab === "usuarios" && (
-            <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between border-b border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3">
-                <h2 className="text-sm font-semibold text-[#334155]">Usuários</h2>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between rounded-xl border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-sm font-semibold text-[#334155]">Usuários</h2>
+                  <span className="rounded-full bg-[#E2E8F0] px-2 py-0.5 text-xs font-medium text-[#475569]">
+                    {filteredUsers.length}
+                  </span>
+                </div>
                 <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+                    <input
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Buscar usuário..."
+                      className="w-56 rounded-lg border border-[#E2E8F0] bg-white py-2 pl-8 pr-3 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={openUserManagement}
@@ -515,10 +848,75 @@ export default function CargosUsuariosPage() {
                   </button>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+
+              <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
+              {selectedUserIds.size > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#D9EEF0] bg-[#ECF8FA] px-3 py-2">
+                  <span className="text-sm font-medium text-[#1E293B]">
+                    {selectedUserIds.size} usuário(s) selecionado(s)
+                  </span>
+                  <div className="inline-flex flex-wrap rounded-lg border border-[#E2E8F0] bg-white overflow-hidden shadow-sm">
+                    <button
+                      type="button"
+                      onClick={openBulkQueueSideOver}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] last:border-r-0"
+                      title="Atribuir filas aos usuários selecionados"
+                    >
+                      Filas em massa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => bulkSetUsersActive(true)}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] last:border-r-0"
+                      title="Ativar usuários selecionados"
+                    >
+                      Ativar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => bulkSetUsersActive(false)}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] last:border-r-0"
+                      title="Desativar usuários selecionados"
+                    >
+                      Desativar
+                    </button>
+                    {selectedUserIds.size === 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const u = users.find((x) => selectedUserIds.has(x.id));
+                          if (u) openEditUser(u);
+                        }}
+                        className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] last:border-r-0"
+                        title="Editar usuário selecionado"
+                      >
+                        Editar
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedUserIds(new Set())}
+                      className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] last:border-r-0"
+                      title="Limpar seleção"
+                    >
+                      Limpar seleção
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="max-h-[48vh] overflow-auto">
                 <table className="w-full min-w-[520px]">
                   <thead>
-                    <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                    <tr className="sticky top-0 z-10 border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                      <th className="w-10 px-2 py-2.5 text-left">
+                        <input
+                          type="checkbox"
+                          checked={pagedUsers.length > 0 && pagedUsers.every((u) => selectedUserIds.has(u.id))}
+                          onChange={toggleAllVisibleUsers}
+                          className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                          aria-label="Selecionar todos os usuários visíveis"
+                        />
+                      </th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Nome / E-mail</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">WhatsApp</th>
                       <th className="px-3 py-2.5 text-left text-xs font-semibold uppercase text-[#64748B]">Cargo</th>
@@ -527,8 +925,17 @@ export default function CargosUsuariosPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u) => (
+                    {pagedUsers.map((u) => (
                       <tr key={u.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
+                        <td className="w-10 px-2 py-2.5">
+                          <input
+                            type="checkbox"
+                            checked={selectedUserIds.has(u.id)}
+                            onChange={() => toggleUserSelected(u.id)}
+                            className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                            aria-label={`Selecionar usuário ${u.full_name || u.email || u.id}`}
+                          />
+                        </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-3">
                             {u.avatar_url ? (
@@ -601,12 +1008,40 @@ export default function CargosUsuariosPage() {
                   </tbody>
                 </table>
               </div>
-              {users.length === 0 && (
+              <div className="flex items-center justify-between gap-2 border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
+                <span className="text-sm text-[#64748B]">
+                  Página {usersPageIndex + 1} de {usersPageCount} ({filteredUsers.length} usuário{filteredUsers.length !== 1 ? "s" : ""})
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setUsersPageIndex((i) => Math.max(0, i - 1))}
+                    disabled={usersPageIndex === 0}
+                    className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:pointer-events-none disabled:opacity-40"
+                    aria-label="Página anterior de usuários"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUsersPageIndex((i) => Math.min(usersPageCount - 1, i + 1))}
+                    disabled={usersPageIndex >= usersPageCount - 1}
+                    className="rounded p-2 text-[#64748B] hover:bg-white hover:text-[#1E293B] disabled:pointer-events-none disabled:opacity-40"
+                    aria-label="Próxima página de usuários"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              {filteredUsers.length === 0 && (
                 <p className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4 text-center text-sm text-[#94A3B8]">
-                  Nenhum usuário cadastrado. Use &quot;Novo usuário&quot; ou &quot;Gestão de usuários&quot; para criar.
+                  {userSearch.trim()
+                    ? "Nenhum usuário encontrado para a busca."
+                    : "Nenhum usuário cadastrado. Use \"Novo usuário\" ou \"Gestão de usuários\" para criar."}
                 </p>
               )}
               {error && activeTab === "usuarios" && <p className="px-4 py-2 text-sm text-red-600">{error}</p>}
+            </div>
             </div>
           )}
         </>
@@ -1142,6 +1577,82 @@ export default function CargosUsuariosPage() {
         confirmLabel="Excluir"
         variant="danger"
       />
+
+      <SideOver
+        open={bulkQueueSideOverOpen}
+        onClose={() => setBulkQueueSideOverOpen(false)}
+        title="Atribuir filas em massa"
+        width={620}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3 text-sm text-[#334155]">
+            {selectedUserIds.size} usuário(s) selecionado(s). Escolha como aplicar as filas:
+          </div>
+
+          <div className="inline-flex w-fit overflow-hidden rounded-lg border border-[#E2E8F0] bg-white">
+            <button
+              type="button"
+              onClick={() => setBulkQueueMode("add")}
+              className={`px-3 py-2 text-sm font-medium ${bulkQueueMode === "add" ? "bg-clicvend-orange/10 text-clicvend-orange" : "text-[#64748B] hover:bg-[#F8FAFC]"}`}
+            >
+              Adicionar filas
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkQueueMode("replace")}
+              className={`border-l border-[#E2E8F0] px-3 py-2 text-sm font-medium ${bulkQueueMode === "replace" ? "bg-clicvend-orange/10 text-clicvend-orange" : "text-[#64748B] hover:bg-[#F8FAFC]"}`}
+            >
+              Substituir filas
+            </button>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-[#334155]">Filas</label>
+            <div className="max-h-64 overflow-auto rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2">
+              {queues.length === 0 ? (
+                <p className="text-xs text-[#94A3B8]">Nenhuma fila cadastrada.</p>
+              ) : (
+                <div className="space-y-1">
+                  {queues.map((q) => (
+                    <label key={q.id} className="flex items-center gap-2 rounded px-1 py-1.5 text-sm text-[#334155] hover:bg-white">
+                      <input
+                        type="checkbox"
+                        checked={bulkQueueIds.includes(q.id)}
+                        onChange={(e) => {
+                          setBulkQueueIds((prev) =>
+                            e.target.checked ? [...prev, q.id] : prev.filter((id) => id !== q.id)
+                          );
+                        }}
+                        className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                      />
+                      {q.name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setBulkQueueSideOverOpen(false)}
+              className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={saveBulkQueueAssignment}
+              disabled={bulkQueueSaving || queues.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+            >
+              {bulkQueueSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Aplicar
+            </button>
+          </div>
+        </div>
+      </SideOver>
     </div>
   );
 }

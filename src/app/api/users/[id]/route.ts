@@ -1,7 +1,6 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
-import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { invalidateRoundRobinForCompany } from "@/lib/queue/round-robin";
 import { NextResponse } from "next/server";
@@ -17,6 +16,10 @@ export async function PATCH(
   if (err) return NextResponse.json({ error: err.error }, { status: err.status });
 
   const { id } = await context.params;
+  const targetId = (id ?? "").trim();
+  if (!targetId) {
+    return NextResponse.json({ error: "ID do usuário é obrigatório" }, { status: 400 });
+  }
   let body: { role_id?: string; queue_ids?: string[]; group_assignments?: { channel_id: string; group_jid: string }[]; is_active?: boolean; full_name?: string; phone?: string; cpf?: string };
   try {
     body = await request.json();
@@ -24,13 +27,22 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const supabase = await createClient();
-  const profile = await supabase
+  const admin = createServiceRoleClient();
+  let profile = await admin
     .from("profiles")
     .select("id, user_id, is_owner")
     .eq("company_id", companyId)
-    .or(`id.eq.${id},user_id.eq.${id}`)
-    .single();
+    .eq("id", targetId)
+    .maybeSingle();
+
+  if (!profile.data) {
+    profile = await admin
+      .from("profiles")
+      .select("id, user_id, is_owner")
+      .eq("company_id", companyId)
+      .eq("user_id", targetId)
+      .maybeSingle();
+  }
 
   if (profile.error || !profile.data) {
     return NextResponse.json({ error: "Usuário não encontrado" }, { status: 404 });
@@ -40,7 +52,6 @@ export async function PATCH(
     return NextResponse.json({ error: "Não é possível desativar o proprietário" }, { status: 403 });
   }
 
-  const admin = createServiceRoleClient();
   const updates: { role_id?: string; is_active?: boolean; full_name?: string | null; phone?: string | null; cpf?: string | null; updated_at: string } = {
     updated_at: new Date().toISOString(),
   };

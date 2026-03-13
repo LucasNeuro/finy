@@ -10,6 +10,7 @@ type ReassignSideOverProps = {
   open: boolean;
   onClose: () => void;
   ticketId: string;
+  queueId?: string | null;
   ticketCustomerName: string | null;
   currentAssignedToName: string | null;
   companySlug: string;
@@ -20,6 +21,7 @@ export function ReassignSideOver({
   open,
   onClose,
   ticketId,
+  queueId,
   ticketCustomerName,
   currentAssignedToName,
   companySlug,
@@ -37,19 +39,55 @@ export function ReassignSideOver({
     setLoading(true);
     setError("");
     try {
+      const allAgents: Agent[] = [];
+      const seen = new Set<string>();
+
+      if (queueId) {
+        try {
+          const q = await fetch(`/api/queues/${encodeURIComponent(queueId)}/assignments`, { credentials: "include", headers: apiHeaders });
+          const qData = await q.json().catch(() => ({}));
+          const queueUsers = (Array.isArray(qData?.users) ? qData.users : Array.isArray(qData?.all_users) ? qData.all_users : []) as {
+            user_id: string;
+            full_name?: string | null;
+            email?: string | null;
+          }[];
+          queueUsers.forEach((u) => {
+            if (!u?.user_id || seen.has(u.user_id)) return;
+            seen.add(u.user_id);
+            allAgents.push({
+              id: u.user_id,
+              user_id: u.user_id,
+              full_name: u.full_name?.trim() || u.email?.trim() || "Sem nome",
+              email: u.email ?? undefined,
+            });
+          });
+        } catch {
+          // ignore fallback
+        }
+      }
+
       const r = await fetch("/api/company/agents", { credentials: "include", headers: apiHeaders });
-      const data = await r.json();
+      const data = await r.json().catch(() => []);
       if (r.ok && Array.isArray(data)) {
-        setAgents(data);
-      } else {
-        setError(data?.error ?? "Falha ao carregar agentes");
+        (data as Agent[]).forEach((a) => {
+          if (!a?.user_id || seen.has(a.user_id)) return;
+          seen.add(a.user_id);
+          allAgents.push(a);
+        });
+      } else if (allAgents.length === 0) {
+        setError((data as { error?: string })?.error ?? "Falha ao carregar agentes");
+      }
+
+      setAgents(allAgents);
+      if (allAgents.length === 0) {
+        setError("Nenhum agente disponível para reatribuição.");
       }
     } catch {
       setError("Erro de rede");
     } finally {
       setLoading(false);
     }
-  }, [companySlug]);
+  }, [apiHeaders, queueId]);
 
   useEffect(() => {
     if (open) {
@@ -151,6 +189,11 @@ export function ReassignSideOver({
                   </option>
                 ))}
               </select>
+              {agents.length === 0 && (
+                <p className="mt-2 text-xs text-[#94A3B8]">
+                  Não há agentes listados para esta fila/empresa no momento.
+                </p>
+              )}
             </div>
 
             <div className="flex gap-2">

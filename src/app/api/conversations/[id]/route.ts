@@ -135,32 +135,38 @@ export async function GET(
       const supabaseCache = await createClient();
       const queueIdCached = (cached.queue_id as string | null) ?? null;
       let ticket_status_color_hex_cached: string | null = null;
+      let ticket_status_name_cached: string | null = null;
       const { data: statusRowCache } = await supabaseCache
         .from("company_ticket_statuses")
-        .select("color_hex")
+        .select("name, color_hex")
         .eq("company_id", companyId)
         .eq("slug", effectiveStatusCached)
         .or(queueIdCached ? `queue_id.eq.${queueIdCached},queue_id.is.null` : "queue_id.is.null")
         .limit(1)
         .maybeSingle();
-      if (statusRowCache && (statusRowCache as { color_hex?: string }).color_hex) {
-        ticket_status_color_hex_cached = (statusRowCache as { color_hex: string }).color_hex.trim() || null;
+      if (statusRowCache) {
+        const row = statusRowCache as { name?: string; color_hex?: string };
+        if (row.color_hex) ticket_status_color_hex_cached = row.color_hex.trim() || null;
+        if (row.name) ticket_status_name_cached = row.name.trim() || null;
       }
-      if (!ticket_status_color_hex_cached) {
+      if (!ticket_status_color_hex_cached || !ticket_status_name_cached) {
         const { data: fallbackRowCache } = await supabaseCache
           .from("company_ticket_statuses")
-          .select("color_hex")
+          .select("name, color_hex")
           .eq("company_id", companyId)
           .eq("slug", effectiveStatusCached)
           .limit(1)
           .maybeSingle();
-        if (fallbackRowCache && (fallbackRowCache as { color_hex?: string }).color_hex) {
-          ticket_status_color_hex_cached = (fallbackRowCache as { color_hex: string }).color_hex.trim() || null;
+        if (fallbackRowCache) {
+          const row = fallbackRowCache as { name?: string; color_hex?: string };
+          if (!ticket_status_color_hex_cached && row.color_hex) ticket_status_color_hex_cached = row.color_hex.trim() || null;
+          if (!ticket_status_name_cached && row.name) ticket_status_name_cached = row.name.trim() || null;
         }
       }
       const res = NextResponse.json({
         ...cached,
         messages,
+        ticket_status_name: ticket_status_name_cached,
         ticket_status_color_hex: ticket_status_color_hex_cached,
       });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
@@ -206,29 +212,34 @@ export async function GET(
             ? "waiting"
             : "open";
   let ticket_status_color_hex: string | null = null;
+  let ticket_status_name: string | null = null;
   const queueId = conversation.queue_id ?? null;
   const slugForColor = effectiveStatus;
   const { data: statusRow } = await supabase
     .from("company_ticket_statuses")
-    .select("color_hex")
+    .select("name, color_hex")
     .eq("company_id", companyId)
     .eq("slug", slugForColor)
     .or(queueId ? `queue_id.eq.${queueId},queue_id.is.null` : "queue_id.is.null")
     .limit(1)
     .maybeSingle();
-  if (statusRow && (statusRow as { color_hex?: string }).color_hex) {
-    ticket_status_color_hex = (statusRow as { color_hex: string }).color_hex.trim() || null;
+  if (statusRow) {
+    const row = statusRow as { name?: string; color_hex?: string };
+    if (row.color_hex) ticket_status_color_hex = row.color_hex.trim() || null;
+    if (row.name) ticket_status_name = row.name.trim() || null;
   }
-  if (!ticket_status_color_hex) {
+  if (!ticket_status_color_hex || !ticket_status_name) {
     const { data: fallbackRow } = await supabase
       .from("company_ticket_statuses")
-      .select("color_hex")
+      .select("name, color_hex")
       .eq("company_id", companyId)
       .eq("slug", slugForColor)
       .limit(1)
       .maybeSingle();
-    if (fallbackRow && (fallbackRow as { color_hex?: string }).color_hex) {
-      ticket_status_color_hex = (fallbackRow as { color_hex: string }).color_hex.trim() || null;
+    if (fallbackRow) {
+      const row = fallbackRow as { name?: string; color_hex?: string };
+      if (!ticket_status_color_hex && row.color_hex) ticket_status_color_hex = row.color_hex.trim() || null;
+      if (!ticket_status_name && row.name) ticket_status_name = row.name.trim() || null;
     }
   }
 
@@ -412,6 +423,7 @@ export async function GET(
     queue_name,
     assigned_to_name,
     contact_avatar_url,
+    ticket_status_name: ticket_status_name ?? null,
     ticket_status_color_hex: ticket_status_color_hex ?? null,
     messages,
   };

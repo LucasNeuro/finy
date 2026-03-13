@@ -119,7 +119,9 @@ export default function TicketsPage() {
   });
   const queues = queuesData ?? [];
 
-  const statusUrl = queueId ? `/api/queues/${encodeURIComponent(queueId)}/ticket-statuses` : "/api/ticket-statuses";
+  const statusUrl = queueId
+    ? `/api/queues/${encodeURIComponent(queueId)}/ticket-statuses`
+    : "/api/ticket-statuses?include_all=1";
   const { data: statusesData } = useQuery({
     queryKey: queryKeys.ticketStatuses(slug ?? "", queueId || undefined),
     queryFn: async () => {
@@ -127,7 +129,9 @@ export default function TicketsPage() {
       return r.json();
     },
     enabled: !!slug,
-    staleTime: 60 * 1000,
+    staleTime: 5 * 1000,
+    refetchInterval: viewMode === "kanban" ? 4000 : false,
+    refetchOnWindowFocus: "always",
   });
 
   const statusColumns = useMemo(() => {
@@ -184,7 +188,9 @@ export default function TicketsPage() {
       return loaded < total ? loaded : undefined;
     },
     enabled: !!slug && permissionsData !== undefined,
-    staleTime: 45 * 1000,
+    staleTime: 8 * 1000,
+    refetchInterval: viewMode === "kanban" ? 4000 : false,
+    refetchOnWindowFocus: "always",
   });
 
   const tickets = ticketsData?.pages.flatMap((pg) => (Array.isArray(pg?.data) ? pg.data : [])) ?? [];
@@ -239,23 +245,80 @@ export default function TicketsPage() {
   useEffect(() => {
     const onReset = () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets) });
+      queryClient.invalidateQueries({ queryKey: ["tickets", "statuses", slug ?? ""] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
+      refetchTickets();
     };
     window.addEventListener("conversations-status-reset", onReset);
     return () => window.removeEventListener("conversations-status-reset", onReset);
-  }, [slug, queueId, canManageTickets, queryClient]);
+  }, [slug, queueId, canManageTickets, queryClient, refetchTickets]);
 
   const [saving, setSaving] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggingColumnKey, setDraggingColumnKey] = useState<string | null>(null);
   const [reorderingColumns, setReorderingColumns] = useState(false);
+  const kanbanScrollRef = useRef<HTMLDivElement>(null);
+  const [showKanbanChevrons, setShowKanbanChevrons] = useState(false);
+  const [canKanbanScrollLeft, setCanKanbanScrollLeft] = useState(false);
+  const [canKanbanScrollRight, setCanKanbanScrollRight] = useState(false);
 
   const sentinelRefsByColumn = useRef<Record<string, HTMLDivElement>>({});
   const tableSelectAllRef = useRef<HTMLInputElement>(null);
+  const optimisticClearTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const loadMore = useCallback(() => {
     if (loading || loadingMore || !hasNextPage) return;
     fetchNextPage();
   }, [loading, loadingMore, hasNextPage, fetchNextPage]);
+
+  const checkKanbanScroll = useCallback(() => {
+    const el = kanbanScrollRef.current;
+    if (!el) return;
+    const hasOverflow = el.scrollWidth > el.clientWidth + 1;
+    setShowKanbanChevrons(hasOverflow);
+    setCanKanbanScrollLeft(hasOverflow && el.scrollLeft > 1);
+    setCanKanbanScrollRight(hasOverflow && el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
+  }, []);
+
+  const scrollKanban = useCallback((direction: "left" | "right") => {
+    const el = kanbanScrollRef.current;
+    if (!el) return;
+    const amount = Math.max(240, Math.floor(el.clientWidth * 0.75));
+    el.scrollBy({ left: direction === "left" ? -amount : amount, behavior: "smooth" });
+    setTimeout(checkKanbanScroll, 240);
+  }, [checkKanbanScroll]);
+
+  const autoScrollKanbanOnDrag = useCallback((clientX: number) => {
+    const el = kanbanScrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const edge = 88;
+    const speed = 20;
+    if (clientX < rect.left + edge) {
+      el.scrollBy({ left: -speed });
+      checkKanbanScroll();
+      return;
+    }
+    if (clientX > rect.right - edge) {
+      el.scrollBy({ left: speed });
+      checkKanbanScroll();
+    }
+  }, [checkKanbanScroll]);
+
+  const autoScrollColumnOnDrag = useCallback((columnEl: HTMLDivElement, clientY: number) => {
+    const listEl = columnEl.querySelector("[data-kanban-column-scroll='1']") as HTMLDivElement | null;
+    if (!listEl) return;
+    const rect = listEl.getBoundingClientRect();
+    const edge = 72;
+    const speed = 14;
+    if (clientY < rect.top + edge) {
+      listEl.scrollBy({ top: -speed });
+      return;
+    }
+    if (clientY > rect.bottom - edge) {
+      listEl.scrollBy({ top: speed });
+    }
+  }, []);
 
   useEffect(() => {
     const sentinels = Object.values(sentinelRefsByColumn.current).filter(Boolean);
@@ -269,6 +332,27 @@ export default function TicketsPage() {
     sentinels.forEach((el) => obs.observe(el));
     return () => obs.disconnect();
   }, [hasNextPage, loading, loadingMore, loadMore, statusColumns.length]);
+
+  useEffect(() => {
+    if (viewMode !== "kanban") return;
+    const el = kanbanScrollRef.current;
+    if (!el) return;
+    const timeout = setTimeout(checkKanbanScroll, 80);
+    el.addEventListener("scroll", checkKanbanScroll);
+    window.addEventListener("resize", checkKanbanScroll);
+    return () => {
+      clearTimeout(timeout);
+      el.removeEventListener("scroll", checkKanbanScroll);
+      window.removeEventListener("resize", checkKanbanScroll);
+    };
+  }, [viewMode, checkKanbanScroll, statusColumns.length, tickets.length]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(optimisticClearTimersRef.current).forEach((timer) => clearTimeout(timer));
+      optimisticClearTimersRef.current = {};
+    };
+  }, []);
 
   const handleReassigned = useCallback(
     (ticketId: string, newAssigneeId: string, newAssigneeName: string) => {
@@ -299,6 +383,11 @@ export default function TicketsPage() {
     const previousData = queryClient.getQueryData<{ pages: { data: Ticket[]; total: number }[]; pageParams: unknown[] }>(listKey);
 
     // Atualização otimista: move o card na hora; se a API falhar, revertemos.
+    const existingTimer = optimisticClearTimersRef.current[ticketId];
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      delete optimisticClearTimersRef.current[ticketId];
+    }
     setOptimisticStatusById((prev) => ({ ...prev, [ticketId]: apiStatus }));
     queryClient.setQueryData(listKey, (old: typeof previousData) => {
       if (!old) return old;
@@ -329,11 +418,22 @@ export default function TicketsPage() {
         });
         alert(d?.error ?? "Falha ao atualizar status");
       } else {
+        // Mantém o estado otimista por uma janela curta para evitar "pisca"
+        // quando a lista volta do cache antigo logo após o PATCH.
+        optimisticClearTimersRef.current[ticketId] = setTimeout(() => {
+          setOptimisticStatusById((prev) => {
+            const next = { ...prev };
+            delete next[ticketId];
+            return next;
+          });
+          delete optimisticClearTimersRef.current[ticketId];
+        }, 1800);
         queryClient.invalidateQueries({ queryKey: listKey });
         queryClient.invalidateQueries({ queryKey: [...listKey, "table", tablePageIndex] });
         queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
         queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
         queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
+        refetchTickets();
       }
     } catch {
       if (previousData) queryClient.setQueryData(listKey, previousData);
@@ -346,7 +446,7 @@ export default function TicketsPage() {
     } finally {
       setSaving(false);
     }
-  }, [apiHeaders, slug, queueId, canManageTickets, queryClient, tablePageIndex]);
+  }, [apiHeaders, slug, queueId, canManageTickets, queryClient, tablePageIndex, refetchTickets]);
 
   const reorderColumns = useCallback(
     async (fromIndex: number, toIndex: number) => {
@@ -357,6 +457,18 @@ export default function TicketsPage() {
       newOrder.splice(toIndex, 0, removed);
       const orderIds = newOrder.map((c) => c.id).filter(Boolean);
       if (orderIds.length === 0) return;
+      const statusesKey = queryKeys.ticketStatuses(slug ?? "", queueId || undefined);
+      const previousStatuses = queryClient.getQueryData(statusesKey);
+      queryClient.setQueryData(statusesKey, (old: unknown) => {
+        if (!Array.isArray(old)) return old;
+        const orderById = new Map(orderIds.map((id, idx) => [id, idx]));
+        return old
+          .map((s: any) => ({
+            ...s,
+            sort_order: orderById.has(s?.id) ? orderById.get(s.id) : (s?.sort_order ?? 999),
+          }))
+          .sort((a: any, b: any) => (a?.sort_order ?? 0) - (b?.sort_order ?? 0));
+      });
       setReorderingColumns(true);
       try {
         // 1) Reordena padrões globais (afeta todas as filas)
@@ -388,13 +500,16 @@ export default function TicketsPage() {
         }
         refreshStatuses();
       } catch {
+        if (previousStatuses !== undefined) {
+          queryClient.setQueryData(statusesKey, previousStatuses);
+        }
         alert("Erro de rede");
       } finally {
         setReorderingColumns(false);
         setDraggingColumnKey(null);
       }
     },
-    [statusColumns, queueId, apiHeaders, refreshStatuses]
+    [statusColumns, queueId, apiHeaders, refreshStatuses, queryClient, slug]
   );
 
   const columns = useMemo(() => {
@@ -497,7 +612,7 @@ export default function TicketsPage() {
       {loading ? (
         <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-2">
           {statusColumns.map((col) => (
-            <div key={col.key} className="flex min-w-[280px] max-w-[320px] flex-1 flex-col gap-3 rounded-lg border-2 border-transparent bg-[#F8FAFC] p-3">
+            <div key={col.key} className="flex w-[300px] min-w-[300px] max-w-[300px] shrink-0 flex-col gap-3 rounded-lg border-2 border-transparent bg-[#F8FAFC] p-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="h-6 w-24 animate-pulse rounded-full bg-[#E2E8F0]" />
                 <div className="h-5 w-8 animate-pulse rounded-full bg-[#E2E8F0]" />
@@ -756,17 +871,36 @@ export default function TicketsPage() {
           </div>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-2">
+        <div className="flex min-h-0 flex-1 items-stretch gap-2">
+          {showKanbanChevrons && (
+            <button
+              type="button"
+              onClick={() => scrollKanban("left")}
+              disabled={!canKanbanScrollLeft}
+              className="shrink-0 self-center rounded border border-[#E2E8F0] bg-white p-2 text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B] disabled:pointer-events-none disabled:opacity-40"
+              aria-label="Rolar colunas para esquerda"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          )}
+          <div
+            ref={kanbanScrollRef}
+            className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          >
           {columns.map((col, colIndex) => (
             <div
               key={col.key}
-              className={`flex min-w-[280px] max-w-[320px] flex-1 flex-col min-h-0 rounded-lg border-2 bg-[#F8FAFC] p-3 transition-colors ${
+              className={`flex w-[300px] min-w-[300px] max-w-[300px] shrink-0 flex-col min-h-0 rounded-lg border-2 bg-[#F8FAFC] p-3 transition-colors ${
                 dragOverColumn === col.key ? "border-clicvend-orange bg-clicvend-orange/5" : "border-transparent"
               } ${draggingColumnKey === col.key ? "opacity-70" : ""}`}
               onDragOver={(e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
-                if (draggingColumnKey || draggingId) setDragOverColumn(col.key);
+                if (draggingColumnKey || draggingId) {
+                  setDragOverColumn(col.key);
+                  autoScrollKanbanOnDrag(e.clientX);
+                  autoScrollColumnOnDrag(e.currentTarget as HTMLDivElement, e.clientY);
+                }
               }}
               onDragLeave={() => setDragOverColumn(null)}
               onDrop={(e) => {
@@ -819,7 +953,10 @@ export default function TicketsPage() {
                   {col.items.length}
                 </span>
               </div>
-              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-md">
+              <div
+                data-kanban-column-scroll="1"
+                className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-md"
+              >
                 {col.items.map((t) => {
                   const statusKey = effectiveStatusForKanban(optimisticStatusById[t.id] ?? t.status, t.assigned_to);
                   const colDef = statusColumns.find((s) => s.key === statusKey);
@@ -987,6 +1124,18 @@ export default function TicketsPage() {
               </div>
             </div>
           ))}
+          </div>
+          {showKanbanChevrons && (
+            <button
+              type="button"
+              onClick={() => scrollKanban("right")}
+              disabled={!canKanbanScrollRight}
+              className="shrink-0 self-center rounded border border-[#E2E8F0] bg-white p-2 text-[#64748B] hover:bg-[#F8FAFC] hover:text-[#1E293B] disabled:pointer-events-none disabled:opacity-40"
+              aria-label="Rolar colunas para direita"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          )}
         </div>
       )}
 
@@ -995,13 +1144,19 @@ export default function TicketsPage() {
         onClose={() => setStatusConfigOpen(false)}
         companySlug={slug ?? ""}
         queues={queues}
-        onSaved={refreshStatuses}
+        onSaved={() => {
+          refreshStatuses();
+          queryClient.invalidateQueries({ queryKey: queryKeys.ticketsList(slug ?? "", queueId, !canManageTickets) });
+          queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
+          refetchTickets();
+        }}
       />
 
       <ReassignSideOver
         open={!!reassignTicket}
         onClose={() => setReassignTicket(null)}
         ticketId={reassignTicket?.id ?? ""}
+        queueId={reassignTicket?.queue_id ?? null}
         ticketCustomerName={reassignTicket?.customer_name ?? reassignTicket?.customer_phone ?? null}
         currentAssignedToName={reassignTicket?.assigned_to_name ?? null}
         companySlug={slug ?? ""}

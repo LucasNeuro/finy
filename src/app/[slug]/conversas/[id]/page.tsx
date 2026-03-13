@@ -47,7 +47,18 @@ type ConversationDetail = {
   contact_avatar_url?: string | null;
   /** Cor do status do Kanban (company_ticket_statuses) para exibir atrás da foto */
   ticket_status_color_hex?: string | null;
+  /** Nome do status do Kanban (company_ticket_statuses) para exibição contextual */
+  ticket_status_name?: string | null;
   messages: Message[];
+};
+
+type TicketStatusOption = {
+  id: string;
+  slug: string;
+  name: string;
+  color_hex: string | null;
+  is_closed: boolean;
+  sort_order?: number;
 };
 
 type ChatDetails = {
@@ -111,6 +122,51 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function resolveConversationStatusVisual(conv: ConversationDetail | null | undefined): {
+  statusKey: string;
+  label: string;
+  colorHex: string;
+  badgeClass: string;
+} {
+  const rawStatus = (conv?.status ?? "open").toString().toLowerCase().trim();
+  const hasAssignee = !!conv?.assigned_to;
+  const effectiveStatus =
+    rawStatus === "closed"
+      ? "closed"
+      : rawStatus === "open" && hasAssignee
+        ? "in_progress"
+        : rawStatus;
+  const fallbackLabel =
+    effectiveStatus === "closed"
+      ? "Encerrado"
+      : effectiveStatus === "in_progress"
+        ? "Em atendimento"
+        : effectiveStatus === "in_queue"
+          ? "Fila"
+          : effectiveStatus === "waiting"
+            ? "Aguardando"
+            : "Novo";
+  const fallbackHex =
+    effectiveStatus === "closed"
+      ? "#64748B"
+      : effectiveStatus === "in_progress"
+        ? "#7C3AED"
+        : effectiveStatus === "waiting"
+          ? "#F59E0B"
+          : "#16A34A";
+  const name = (conv?.ticket_status_name ?? "").trim() || fallbackLabel;
+  const colorHex = (conv?.ticket_status_color_hex ?? "").trim() || fallbackHex;
+  const badgeClass =
+    effectiveStatus === "closed"
+      ? "bg-[#64748B]/15 text-[#64748B]"
+      : effectiveStatus === "in_progress"
+        ? "bg-[#8B5CF6]/15 text-[#7C3AED]"
+        : effectiveStatus === "waiting"
+          ? "bg-[#F59E0B]/15 text-[#B45309]"
+          : "bg-[#22C55E]/15 text-[#16A34A]";
+  return { statusKey: effectiveStatus, label: name, colorHex, badgeClass };
 }
 
 /** Barra de preview do áudio gravado antes de enviar (miniplayer com degradê roxo claro, igual ao mini player da conversa). */
@@ -1240,6 +1296,38 @@ export default function ConversaThreadPage({
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: availableTicketStatuses = [] } = useQuery({
+    queryKey: ["conversation-status-options", conv?.queue_id ?? "__global__"],
+    queryFn: async () => {
+      const queueId = conv?.queue_id ?? null;
+      const requests: string[] = [];
+      if (queueId) {
+        requests.push(`/api/queues/${queueId}/ticket-statuses`);
+        requests.push(`/api/ticket-statuses?queue_id=${queueId}`);
+      }
+      requests.push("/api/ticket-statuses");
+
+      for (const url of requests) {
+        try {
+          const res = await fetch(url, { credentials: "include", headers: apiHeaders });
+          if (!res.ok) continue;
+          const data = await res.json().catch(() => []);
+          if (Array.isArray(data) && data.length > 0) {
+            return (data as TicketStatusOption[]).map((s) => ({
+              ...s,
+              color_hex: s.color_hex ?? "#64748B",
+            }));
+          }
+        } catch {
+          // fallback para próxima rota
+        }
+      }
+      return [] as TicketStatusOption[];
+    },
+    enabled: !!slug && !!conv,
+    staleTime: 30_000,
+  });
+
   const filteredQuickReplies = useMemo(() => {
     // Se não há termo de busca (quickSearch é null), não retorna nada
     if (quickSearch === null || !Array.isArray(quickReplies)) return [];
@@ -2020,10 +2108,14 @@ export default function ConversaThreadPage({
         ? `/api/contacts/avatar?url=${encodeURIComponent(conv.contact_avatar_url)}`
         : conv.contact_avatar_url)
     : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
+  const headerStatusVisual = resolveConversationStatusVisual(conv);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#F1F5F9]">
-      <header className="flex shrink-0 items-center gap-3 border-b border-[#E2E8F0] bg-white px-4 py-3">
+      <header
+        className="flex shrink-0 items-center gap-3 border-b border-[#E2E8F0] px-4 py-3"
+        style={{ backgroundColor: `${headerStatusVisual.colorHex}14` }}
+      >
         <button
           type="button"
           onClick={() => setFocusMode(!focusMode)}
@@ -2033,14 +2125,16 @@ export default function ConversaThreadPage({
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
-          {isLoading ? (
-            <Skeleton className="h-10 w-10 rounded-full" />
-          ) : imageUrl ? (
-            <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            name.slice(0, 1).toUpperCase() || "?"
-          )}
+        <span className="relative shrink-0 rounded-full p-0.5" style={{ backgroundColor: headerStatusVisual.colorHex }}>
+          <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-[#E2E8F0] text-sm font-medium text-[#64748B]">
+            {isLoading ? (
+              <Skeleton className="h-10 w-10 rounded-full" />
+            ) : imageUrl ? (
+              <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              name.slice(0, 1).toUpperCase() || "?"
+            )}
+          </span>
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -2077,33 +2171,12 @@ export default function ConversaThreadPage({
             )}
             {!isLoading && (
               (() => {
-                const rawStatus = conv?.status ?? "open";
-                const isAssigned = !!conv?.assigned_to;
-                let statusKey =
-                  rawStatus === "closed"
-                    ? "closed"
-                    : isAssigned
-                      ? "in_progress"
-                      : rawStatus === "in_queue"
-                        ? "in_queue"
-                        : "open";
-                const label =
-                  statusKey === "closed"
-                    ? "Encerrado"
-                    : statusKey === "in_progress"
-                      ? "Em atendimento"
-                      : statusKey === "in_queue"
-                        ? "Fila"
-                        : "Novo";
-                const colorClass =
-                  statusKey === "closed"
-                    ? "bg-[#64748B]/15 text-[#64748B]"
-                    : statusKey === "in_progress"
-                      ? "bg-[#8B5CF6]/15 text-[#7C3AED]"
-                      : "bg-[#22C55E]/15 text-[#16A34A]";
+                const visual = resolveConversationStatusVisual(conv);
+                const inlineText = { color: visual.colorHex };
+                const inlineBg = { backgroundColor: `${visual.colorHex}26` };
                 return (
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${colorClass}`}>
-                    {label}
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${visual.badgeClass}`} style={{ ...inlineText, ...inlineBg }}>
+                    {visual.label}
                   </span>
                 );
               })()
@@ -2139,47 +2212,6 @@ export default function ConversaThreadPage({
             </button>
             {chatMenuOpen && (
               <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-[#E2E8F0] bg-white py-1 shadow-lg">
-                {(canChangeStatus || canClose) && (
-                  <>
-                    {canChangeStatus && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleStatusChange("open")}
-                          disabled={!!chatActionLoading}
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
-                        >
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#22C55E]" aria-hidden />
-                          {conv?.status === "open" ? <Check className="h-4 w-4 shrink-0 text-[#22C55E]" /> : null}
-                          Abrir
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleStatusChange("in_progress")}
-                          disabled={!!chatActionLoading}
-                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
-                        >
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#3B82F6]" aria-hidden />
-                          {conv?.status === "in_progress" ? <Check className="h-4 w-4 shrink-0 text-[#3B82F6]" /> : null}
-                          Em atendimento
-                        </button>
-                      </>
-                    )}
-                    {canClose && (
-                      <button
-                        type="button"
-                        onClick={() => handleStatusChange("closed")}
-                        disabled={!!chatActionLoading}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
-                      >
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#64748B]" aria-hidden />
-                        {conv?.status === "closed" ? <Check className="h-4 w-4 shrink-0 text-[#64748B]" /> : null}
-                        Fechar
-                      </button>
-                    )}
-                    <hr className="my-1 border-[#E2E8F0]" />
-                  </>
-                )}
                 <button
                   type="button"
                   onClick={() => chatAction("read", { read: true })}
@@ -2197,6 +2229,18 @@ export default function ConversaThreadPage({
                 >
                   <Archive className="h-4 w-4 shrink-0" />
                   Arquivar conversa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInfoOpen(true);
+                    setChatMenuOpen(false);
+                  }}
+                  disabled={!!chatActionLoading}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[#1E293B] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  <User className="h-4 w-4 shrink-0" />
+                  Alterar status no perfil
                 </button>
                 <button
                   type="button"
@@ -2719,7 +2763,7 @@ export default function ConversaThreadPage({
         open={infoOpen}
         onClose={() => setInfoOpen(false)}
         title="Informações do contato"
-        width={580}
+        width={660}
       >
         <div className="flex flex-col h-full overflow-hidden">
           <div className="flex-1 overflow-y-auto min-h-0">
@@ -2736,7 +2780,8 @@ export default function ConversaThreadPage({
             {!contactDetailsLoading && (contactDetails || !conv?.channel_id) && (
               <div className="space-y-4">
                 {(() => {
-                  const kanbanColor = (conv?.ticket_status_color_hex ?? "").trim() || null;
+                  const visual = resolveConversationStatusVisual(conv);
+                  const kanbanColor = visual.colorHex || null;
                   const statusBg = kanbanColor || "#64748B";
                   const statusTitle = kanbanColor ? "Status do ticket (Kanban)" : "Status";
                   return (
@@ -2786,7 +2831,7 @@ export default function ConversaThreadPage({
                       return <p className="text-sm text-[#94A3B8]">Nenhuma mídia ou documento nesta conversa.</p>;
                     }
                     return (
-                      <div className="overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 scrollbar-thin scrollbar-track-[#F1F5F9] scrollbar-thumb-[#CBD5E1]">
+                      <div className="overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                         <ul className="flex gap-3 snap-x snap-mandatory" style={{ minWidth: "min-content" }}>
                           {mediaList.map((msg) => {
                             const type = inferDisplayType(msg.message_type, msg.content ?? "", msg);
@@ -2899,6 +2944,44 @@ export default function ConversaThreadPage({
                   <span className="text-sm text-[#64748B]">Silenciar</span>
                   <span className="text-xs text-[#94A3B8]">Off</span>
                 </div>
+                {(canChangeStatus || canClose) && (
+                  <div className="space-y-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Status do ticket</p>
+                      <span className="text-[11px] text-[#94A3B8]">{conv?.queue_name ? `Fila ${conv.queue_name}` : "Status da empresa"}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {(() => {
+                        const currentStatusKey = resolveConversationStatusVisual(conv).statusKey;
+                        return availableTicketStatuses
+                        .filter((s) => (s.is_closed ? canClose : canChangeStatus))
+                        .map((s) => {
+                          const active = (currentStatusKey ?? "").toLowerCase() === (s.slug ?? "").toLowerCase();
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => handleStatusChange(s.slug)}
+                              disabled={!!chatActionLoading || active}
+                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-60 ${
+                                active
+                                  ? "border-clicvend-orange/40 bg-clicvend-orange/10 text-clicvend-orange"
+                                  : "border-[#E2E8F0] bg-white text-[#334155] hover:bg-[#F1F5F9]"
+                              }`}
+                            >
+                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color_hex ?? "#64748B" }} />
+                              {active ? <Check className="h-3.5 w-3.5 shrink-0" /> : null}
+                              {s.name}
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
+                    {availableTicketStatuses.length === 0 && (
+                      <p className="text-xs text-[#94A3B8]">Nenhum status configurado para esta fila.</p>
+                    )}
+                  </div>
+                )}
                 <button type="button" className="w-full rounded-lg border border-[#E2E8F0] py-2 text-sm text-[#64748B] hover:bg-[#F8FAFC]">
                   Marcar como não lida
                 </button>
@@ -2909,6 +2992,9 @@ export default function ConversaThreadPage({
                       id: conv.id,
                       channel_id: conv.channel_id ?? null,
                       queue_id: conv.queue_id ?? null,
+                      status: conv.status ?? null,
+                      ticket_status_name: conv.ticket_status_name ?? null,
+                      ticket_status_color_hex: conv.ticket_status_color_hex ?? null,
                       customer_phone: conv.customer_phone ?? null,
                       external_id: conv.external_id ?? null,
                       is_group: conv.is_group ?? false,
@@ -2924,6 +3010,9 @@ export default function ConversaThreadPage({
                       id: conv.id,
                       channel_id: conv.channel_id ?? null,
                       queue_id: conv.queue_id ?? null,
+                      status: conv.status ?? null,
+                      ticket_status_name: conv.ticket_status_name ?? null,
+                      ticket_status_color_hex: conv.ticket_status_color_hex ?? null,
                       customer_phone: conv.customer_phone ?? null,
                       external_id: conv.external_id ?? null,
                       is_group: conv.is_group ?? false,

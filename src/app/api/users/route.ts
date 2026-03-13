@@ -10,8 +10,11 @@ import { NextResponse } from "next/server";
 export async function GET(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const err = await requirePermission(companyId, PERMISSIONS.users.manage);
-  if (err) return NextResponse.json({ error: err.error }, { status: err.status });
+  const viewErr = await requirePermission(companyId, PERMISSIONS.users.view);
+  if (viewErr) {
+    const manageErr = await requirePermission(companyId, PERMISSIONS.users.manage);
+    if (manageErr) return NextResponse.json({ error: viewErr.error }, { status: viewErr.status });
+  }
 
   const admin = createServiceRoleClient();
   const selectWithAvatar = "id, user_id, company_id, role_id, email, full_name, phone, cpf, avatar_url, is_owner, is_active, created_at, roles(id, name)";
