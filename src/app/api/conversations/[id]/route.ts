@@ -119,10 +119,50 @@ export async function GET(
   if (!skipCache) {
     const cached = await getCachedConversationDetail(id);
     if (cached) {
-
       let messages = Array.isArray(cached.messages) ? normalizeMessageTypes(cached.messages) : cached.messages;
       messages = await enrichMessagesWithCachedMedia(id, messages as Record<string, unknown>[]);
-      const res = NextResponse.json({ ...cached, messages });
+      const rawStatusCached = (cached.status ?? "open").toString().toLowerCase().trim();
+      const effectiveStatusCached =
+        rawStatusCached === "closed"
+          ? "closed"
+          : (cached.assigned_to != null && cached.assigned_to !== "")
+            ? "in_progress"
+            : rawStatusCached === "in_queue"
+              ? "in_queue"
+              : rawStatusCached === "waiting"
+                ? "waiting"
+                : "open";
+      const supabaseCache = await createClient();
+      const queueIdCached = (cached.queue_id as string | null) ?? null;
+      let ticket_status_color_hex_cached: string | null = null;
+      const { data: statusRowCache } = await supabaseCache
+        .from("company_ticket_statuses")
+        .select("color_hex")
+        .eq("company_id", companyId)
+        .eq("slug", effectiveStatusCached)
+        .or(queueIdCached ? `queue_id.eq.${queueIdCached},queue_id.is.null` : "queue_id.is.null")
+        .limit(1)
+        .maybeSingle();
+      if (statusRowCache && (statusRowCache as { color_hex?: string }).color_hex) {
+        ticket_status_color_hex_cached = (statusRowCache as { color_hex: string }).color_hex.trim() || null;
+      }
+      if (!ticket_status_color_hex_cached) {
+        const { data: fallbackRowCache } = await supabaseCache
+          .from("company_ticket_statuses")
+          .select("color_hex")
+          .eq("company_id", companyId)
+          .eq("slug", effectiveStatusCached)
+          .limit(1)
+          .maybeSingle();
+        if (fallbackRowCache && (fallbackRowCache as { color_hex?: string }).color_hex) {
+          ticket_status_color_hex_cached = (fallbackRowCache as { color_hex: string }).color_hex.trim() || null;
+        }
+      }
+      const res = NextResponse.json({
+        ...cached,
+        messages,
+        ticket_status_color_hex: ticket_status_color_hex_cached,
+      });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }
@@ -413,14 +453,37 @@ export async function PATCH(
   }
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const resolveStatusMeta = async (slug: string, queueId: string | null) => {
+    const base = supabase
+      .from("company_ticket_statuses")
+      .select("slug, is_closed")
+      .eq("company_id", companyId)
+      .eq("slug", slug);
+    const { data } = await (queueId
+      ? base.or(`queue_id.eq.${queueId},queue_id.is.null`).order("queue_id", { ascending: false }).limit(1).maybeSingle()
+      : base.is("queue_id", null).limit(1).maybeSingle());
+    return (data as { slug: string; is_closed?: boolean } | null) ?? null;
+  };
+
   // Controle de permissão por tipo de atualização
   if (body.status !== undefined && typeof body.status === "string" && body.status.trim()) {
     const newStatus = body.status.trim().toLowerCase();
     if (newStatus !== existing.status) {
-      if (newStatus === "closed") {
+      const nextQueueId =
+        body.queue_id !== undefined
+          ? (body.queue_id === null || body.queue_id === "" ? null : body.queue_id)
+          : (existing.queue_id ?? null);
+      const newStatusMeta = await resolveStatusMeta(newStatus, nextQueueId);
+      if (!newStatusMeta) {
+        return NextResponse.json({ error: "Status inválido para esta fila." }, { status: 400 });
+      }
+      const existingStatusMeta = await resolveStatusMeta(String(existing.status || "").toLowerCase(), existing.queue_id ?? null);
+      const existingIsClosed = existingStatusMeta ? !!existingStatusMeta.is_closed : String(existing.status || "").toLowerCase() === "closed";
+      const newIsClosed = !!newStatusMeta.is_closed;
+      if (newIsClosed) {
         const err = await requirePermission(companyId, PERMISSIONS.inbox.close);
         if (err) return NextResponse.json({ error: err.error }, { status: err.status });
-      } else if (existing.status === "closed") {
+      } else if (existingIsClosed) {
         const err = await requirePermission(companyId, PERMISSIONS.inbox.reopen);
         if (err) return NextResponse.json({ error: err.error }, { status: err.status });
       } else if (["in_progress", "in_queue", "waiting", "open"].includes(newStatus)) {

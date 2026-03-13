@@ -10,6 +10,32 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
+async function resolveStatusSlugs(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string
+): Promise<{ active: string[]; closed: string[]; unassigned: string[] }> {
+  const fallbackActive = ["open", "in_progress", "in_queue", "waiting"];
+  const fallbackClosed = ["closed"];
+  try {
+    const { data } = await supabase
+      .from("company_ticket_statuses")
+      .select("slug, is_closed")
+      .eq("company_id", companyId);
+    const rows = (data ?? []) as { slug: string; is_closed?: boolean }[];
+    const active = [...new Set(rows.filter((r) => !r.is_closed).map((r) => String(r.slug || "").trim().toLowerCase()).filter(Boolean))];
+    const closed = [...new Set(rows.filter((r) => !!r.is_closed).map((r) => String(r.slug || "").trim().toLowerCase()).filter(Boolean))];
+    // Mantém slugs base sempre ativos para evitar zerar contagens
+    // quando a configuração estiver incompleta.
+    const activeFinal = [...new Set([...(active.length > 0 ? active : []), ...fallbackActive])];
+    const closedFinal = [...new Set([...(closed.length > 0 ? closed : []), ...fallbackClosed])];
+    const unassignedPreferred = activeFinal.filter((s) => s === "open" || s === "in_queue");
+    const unassignedFinal = unassignedPreferred.length > 0 ? unassignedPreferred : activeFinal;
+    return { active: activeFinal, closed: closedFinal, unassigned: unassignedFinal };
+  } catch {
+    return { active: fallbackActive, closed: fallbackClosed, unassigned: ["open", "in_queue"] };
+  }
+}
+
 /**
  * GET /api/conversations/counts
  * Retorna contagens por aba: mine, queues, individual, groups.
@@ -77,14 +103,13 @@ export async function GET(request: Request) {
     }
   }
 
-  const activeStatuses = ["open", "in_progress", "waiting"];
-  const unassignedStatuses = ["open", "in_queue"];
+  const { active: activeStatuses, closed: closedStatuses, unassigned: unassignedStatuses } = await resolveStatusSlugs(supabase, companyId);
   let queuesQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).in("status", activeStatuses);
   let mineQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").in("status", activeStatuses);
   let individualQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", false).in("status", activeStatuses);
   let groupsQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", true).in("status", activeStatuses);
   let unassignedQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).is("assigned_to", null).in("status", unassignedStatuses);
-  let mineClosedQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("status", "closed");
+  let mineClosedQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").in("status", closedStatuses);
 
   if (allowedQueueIds !== null) {
     if (allowedGroupKeys.length === 0) {

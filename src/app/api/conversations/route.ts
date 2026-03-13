@@ -35,6 +35,84 @@ function normalizePhoneForDisplay(raw: string | null | undefined): string | null
   return toCanonicalDigits(raw) ?? raw;
 }
 
+async function resolveStatusSlugsForList(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  queueId?: string
+): Promise<{ active: string[]; closed: string[]; unassigned: string[] }> {
+  const fallbackActive = ["open", "in_progress", "in_queue", "waiting"];
+  const fallbackClosed = ["closed"];
+  try {
+    const query = supabase
+      .from("company_ticket_statuses")
+      .select("slug, is_closed, queue_id")
+      .eq("company_id", companyId);
+    const { data } = queueId
+      ? await query.or(`queue_id.eq.${queueId},queue_id.is.null`)
+      : await query;
+    const rows = (data ?? []) as { slug: string; is_closed?: boolean; queue_id?: string | null }[];
+    const active = [...new Set(rows.filter((r) => !r.is_closed).map((r) => String(r.slug || "").trim().toLowerCase()).filter(Boolean))];
+    const closed = [...new Set(rows.filter((r) => !!r.is_closed).map((r) => String(r.slug || "").trim().toLowerCase()).filter(Boolean))];
+    // Nunca remove os slugs base da operação; evita "sumir tudo" no chat/tickets
+    // quando a configuração de status estiver incompleta.
+    const activeFinal = [...new Set([...(active.length > 0 ? active : []), ...fallbackActive])];
+    const closedFinal = [...new Set([...(closed.length > 0 ? closed : []), ...fallbackClosed])];
+    const unassignedPreferred = activeFinal.filter((s) => s === "open" || s === "in_queue");
+    const unassignedFinal = unassignedPreferred.length > 0 ? unassignedPreferred : activeFinal;
+    return { active: activeFinal, closed: closedFinal, unassigned: unassignedFinal };
+  } catch {
+    return { active: fallbackActive, closed: fallbackClosed, unassigned: ["open", "in_queue"] };
+  }
+}
+
+async function enrichWithStatusVisuals<T extends { status?: string; queue_id?: string | null; assigned_to?: string | null }>(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string,
+  list: T[]
+): Promise<(T & { ticket_status_name?: string | null; ticket_status_color_hex?: string | null })[]> {
+  if (list.length === 0) return list;
+  try {
+    const { data } = await supabase
+      .from("company_ticket_statuses")
+      .select("slug, name, color_hex, queue_id")
+      .eq("company_id", companyId);
+    const rows = (data ?? []) as { slug: string; name: string; color_hex?: string | null; queue_id?: string | null }[];
+    const globalMap = new Map<string, { name: string; color_hex: string | null }>();
+    const queueMap = new Map<string, Map<string, { name: string; color_hex: string | null }>>();
+    for (const r of rows) {
+      const slug = String(r.slug || "").trim().toLowerCase();
+      if (!slug) continue;
+      const payload = { name: r.name?.trim() || slug, color_hex: r.color_hex?.trim() || null };
+      if (!r.queue_id) {
+        if (!globalMap.has(slug)) globalMap.set(slug, payload);
+      } else {
+        const m = queueMap.get(r.queue_id) ?? new Map<string, { name: string; color_hex: string | null }>();
+        m.set(slug, payload);
+        queueMap.set(r.queue_id, m);
+      }
+    }
+    return list.map((c) => {
+      const raw = String(c.status || "open").trim().toLowerCase();
+      // Mantém comportamento atual: quando atribuído e status "de entrada", exibe "Em atendimento".
+      const effective =
+        raw === "closed"
+          ? "closed"
+          : c.assigned_to && (raw === "open" || raw === "in_queue" || raw === "waiting")
+            ? "in_progress"
+            : (raw || "open");
+      const queueScoped = c.queue_id ? queueMap.get(c.queue_id)?.get(effective) : null;
+      const resolved = queueScoped ?? globalMap.get(effective) ?? null;
+      return {
+        ...c,
+        ticket_status_name: resolved?.name ?? null,
+        ticket_status_color_hex: resolved?.color_hex ?? null,
+      };
+    });
+  } catch {
+    return list;
+  }
+}
+
 /** Chamados novos = não atribuídos e status open. Ordenação estilo Zendesk/Intercom: novos no topo, depois por última mensagem. */
 function sortQueuesListNewFirst<T extends { assigned_to?: string | null; status?: string; last_message_at: string }>(
   list: T[]
@@ -151,6 +229,11 @@ export async function GET(request: Request) {
   }
 
   const selectFields = "id, channel_id, external_id, wa_chat_jid, kind, is_group, customer_phone, customer_name, queue_id, assigned_to, status, last_message_at, created_at";
+  const { active: activeStatuses, closed: closedStatuses, unassigned: unassignedStatuses } =
+    await resolveStatusSlugsForList(supabase, companyId, queueIdParam);
+  const statusesForList = includeClosed
+    ? [...new Set([...activeStatuses, ...closedStatuses])]
+    : activeStatuses;
 
   let q = supabase
     .from("conversations")
@@ -170,13 +253,12 @@ export async function GET(request: Request) {
   }
   if (onlyUnassigned) {
     q = q.is("assigned_to", null);
-    q = q.in("status", ["open", "in_queue"]);
+    q = q.in("status", unassignedStatuses);
   }
   if (status) {
     q = q.eq("status", status);
   } else {
-    const statuses = includeClosed ? ["open", "in_progress", "in_queue", "waiting", "closed"] : ["open", "in_progress", "in_queue", "waiting"];
-    q = q.in("status", statuses);
+    q = q.in("status", statusesForList);
   }
   if (queueIdParam) {
     q = q.eq("queue_id", queueIdParam);
@@ -190,8 +272,7 @@ export async function GET(request: Request) {
         .in("external_id", groupJids)
         .order("last_message_at", { ascending: false });
       const filteredByChannel = (rows: ConvRow[]) => rows.filter((c) => allowedGroupKeys.some((k) => k.channel_id === c.channel_id && k.group_jid === c.external_id));
-      const groupStatuses = includeClosed ? ["open", "in_progress", "in_queue", "waiting", "closed"] : ["open", "in_progress", "in_queue", "waiting"];
-      const statusFilter = status ? q.eq("status", status) : q.in("status", groupStatuses);
+      const statusFilter = status ? q.eq("status", status) : q.in("status", statusesForList);
       const { data: groupData, error: groupErr } = await statusFilter.range(offset, offset + limit - 1);
       if (groupErr) return NextResponse.json({ error: groupErr.message }, { status: 500 });
       const list = filteredByChannel((groupData ?? []) as ConvRow[]);
@@ -221,7 +302,8 @@ export async function GET(request: Request) {
         }
         return { ...c, last_message_preview };
       });
-      return NextResponse.json({ data: gWithPreview, total: gWithPreview.length });
+      const gWithStatusVisuals = await enrichWithStatusVisuals(supabase, companyId, gWithPreview);
+      return NextResponse.json({ data: gWithStatusVisuals, total: gWithStatusVisuals.length });
     }
   }
   q = q.range(offset, offset + limit - 1);
@@ -352,6 +434,7 @@ export async function GET(request: Request) {
     ...c,
     channel_name: channelNameById[c.channel_id] ?? null,
   }));
+  listWithPreview = await enrichWithStatusVisuals(supabase, companyId, listWithPreview);
 
   // Evita mesmo contato aparecer 2x (ex.: external_id diferente ou customer_phone 55 vs sem 55)
   const seenTicketKey = new Set<string>();

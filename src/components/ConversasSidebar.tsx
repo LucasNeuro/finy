@@ -26,6 +26,8 @@ type Conversation = {
   assigned_to_name?: string | null;
   queue_id?: string | null;
   queue_name?: string | null;
+  ticket_status_name?: string | null;
+  ticket_status_color_hex?: string | null;
 };
 
 function formatLastMessageTime(iso: string): string {
@@ -73,6 +75,12 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   }
   if (s.length <= 14) return s;
   return s.slice(0, 14) + "…";
+}
+
+function withAlpha(hex: string, alphaHex = "1A"): string | null {
+  const v = (hex || "").trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(v)) return null;
+  return `${v}${alphaHex}`;
 }
 
 type ViewMode = "mine" | "queues" | "unassigned" | "mine_closed";
@@ -166,6 +174,9 @@ const ConversationListItem = memo(function ConversationListItem({
   };
 
   const statusLabel =
+    c.ticket_status_name?.trim()
+      ? c.ticket_status_name
+      :
     c.status === "closed"
       ? "Encerrado"
       : c.assigned_to
@@ -175,6 +186,8 @@ const ConversationListItem = memo(function ConversationListItem({
           : c.status === "open" || !c.status
             ? "Novo"
             : c.status;
+  const badgeTextColor = c.ticket_status_color_hex?.trim() || null;
+  const badgeBg = badgeTextColor ? withAlpha(badgeTextColor, "1A") : null;
   const shortId = c.id.replace(/-/g, "").slice(0, 8).toUpperCase();
 
   return (
@@ -251,14 +264,17 @@ const ConversationListItem = memo(function ConversationListItem({
             )}
             <span
               className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ${
-                c.status === "closed"
-                  ? "bg-[#64748B]/10 text-[#64748B]"
-                  : c.assigned_to
-                    ? "bg-[#8B5CF6]/10 text-[#7C3AED]"
-                    : c.status === "open" || c.status === "in_queue"
-                      ? "bg-[#22C55E]/10 text-[#16A34A]"
-                      : "bg-[#E2E8F0] text-[#64748B]"
+                !badgeTextColor
+                  ? c.status === "closed"
+                    ? "bg-[#64748B]/10 text-[#64748B]"
+                    : c.assigned_to
+                      ? "bg-[#8B5CF6]/10 text-[#7C3AED]"
+                      : c.status === "open" || c.status === "in_queue"
+                        ? "bg-[#22C55E]/10 text-[#16A34A]"
+                        : "bg-[#E2E8F0] text-[#64748B]"
+                  : ""
               }`}
+              style={badgeTextColor ? { color: badgeTextColor, backgroundColor: badgeBg ?? undefined } : undefined}
               title={`Status: ${statusLabel}`}
             >
               {statusLabel}
@@ -438,35 +454,12 @@ export function ConversasSidebar() {
   const [activeTab, setActiveTab] = useState<TabId>("mine");
   const [search, setSearch] = useState("");
   const [unassigning, setUnassigning] = useState(false);
-  const [resettingToOpen, setResettingToOpen] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab);
-    if ((tab === "queues" || tab === "mine" || tab === "novos") && slug) {
-      setResettingToOpen(true);
-      fetch("/api/conversations/reset-to-open", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ filter: tab }),
-      })
-        .then((res) => {
-          if (res.ok) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
-            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
-            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "unassigned") });
-            queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine_closed") });
-            queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
-            if (typeof window !== "undefined") {
-              window.dispatchEvent(new CustomEvent("conversations-status-reset"));
-            }
-          }
-        })
-        .finally(() => setResettingToOpen(false));
-    }
   };
   const viewMode: ViewMode =
     activeTab === "queues" ? "queues"

@@ -59,13 +59,13 @@ function normalizeStatus(raw: string): string {
 
 // Status "efetivo" usado no Kanban/Tabela:
 // - Se estiver fechado → sempre "closed"
-// - Se tiver atendente → sempre "in_progress" (Em atendimento)
+// - Para compatibilidade legada: "open" + atendente vira "in_progress"
+// - Para status customizados, respeitamos o status salvo (não forçamos "in_progress")
 // - Se estiver em fila e sem atendente → "in_queue"
-// - Caso contrário → normalizado (open / custom)
 function effectiveStatusForKanban(status: string, assigned_to: string | null): string {
   const norm = normalizeStatus(status);
   if (norm === "closed") return "closed";
-  if (assigned_to) return "in_progress";
+  if (norm === "open" && assigned_to) return "in_progress";
   if (norm === "in_queue") return "in_queue";
   return norm;
 }
@@ -131,7 +131,7 @@ export default function TicketsPage() {
 
   const statusColumns = useMemo(() => {
     if (Array.isArray(statusesData) && statusesData.length > 0) {
-      return statusesData
+      const configured = statusesData
         // Não exibimos a coluna padrão "Fila" no Kanban; ela continua válida na API/chat.
         .filter((s: { slug: string }) => s.slug !== "in_queue")
         .map((s: { id: string; name: string; slug: string; color_hex?: string; is_closed?: boolean; sort_order?: number }) => ({
@@ -142,6 +142,12 @@ export default function TicketsPage() {
           is_closed: !!s.is_closed,
           sort_order: s.sort_order ?? 0,
         }));
+      const bySlug = new Map(configured.map((c: TicketStatusColumn) => [c.key, c]));
+      // Guardrail visual: se a configuração vier incompleta, mantém colunas base visíveis.
+      FALLBACK_STATUSES.forEach((base) => {
+        if (!bySlug.has(base.key)) bySlug.set(base.key, base);
+      });
+      return Array.from(bySlug.values()).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     }
     return FALLBACK_STATUSES;
   }, [statusesData]);
@@ -203,7 +209,7 @@ export default function TicketsPage() {
     enabled: !!slug && permissionsData !== undefined && viewMode === "table",
     staleTime: 45 * 1000,
   });
-  const tableTickets = Array.isArray(tablePageData?.data) ? tablePageData.data : [];
+  const tableTickets: Ticket[] = Array.isArray(tablePageData?.data) ? (tablePageData.data as Ticket[]) : [];
   const tableTotal = typeof tablePageData?.total === "number" ? tablePageData.total : 0;
   const tablePageCount = Math.max(1, Math.ceil(tableTotal / TABLE_PAGE_SIZE));
 
@@ -336,25 +342,34 @@ export default function TicketsPage() {
       if (orderIds.length === 0) return;
       setReorderingColumns(true);
       try {
-        const r = queueId
-          ? await fetch(`/api/queues/${encodeURIComponent(queueId)}/ticket-statuses`, {
-              method: "PUT",
-              credentials: "include",
-              headers: { "Content-Type": "application/json", ...apiHeaders },
-              body: JSON.stringify({ ticket_status_ids: orderIds }),
-            })
-          : await fetch("/api/ticket-statuses/reorder", {
-              method: "PUT",
-              credentials: "include",
-              headers: { "Content-Type": "application/json", ...apiHeaders },
-              body: JSON.stringify({ order: orderIds }),
-            });
-        if (r.ok) {
-          refreshStatuses();
-        } else {
-          const d = await r.json().catch(() => ({}));
-          alert(d?.error ?? "Falha ao reordenar");
+        // 1) Reordena padrões globais (afeta todas as filas)
+        const globalReorder = await fetch("/api/ticket-statuses/reorder", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...apiHeaders },
+          body: JSON.stringify({ order: orderIds }),
+        });
+        if (!globalReorder.ok) {
+          const d = await globalReorder.json().catch(() => ({}));
+          alert(d?.error ?? "Falha ao reordenar padrões");
+          return;
         }
+
+        // 2) Se estiver numa fila específica, salva a ordem local (exclusivos)
+        if (queueId) {
+          const queueReorder = await fetch(`/api/queues/${encodeURIComponent(queueId)}/ticket-statuses`, {
+            method: "PUT",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({ ticket_status_ids: orderIds }),
+          });
+          if (!queueReorder.ok) {
+            const d = await queueReorder.json().catch(() => ({}));
+            alert(d?.error ?? "Falha ao reordenar fila");
+            return;
+          }
+        }
+        refreshStatuses();
       } catch {
         alert("Erro de rede");
       } finally {
@@ -734,16 +749,22 @@ export default function TicketsPage() {
               onDragOver={(e) => {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "move";
-                if (e.dataTransfer.types.includes("columnKey")) setDragOverColumn(col.key);
-                else if (e.dataTransfer.types.includes("ticketId")) setDragOverColumn(col.key);
+                if (draggingColumnKey || draggingId) setDragOverColumn(col.key);
               }}
               onDragLeave={() => setDragOverColumn(null)}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOverColumn(null);
-                const columnKey = e.dataTransfer.getData("columnKey");
-                const ticketId = e.dataTransfer.getData("ticketId");
-                const fromStatus = e.dataTransfer.getData("fromStatus");
+                const plain = e.dataTransfer.getData("text/plain");
+                let payload: { kind?: string; columnKey?: string; ticketId?: string; fromStatus?: string } = {};
+                try {
+                  payload = plain ? JSON.parse(plain) : {};
+                } catch {
+                  payload = {};
+                }
+                const columnKey = payload.columnKey || e.dataTransfer.getData("columnKey") || draggingColumnKey || "";
+                const ticketId = payload.ticketId || e.dataTransfer.getData("ticketId") || draggingId || "";
+                const fromStatus = payload.fromStatus || e.dataTransfer.getData("fromStatus") || "";
                 if (columnKey && columnKey !== col.key) {
                   const fromIndex = columns.findIndex((c) => c.key === columnKey);
                   if (fromIndex >= 0) reorderColumns(fromIndex, colIndex);
@@ -760,6 +781,7 @@ export default function TicketsPage() {
                 onDragStart={(e) => {
                   if (!canManageStatuses || reorderingColumns) return;
                   setDraggingColumnKey(col.key);
+                  e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "column", columnKey: col.key }));
                   e.dataTransfer.setData("columnKey", col.key);
                   e.dataTransfer.setData("columnId", col.id);
                   e.dataTransfer.effectAllowed = "move";
@@ -811,8 +833,10 @@ export default function TicketsPage() {
                     draggable={canManageTickets && !saving}
                     onDragStart={(e) => {
                       setDraggingId(t.id);
+                      const from = effectiveStatusForKanban(t.status, t.assigned_to);
+                      e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "ticket", ticketId: t.id, fromStatus: from }));
                       e.dataTransfer.setData("ticketId", t.id);
-                      e.dataTransfer.setData("fromStatus", effectiveStatusForKanban(t.status, t.assigned_to));
+                      e.dataTransfer.setData("fromStatus", from);
                       e.dataTransfer.effectAllowed = "move";
                     }}
                     onDragEnd={() => setDraggingId(null)}

@@ -10,9 +10,10 @@ import { invalidateCountsInSupabase } from "@/lib/cache/inbox-counts-supabase";
  * Redis só para gerenciar e deixar veloz: atendimento e gerenciamento de tickets.
  *
  * Onde o Redis é usado:
- * - GET /api/conversations (lista de conversas / tickets)
- * - GET /api/conversations/[id] (detalhe do chat)
- * - GET /api/conversations/counts (badges da sidebar)
+ * - GET /api/conversations (lista): SIDEBAR DO CHAT (Novos, Filas, Meus) e PÁGINA TICKETS (Kanban).
+ *   Um único cache de lista serve os dois; não existe Redis separado para o Kanban.
+ * - GET /api/conversations/[id] (detalhe do chat) — só o chat (abrir conversa).
+ * - GET /api/conversations/counts (badges da sidebar) — só o chat.
  *
  * Onde NÃO usamos Redis (sempre Supabase / UAZAPI quando aplicável):
  * - GET /api/contacts, GET /api/groups (Contatos e grupos — dados completos)
@@ -22,7 +23,12 @@ import { invalidateCountsInSupabase } from "@/lib/cache/inbox-counts-supabase";
  * Fluxo: Supabase = fonte da verdade. Redis = cache quente só para lista/detalhe/counts
  * de conversas. UAZAPI = chamada sob demanda (ex.: chat-details ao abrir painel, sync ao clicar Sincronizar).
  *
+ * Padrão de mercado (Zendesk, Intercom, etc.): cache quente + TTL curto + invalidação na escrita
+ * para manter a UI rápida sem servir dado desatualizado.
+ *
  * TTLs (segundos): lista 50, tickets 55, detalhe 90, contagens 45.
+ * Isolamento por empresa: lista e counts usam companyId na chave; detalhe/mídia usam conversationId
+ * (conversa já pertence a uma empresa; a API só devolve se o usuário for da mesma empresa).
  */
 const KEY_PREFIX = "inbox:list:";
 /** Lista: TTL para atendimento fluido (troca de abas, volta à lista). Estilo Zendesk. */
@@ -101,8 +107,9 @@ export async function setCachedConversationList(
 
 /**
  * Invalida todo o cache de listas de conversas da empresa.
- * Chamar quando uma conversa for criada/atualizada (webhook, PATCH, sync)
- * para que o estado quente reflita as mudanças.
+ * Chamado quando: PATCH conversa, claim, nova mensagem (webhook/POST), reação, deletar msg,
+ * arquivar/deletar chat, esvaziar meus, reset-to-open, sync contatos/histórico, chat-details.
+ * Remove todas as chaves inbox:list:{companyId}:* e em seguida invalida counts.
  */
 export async function invalidateConversationList(companyId: string): Promise<void> {
   const redis = await getRedisClient();
@@ -209,7 +216,9 @@ export async function setCachedConversationDetail(
 }
 
 /**
- * Invalida o cache do detalhe de uma conversa (nova mensagem, PATCH).
+ * Invalida o cache do detalhe de uma conversa.
+ * Chamado quando: PATCH na conversa, claim, nova mensagem, reação, deletar mensagem,
+ * arquivar/deletar chat, chat-details que altera essa conversa.
  */
 export async function invalidateConversationDetail(conversationId: string): Promise<void> {
   const redis = await getRedisClient();

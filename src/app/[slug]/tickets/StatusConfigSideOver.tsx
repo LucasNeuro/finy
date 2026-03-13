@@ -18,12 +18,17 @@ type Queue = { id: string; name: string };
 
 type TabId = "statuses" | "por-fila";
 const TAB_LABELS: Record<TabId, string> = {
-  statuses: "Status da empresa",
+  statuses: "Padrões da empresa",
   "por-fila": "Por fila",
 };
 
 const MAX_QUEUE_EXCLUSIVE_STATUSES = 9;
 const DEFAULT_STATUS_SLUGS = ["open", "in_queue", "in_progress", "closed"];
+const DEFAULT_STATUS_PRESETS = [
+  { name: "Novo", slug: "open", color_hex: "#22C55E", sort_order: 0, is_closed: false },
+  { name: "Em atendimento", slug: "in_progress", color_hex: "#8B5CF6", sort_order: 1, is_closed: false },
+  { name: "Encerrado", slug: "closed", color_hex: "#64748B", sort_order: 2, is_closed: true },
+];
 
 type StatusConfigSideOverProps = {
   open: boolean;
@@ -40,7 +45,7 @@ export function StatusConfigSideOver({
   queues = [],
   onSaved,
 }: StatusConfigSideOverProps) {
-  const [activeTab, setActiveTab] = useState<TabId>("statuses");
+  const [activeTab, setActiveTab] = useState<TabId>("por-fila");
   const [statuses, setStatuses] = useState<TicketStatus[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -89,6 +94,31 @@ export function StatusConfigSideOver({
     }
   }, [companySlug]);
 
+  const restoreCompanyDefaults = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      for (const preset of DEFAULT_STATUS_PRESETS) {
+        const r = await fetch("/api/ticket-statuses", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...apiHeaders },
+          body: JSON.stringify(preset),
+        });
+        if (!r.ok && r.status !== 409) {
+          const data = await r.json().catch(() => ({}));
+          throw new Error(data?.error ?? "Falha ao restaurar padrões");
+        }
+      }
+      await fetchStatuses();
+      onSaved?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro de rede");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const fetchQueueStatuses = useCallback(async () => {
     if (!selectedQueueId) {
       setQueueStatuses([]);
@@ -115,7 +145,7 @@ export function StatusConfigSideOver({
 
   useEffect(() => {
     if (open) {
-      setActiveTab("statuses");
+      setActiveTab("por-fila");
       setError("");
       setEditingId(null);
       setNewName("");
@@ -285,6 +315,22 @@ export function StatusConfigSideOver({
     setQueueStatusesSaving(true);
     setError("");
     try {
+      const globalIdsSet = new Set(statuses.map((s) => s.id));
+      const globalOrder = queueStatuses.filter((s) => globalIdsSet.has(s.id)).map((s) => s.id);
+      if (globalOrder.length > 0) {
+        const reorderRes = await fetch("/api/ticket-statuses/reorder", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...apiHeaders },
+          body: JSON.stringify({ order: globalOrder }),
+        });
+        if (!reorderRes.ok) {
+          const data = await reorderRes.json().catch(() => ({}));
+          setError(data?.error ?? "Falha ao reordenar padrões");
+          setQueueStatusesSaving(false);
+          return;
+        }
+      }
       const r = await fetch(`/api/queues/${encodeURIComponent(selectedQueueId)}/ticket-statuses`, {
         method: "PUT",
         credentials: "include",
@@ -351,7 +397,6 @@ export function StatusConfigSideOver({
   };
 
   const tabs: { id: TabId; icon: React.ReactNode }[] = [
-    { id: "statuses", icon: <ListOrdered className="h-4 w-4" /> },
     { id: "por-fila", icon: <GripVertical className="h-4 w-4" /> },
   ];
 
@@ -359,21 +404,23 @@ export function StatusConfigSideOver({
     <>
       <SideOver open={open} onClose={onClose} title="Configurar status" width={680}>
         <div className="flex flex-col gap-4">
-          <div className="flex gap-1 overflow-x-auto pb-2 -mx-1">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setActiveTab(t.id)}
-                className={`flex items-center gap-1.5 shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  activeTab === t.id ? "bg-clicvend-orange/10 text-clicvend-orange" : "text-[#64748B] hover:bg-[#F1F5F9]"
-                }`}
-              >
-                {t.icon}
-                {TAB_LABELS[t.id]}
-              </button>
-            ))}
-          </div>
+          {tabs.length > 1 && (
+            <div className="flex gap-1 overflow-x-auto pb-2 -mx-1">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveTab(t.id)}
+                  className={`flex items-center gap-1.5 shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    activeTab === t.id ? "bg-clicvend-orange/10 text-clicvend-orange" : "text-[#64748B] hover:bg-[#F1F5F9]"
+                  }`}
+                >
+                  {t.icon}
+                  {TAB_LABELS[t.id]}
+                </button>
+              ))}
+            </div>
+          )}
 
           {error && (
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
@@ -389,64 +436,21 @@ export function StatusConfigSideOver({
               {activeTab === "statuses" && (
                 <div className="space-y-4">
                   <p className="text-sm text-[#64748B]">
-                    Crie e edite o status do fluxo de atendimento. Cada fila pode ter seus próprios status: use a aba &quot;Por fila&quot; para definir quais colunas cada fila exibe no quadro.
+                    Nesta versão, os status customizados devem ser configurados por fila.
+                    Aqui ficam os padrões globais da empresa (base do sistema).
                   </p>
-
-                  {!creating ? (
+                  <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3 flex items-center justify-between gap-2">
+                    <span className="text-sm text-[#334155]">Restaurar/garantir padrões globais (Novo, Em atendimento, Encerrado).</span>
                     <button
                       type="button"
-                      onClick={() => setCreating(true)}
-                      className="inline-flex items-center gap-2 rounded-lg border border-dashed border-[#CBD5E1] px-3 py-2 text-sm font-medium text-[#64748B] hover:border-clicvend-orange hover:text-clicvend-orange"
+                      onClick={restoreCompanyDefaults}
+                      disabled={saving}
+                      className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 text-sm font-medium text-[#334155] hover:bg-[#F1F5F9] disabled:opacity-60"
                     >
-                      <Plus className="h-4 w-4" />
-                      Novo status
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Restaurar padrões
                     </button>
-                  ) : (
-                    <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-4 space-y-3">
-                      <input
-                        type="text"
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        placeholder="Nome do status (ex: Em análise)"
-                        className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B]"
-                      />
-                      <div className="flex items-center gap-3">
-                        <label className="text-sm text-[#64748B]">Cor:</label>
-                        <input
-                          type="color"
-                          value={newColor}
-                          onChange={(e) => setNewColor(e.target.value)}
-                          className="h-8 w-8 cursor-pointer rounded border border-[#E2E8F0]"
-                        />
-                        <label className="flex items-center gap-2 text-sm text-[#64748B]">
-                          <input
-                            type="checkbox"
-                            checked={newIsClosed}
-                            onChange={(e) => setNewIsClosed(e.target.checked)}
-                          />
-                          Status de fechamento
-                        </label>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { setCreating(false); setNewName(""); setNewColor("#64748B"); setNewIsClosed(false); }}
-                          className="rounded-lg px-3 py-1.5 text-sm text-[#64748B] hover:bg-[#E2E8F0]"
-                        >
-                          Cancelar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={createStatus}
-                          disabled={saving || !newName.trim()}
-                          className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-                        >
-                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                          Criar
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  </div>
 
                   <div className="space-y-2">
                     {statuses.map((s, i) => (

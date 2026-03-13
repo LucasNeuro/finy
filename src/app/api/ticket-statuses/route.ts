@@ -1,8 +1,55 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+
+async function ensureCompanyDefaultStatuses(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  companyId: string
+) {
+  const defaults = [
+    { name: "Novo", slug: "open", color_hex: "#22C55E", sort_order: 0, is_closed: false },
+    { name: "Em atendimento", slug: "in_progress", color_hex: "#8B5CF6", sort_order: 1, is_closed: false },
+    { name: "Encerrado", slug: "closed", color_hex: "#64748B", sort_order: 2, is_closed: true },
+  ];
+  const { data: existing } = await supabase
+    .from("company_ticket_statuses")
+    .select("id, slug")
+    .eq("company_id", companyId)
+    .is("queue_id", null)
+    .in("slug", defaults.map((d) => d.slug));
+  const bySlug = new Map((existing ?? []).map((r: { id: string; slug: string }) => [String(r.slug), r.id]));
+  for (const d of defaults) {
+    const id = bySlug.get(d.slug);
+    if (id) {
+      await supabase
+        .from("company_ticket_statuses")
+        .update({
+          name: d.name,
+          color_hex: d.color_hex,
+          sort_order: d.sort_order,
+          is_closed: d.is_closed,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+        .eq("company_id", companyId);
+    } else {
+      await supabase
+        .from("company_ticket_statuses")
+        .insert({
+          company_id: companyId,
+          queue_id: null,
+          name: d.name,
+          slug: d.slug,
+          color_hex: d.color_hex,
+          sort_order: d.sort_order,
+          is_closed: d.is_closed,
+        });
+    }
+  }
+}
 
 /**
  * POST /api/ticket-statuses
@@ -92,6 +139,7 @@ export async function POST(request: Request) {
     });
   }
 
+  await invalidateConversationList(companyId);
   return NextResponse.json(data);
 }
 
@@ -114,6 +162,7 @@ export async function GET(request: Request) {
   const queueId = searchParams.get("queue_id")?.trim();
 
   const supabase = await createClient();
+  await ensureCompanyDefaultStatuses(supabase, companyId);
 
   if (queueId) {
     const { data: qRows, error: qErr } = await supabase
