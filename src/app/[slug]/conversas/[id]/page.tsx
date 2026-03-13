@@ -13,6 +13,7 @@ import { RealtimeMessages } from "@/components/RealtimeMessages";
 import { EmojiReactionPicker } from "@/components/EmojiReactionPicker";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { ChatAudioPlayer } from "@/components/chat/ChatAudioPlayer";
+import { ChatContactInfoTagsAndForms } from "./ChatContactInfoTagsAndForms";
 
 type Message = {
   id: string;
@@ -44,6 +45,8 @@ type ConversationDetail = {
   queue_name?: string | null;
   assigned_to_name?: string | null;
   contact_avatar_url?: string | null;
+  /** Cor do status do Kanban (company_ticket_statuses) para exibir atrás da foto */
+  ticket_status_color_hex?: string | null;
   messages: Message[];
 };
 
@@ -378,6 +381,68 @@ function isPlayableOrDirectUrl(url: string | null | undefined): boolean {
 
 /** Cache local de URLs de mídia por messageId (evita refetch ao navegar entre abas). */
 const mediaUrlCache = new Map<string, string>();
+
+/** Miniatura na lista de mídias: para imagem usa URL de download quando disponível. variant carousel = preenche o card. */
+function MediaListThumbnail({
+  type,
+  msgId,
+  conversationId,
+  apiHeaders,
+  mediaUrl,
+  variant = "list",
+}: {
+  type: string;
+  msgId: string;
+  conversationId: string | undefined;
+  apiHeaders: Record<string, string> | undefined;
+  mediaUrl?: string | null;
+  variant?: "list" | "carousel";
+}) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(() => mediaUrlCache.get(msgId) ?? null);
+  useEffect(() => {
+    if (type !== "image" && type !== "video") return;
+    if (thumbUrl) return;
+    if (!conversationId || !apiHeaders) return;
+    let cancelled = false;
+    fetch(`/api/conversations/${conversationId}/messages/${msgId}/download`, { credentials: "include", headers: apiHeaders })
+      .then((r) => r.json().catch(() => ({})))
+      .then((data: { fileURL?: string }) => {
+        if (cancelled || !data?.fileURL) return;
+        mediaUrlCache.set(msgId, data.fileURL);
+        setThumbUrl(data.fileURL);
+      });
+    return () => { cancelled = true; };
+  }, [type, msgId, conversationId, apiHeaders, thumbUrl]);
+
+  const directUrl = (mediaUrl && (mediaUrl.startsWith("http") || mediaUrl.startsWith("data:"))) ? mediaUrl : null;
+  const url = thumbUrl ?? directUrl;
+
+  const sizeClass = variant === "carousel" ? "h-full w-full min-h-[6rem]" : "h-10 w-10 shrink-0";
+
+  if (type === "image" && url) {
+    return (
+      <div className={`overflow-hidden rounded bg-[#E2E8F0] ${sizeClass}`}>
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      </div>
+    );
+  }
+  if (type === "video") {
+    return (
+      <div className={`relative flex items-center justify-center overflow-hidden rounded bg-[#E2E8F0] text-[#64748B] ${sizeClass}`}>
+        <Video className={variant === "carousel" ? "h-10 w-10" : "h-5 w-5"} />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded">
+          <Play className={`${variant === "carousel" ? "h-6 w-6" : "h-3 w-3"} text-white drop-shadow`} />
+        </div>
+      </div>
+    );
+  }
+  const Icon = type === "document" ? FileText : Music;
+  return (
+    <div className={`flex items-center justify-center rounded bg-[#E2E8F0] text-[#64748B] ${sizeClass}`}>
+      <Icon className={variant === "carousel" ? "h-10 w-10" : "h-5 w-5"} />
+    </div>
+  );
+}
 
 /** Inferir tipo de mídia para mensagens já na conversa (message_type vazio ou conteúdo em formato antigo). */
 function inferDisplayType(messageType: string | undefined, content: string, m?: { file_name?: string | null; media_url?: string | null }): string {
@@ -2670,15 +2735,22 @@ export default function ConversaThreadPage({
             )}
             {!contactDetailsLoading && (contactDetails || !conv?.channel_id) && (
               <div className="space-y-4">
+                {(() => {
+                  const kanbanColor = (conv?.ticket_status_color_hex ?? "").trim() || null;
+                  const statusBg = kanbanColor || "#64748B";
+                  const statusTitle = kanbanColor ? "Status do ticket (Kanban)" : "Status";
+                  return (
                 <div className="flex flex-col items-center gap-3 border-b border-[#E2E8F0] pb-4">
-                  <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full bg-[#E2E8F0]">
-                    {imageUrl ? (
-                      <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-3xl text-[#94A3B8]">
-                        <User className="h-12 w-12" />
-                      </div>
-                    )}
+                  <div className="relative p-2 rounded-full shadow-lg ring-2 ring-black/10" style={{ backgroundColor: statusBg }} title={statusTitle}>
+                    <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full bg-white ring-2 ring-white shadow-inner">
+                      {imageUrl ? (
+                        <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-3xl text-[#94A3B8] bg-[#E2E8F0]">
+                          <User className="h-12 w-12" />
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="text-center">
                     <p className="font-semibold text-[#1E293B]">{displayName}</p>
@@ -2694,30 +2766,67 @@ export default function ConversaThreadPage({
                     )}
                   </div>
                 </div>
+                  );
+                })()}
                 <div className="space-y-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Mídias e documentos</h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">Mídias e documentos</h3>
+                    {(() => {
+                      const mediaList = getMediaMessages(conv?.messages);
+                      return mediaList.length > 0 ? (
+                        <span className="text-xs font-medium text-[#64748B] shrink-0">
+                          {mediaList.length} {mediaList.length === 1 ? "arquivo" : "arquivos"}
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
                   {(() => {
                     const mediaList = getMediaMessages(conv?.messages);
                     if (mediaList.length === 0) {
                       return <p className="text-sm text-[#94A3B8]">Nenhuma mídia ou documento nesta conversa.</p>;
                     }
                     return (
-                      <div className="space-y-2">
-                        <p className="text-sm text-[#64748B]">{mediaList.length} {mediaList.length === 1 ? "arquivo" : "arquivos"}</p>
-                        <ul className="space-y-1.5 max-h-48 overflow-y-auto">
+                      <div className="overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 scrollbar-thin scrollbar-track-[#F1F5F9] scrollbar-thumb-[#CBD5E1]">
+                        <ul className="flex gap-3 snap-x snap-mandatory" style={{ minWidth: "min-content" }}>
                           {mediaList.map((msg) => {
                             const type = inferDisplayType(msg.message_type, msg.content ?? "", msg);
                             const label = type === "document" ? (msg.file_name || "Documento") : mediaTypeLabel(type);
-                            const Icon = type === "image" ? Image : type === "video" ? Video : type === "document" ? FileText : Music;
                             return (
-                              <li key={msg.id} className="flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-1.5 text-sm">
-                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#E2E8F0] text-[#64748B]">
-                                  <Icon className="h-4 w-4" />
-                                </div>
-                                <span className="min-w-0 flex-1 truncate text-[#1E293B]" title={label}>{label}</span>
-                                <span className="text-xs text-[#94A3B8] shrink-0">
-                                  {new Date(msg.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                                </span>
+                              <li
+                                key={msg.id}
+                                className="flex flex-col shrink-0 w-28 snap-start rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] overflow-hidden hover:border-[#CBD5E1] transition-colors"
+                              >
+                                <button
+                                  type="button"
+                                  className="block w-full text-left focus:outline-none focus:ring-2 focus:ring-clicvend-orange/30 rounded-t-lg overflow-hidden"
+                                  onClick={async () => {
+                                    if (!resolved?.id || !apiHeaders) return;
+                                    try {
+                                      const res = await fetch(`/api/conversations/${resolved.id}/messages/${msg.id}/download`, { credentials: "include", headers: apiHeaders });
+                                      const data = await res.json().catch(() => ({}));
+                                      if (data?.fileURL) window.open(data.fileURL, "_blank", "noopener,noreferrer");
+                                    } catch {
+                                      // ignorar
+                                    }
+                                  }}
+                                >
+                                  <div className="h-24 w-full bg-[#E2E8F0]">
+                                    <MediaListThumbnail
+                                      type={type}
+                                      msgId={msg.id}
+                                      conversationId={resolved?.id}
+                                      apiHeaders={apiHeaders ?? undefined}
+                                      mediaUrl={msg.media_url ?? msg.media_cached_url}
+                                      variant="carousel"
+                                    />
+                                  </div>
+                                  <div className="px-2 py-1.5 min-h-0">
+                                    <p className="text-xs font-medium text-[#1E293B] truncate" title={label}>{label}</p>
+                                    <p className="text-[10px] text-[#94A3B8]">
+                                      {new Date(msg.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                                    </p>
+                                  </div>
+                                </button>
                                 <a
                                   href="#"
                                   onClick={async (e) => {
@@ -2731,10 +2840,11 @@ export default function ConversaThreadPage({
                                       // ignorar
                                     }
                                   }}
-                                  className="shrink-0 rounded p-1 text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
+                                  className="flex items-center justify-center gap-1 py-1.5 text-[10px] text-[#64748B] hover:bg-[#E2E8F0] hover:text-clicvend-orange transition-colors"
                                   title="Ver e baixar"
                                 >
-                                  <Download className="h-4 w-4" />
+                                  <Download className="h-3.5 w-3.5" />
+                                  Baixar
                                 </a>
                               </li>
                             );
@@ -2792,6 +2902,36 @@ export default function ConversaThreadPage({
                 <button type="button" className="w-full rounded-lg border border-[#E2E8F0] py-2 text-sm text-[#64748B] hover:bg-[#F8FAFC]">
                   Marcar como não lida
                 </button>
+                {infoOpen && conv && (
+                  <ChatContactInfoTagsAndForms
+                    showSection="tags"
+                    conv={{
+                      id: conv.id,
+                      channel_id: conv.channel_id ?? null,
+                      queue_id: conv.queue_id ?? null,
+                      customer_phone: conv.customer_phone ?? null,
+                      external_id: conv.external_id ?? null,
+                      is_group: conv.is_group ?? false,
+                      wa_chat_jid: conv.wa_chat_jid ?? null,
+                    }}
+                    apiHeaders={apiHeaders ?? undefined}
+                  />
+                )}
+                {infoOpen && conv && (
+                  <ChatContactInfoTagsAndForms
+                    showSection="forms"
+                    conv={{
+                      id: conv.id,
+                      channel_id: conv.channel_id ?? null,
+                      queue_id: conv.queue_id ?? null,
+                      customer_phone: conv.customer_phone ?? null,
+                      external_id: conv.external_id ?? null,
+                      is_group: conv.is_group ?? false,
+                      wa_chat_jid: conv.wa_chat_jid ?? null,
+                    }}
+                    apiHeaders={apiHeaders ?? undefined}
+                  />
+                )}
               </div>
             )}
             {!conv?.channel_id && !contactDetailsLoading && (

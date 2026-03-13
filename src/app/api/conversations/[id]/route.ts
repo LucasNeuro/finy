@@ -154,6 +154,44 @@ export async function GET(
   const queue_name = (queueRes.data as { name?: string } | null)?.name ?? null;
   const assigned_to_name = (assigneeRes.data as { full_name?: string } | null)?.full_name ?? null;
 
+  const rawStatus = (conversation.status ?? "open").toString().toLowerCase().trim();
+  const effectiveStatus =
+    rawStatus === "closed"
+      ? "closed"
+      : conversation.assigned_to
+        ? "in_progress"
+        : rawStatus === "in_queue"
+          ? "in_queue"
+          : rawStatus === "waiting"
+            ? "waiting"
+            : "open";
+  let ticket_status_color_hex: string | null = null;
+  const queueId = conversation.queue_id ?? null;
+  const slugForColor = effectiveStatus;
+  const { data: statusRow } = await supabase
+    .from("company_ticket_statuses")
+    .select("color_hex")
+    .eq("company_id", companyId)
+    .eq("slug", slugForColor)
+    .or(queueId ? `queue_id.eq.${queueId},queue_id.is.null` : "queue_id.is.null")
+    .limit(1)
+    .maybeSingle();
+  if (statusRow && (statusRow as { color_hex?: string }).color_hex) {
+    ticket_status_color_hex = (statusRow as { color_hex: string }).color_hex.trim() || null;
+  }
+  if (!ticket_status_color_hex) {
+    const { data: fallbackRow } = await supabase
+      .from("company_ticket_statuses")
+      .select("color_hex")
+      .eq("company_id", companyId)
+      .eq("slug", slugForColor)
+      .limit(1)
+      .maybeSingle();
+    if (fallbackRow && (fallbackRow as { color_hex?: string }).color_hex) {
+      ticket_status_color_hex = (fallbackRow as { color_hex: string }).color_hex.trim() || null;
+    }
+  }
+
   const jid = conversation.wa_chat_jid || conversation.external_id || conversation.customer_phone || "";
   const jidNorm = jid && !jid.includes("@") ? `${jid.replace(/\D/g, "")}@s.whatsapp.net` : jid;
   const canonicalDigits = toCanonicalDigits(conversation.customer_phone || jid);
@@ -334,6 +372,7 @@ export async function GET(
     queue_name,
     assigned_to_name,
     contact_avatar_url,
+    ticket_status_color_hex: ticket_status_color_hex ?? null,
     messages,
   };
   await setCachedConversationDetail(id, payload as Record<string, unknown>);

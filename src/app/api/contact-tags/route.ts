@@ -20,9 +20,27 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const channelContactId = url.searchParams.get("channel_contact_id");
+  let channelContactId = url.searchParams.get("channel_contact_id");
+  const channelIdParam = url.searchParams.get("channel_id");
+  const numberParam = url.searchParams.get("number");
 
   const supabase = await createClient();
+
+  // Resolve channel_contact_id from channel_id + number (ex.: chat sidebar)
+  if (!channelContactId && channelIdParam?.trim() && numberParam?.trim()) {
+    const digits = numberParam.replace(/\D/g, "").trim();
+    const jid = digits ? `${digits}@s.whatsapp.net` : "";
+    if (jid) {
+      const { data: contactRow } = await supabase
+        .from("channel_contacts")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("channel_id", channelIdParam.trim())
+        .eq("jid", jid)
+        .maybeSingle();
+      if (contactRow?.id) channelContactId = contactRow.id as string;
+    }
+  }
 
   const { data, error } = await supabase
     .from("tags")
