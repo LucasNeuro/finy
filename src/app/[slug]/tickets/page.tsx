@@ -87,6 +87,7 @@ export default function TicketsPage() {
   const [tablePageIndex, setTablePageIndex] = useState(0);
   const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set());
   const [bulkStatusSaving, setBulkStatusSaving] = useState(false);
+  const [optimisticStatusById, setOptimisticStatusById] = useState<Record<string, string>>({});
 
   const queryClient = useQueryClient();
 
@@ -219,6 +220,9 @@ export default function TicketsPage() {
       setSelectedTicketIds(new Set());
     }
   }, [viewMode, queueId]);
+  useEffect(() => {
+    setOptimisticStatusById({});
+  }, [queueId]);
 
   useEffect(() => {
     const el = tableSelectAllRef.current;
@@ -295,6 +299,7 @@ export default function TicketsPage() {
     const previousData = queryClient.getQueryData<{ pages: { data: Ticket[]; total: number }[]; pageParams: unknown[] }>(listKey);
 
     // Atualização otimista: move o card na hora; se a API falhar, revertemos.
+    setOptimisticStatusById((prev) => ({ ...prev, [ticketId]: apiStatus }));
     queryClient.setQueryData(listKey, (old: typeof previousData) => {
       if (!old) return old;
       return {
@@ -317,19 +322,31 @@ export default function TicketsPage() {
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         if (previousData) queryClient.setQueryData(listKey, previousData);
+        setOptimisticStatusById((prev) => {
+          const next = { ...prev };
+          delete next[ticketId];
+          return next;
+        });
         alert(d?.error ?? "Falha ao atualizar status");
       } else {
+        queryClient.invalidateQueries({ queryKey: listKey });
+        queryClient.invalidateQueries({ queryKey: [...listKey, "table", tablePageIndex] });
         queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "queues") });
         queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug ?? "", "mine") });
         queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
       }
     } catch {
       if (previousData) queryClient.setQueryData(listKey, previousData);
+      setOptimisticStatusById((prev) => {
+        const next = { ...prev };
+        delete next[ticketId];
+        return next;
+      });
       alert("Erro de rede");
     } finally {
       setSaving(false);
     }
-  }, [apiHeaders, slug, queueId, canManageTickets, queryClient]);
+  }, [apiHeaders, slug, queueId, canManageTickets, queryClient, tablePageIndex]);
 
   const reorderColumns = useCallback(
     async (fromIndex: number, toIndex: number) => {
@@ -386,7 +403,7 @@ export default function TicketsPage() {
       grouped[c.key] = [];
     });
     for (const t of tickets) {
-      const baseKey = effectiveStatusForKanban(t.status, t.assigned_to);
+      const baseKey = effectiveStatusForKanban(optimisticStatusById[t.id] ?? t.status, t.assigned_to);
       // No Kanban, tratamos "in_queue" como "open" (sem coluna própria).
       const key = baseKey === "in_queue" ? "open" : baseKey;
       if (!grouped[key]) grouped[key] = [];
@@ -396,7 +413,7 @@ export default function TicketsPage() {
       ...c,
       items: grouped[c.key] ?? [],
     }));
-  }, [tickets, statusColumns]);
+  }, [tickets, statusColumns, optimisticStatusById]);
 
   if (slug && permissionsData !== undefined && !canAccessTickets) {
     return (
@@ -624,7 +641,7 @@ export default function TicketsPage() {
                 </thead>
                 <tbody>
                   {tableTickets.map((t) => {
-                    const statusKey = effectiveStatusForKanban(t.status, t.assigned_to);
+                    const statusKey = effectiveStatusForKanban(optimisticStatusById[t.id] ?? t.status, t.assigned_to);
                     const colDef = statusColumns.find((s) => s.key === statusKey);
                     const barColor = colDef?.color_hex ?? "#64748B";
                     const statusLabel =
@@ -804,7 +821,7 @@ export default function TicketsPage() {
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-md">
                 {col.items.map((t) => {
-                  const statusKey = effectiveStatusForKanban(t.status, t.assigned_to);
+                  const statusKey = effectiveStatusForKanban(optimisticStatusById[t.id] ?? t.status, t.assigned_to);
                   const colDef = statusColumns.find((s) => s.key === statusKey);
                   const barColor = colDef?.color_hex ?? "#3B82F6";
                   const statusLabel =
@@ -833,7 +850,7 @@ export default function TicketsPage() {
                     draggable={canManageTickets && !saving}
                     onDragStart={(e) => {
                       setDraggingId(t.id);
-                      const from = effectiveStatusForKanban(t.status, t.assigned_to);
+                      const from = effectiveStatusForKanban(optimisticStatusById[t.id] ?? t.status, t.assigned_to);
                       e.dataTransfer.setData("text/plain", JSON.stringify({ kind: "ticket", ticketId: t.id, fromStatus: from }));
                       e.dataTransfer.setData("ticketId", t.id);
                       e.dataTransfer.setData("fromStatus", from);
