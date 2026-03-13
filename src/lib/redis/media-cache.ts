@@ -10,8 +10,9 @@ import { getRedisClient } from "@/lib/redis/client";
  * Valor: { fileURL: string, mimeType?: string }
  * TTL: 2 horas (mídia é imutável)
  */
-const KEY_PREFIX = "inbox:media:";
-const KEY_PREFIX_V2 = "inbox:media:v2:";
+const REDIS_NAMESPACE = (process.env.REDIS_NAMESPACE?.trim() || process.env.NODE_ENV || "dev").replace(/\s+/g, "_");
+const KEY_PREFIX = `${REDIS_NAMESPACE}:inbox:media:`; // legado
+const KEY_PREFIX_V2 = `${REDIS_NAMESPACE}:inbox:media:v2:`;
 const TTL_SECONDS = 2 * 60 * 60; // 2 horas
 
 function mediaKey(conversationId: string, messageId: string): string {

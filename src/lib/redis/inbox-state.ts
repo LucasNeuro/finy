@@ -30,7 +30,8 @@ import { invalidateCountsInSupabase } from "@/lib/cache/inbox-counts-supabase";
  * Isolamento por empresa: lista e counts usam companyId na chave; detalhe/mídia usam conversationId
  * (conversa já pertence a uma empresa; a API só devolve se o usuário for da mesma empresa).
  */
-const KEY_PREFIX = "inbox:list:";
+const REDIS_NAMESPACE = (process.env.REDIS_NAMESPACE?.trim() || process.env.NODE_ENV || "dev").replace(/\s+/g, "_");
+const KEY_PREFIX = `${REDIS_NAMESPACE}:inbox:list:v2:`;
 /** Lista: TTL para atendimento fluido (troca de abas, volta à lista). Estilo Zendesk. */
 const TTL_SECONDS = 50;
 /** Tickets (includeClosed). */
@@ -126,7 +127,7 @@ export async function invalidateConversationList(companyId: string): Promise<voi
   }
 }
 
-const COUNTS_KEY_PREFIX = "inbox:counts:";
+const COUNTS_KEY_PREFIX = `${REDIS_NAMESPACE}:inbox:counts:v2:`;
 const COUNTS_TTL_SECONDS = 45;
 
 /** Retorna as contagens (mine, queues, individual, groups, unassigned) do cache, se existirem. */
@@ -178,8 +179,8 @@ export async function invalidateCounts(companyId: string): Promise<void> {
   await invalidateCountsInSupabase(companyId);
 }
 
-const DETAIL_KEY_PREFIX = "inbox:detail:";
-const DETAIL_KEY_PREFIX_V2 = "inbox:detail:v2:";
+const DETAIL_KEY_PREFIX = `${REDIS_NAMESPACE}:inbox:detail:`; // legado
+const DETAIL_KEY_PREFIX_V2 = `${REDIS_NAMESPACE}:inbox:detail:v2:`;
 /** Detalhe do chat: TTL para abrir conversa instantâneo ao trocar. Estilo Zendesk. */
 const DETAIL_TTL_SECONDS = 90;
 

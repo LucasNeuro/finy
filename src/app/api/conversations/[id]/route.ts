@@ -304,12 +304,22 @@ export async function GET(
             updatePayload.avatar_url = fetchedImage;
           }
 
-          await supabase
-            .from("channel_contacts")
-            .update(updatePayload)
-            .eq("channel_id", conversation.channel_id)
-            .eq("company_id", companyId)
-            .in("jid", jids);
+          await Promise.all(
+            jids.map((jid) =>
+              supabase
+                .from("channel_contacts")
+                .upsert(
+                  {
+                    channel_id: conversation.channel_id,
+                    company_id: companyId,
+                    jid,
+                    ...(canonicalDigits ? { phone: canonicalDigits } : {}),
+                    ...updatePayload,
+                  },
+                  { onConflict: "channel_id,jid" }
+                )
+            )
+          );
 
           if (fetchedName) {
             await supabase

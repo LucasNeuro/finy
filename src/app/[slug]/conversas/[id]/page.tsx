@@ -123,6 +123,15 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   return s.slice(0, 14) + "…";
 }
 
+function normalizeAvatarUrl(url: string | null | undefined): string | null {
+  const u = (url ?? "").trim();
+  if (!u) return null;
+  if (u.startsWith("http://") || u.startsWith("https://")) {
+    return `/api/contacts/avatar?url=${encodeURIComponent(u)}`;
+  }
+  return u;
+}
+
 /** Formata segundos em mm:ss */
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -2298,11 +2307,10 @@ export default function ConversaThreadPage({
   const displayPhone = formatPhoneBrazil(rawPhone);
   const telDigits = rawPhone.replace(/\D/g, "") || "";
   const telHref = telDigits ? (telDigits.startsWith("55") ? `tel:+${telDigits}` : `tel:+55${telDigits}`) : undefined;
-  const imageUrl = (conv?.contact_avatar_url && conv.contact_avatar_url.trim())
-    ? (conv.contact_avatar_url.startsWith("http://") || conv.contact_avatar_url.startsWith("https://")
-        ? `/api/contacts/avatar?url=${encodeURIComponent(conv.contact_avatar_url)}`
-        : conv.contact_avatar_url)
-    : (contactDetails?.imagePreview ?? contactDetails?.image ?? null);
+  const imageUrl = normalizeAvatarUrl(conv?.contact_avatar_url)
+    ?? normalizeAvatarUrl(contactDetails?.imagePreview as string | null | undefined)
+    ?? normalizeAvatarUrl(contactDetails?.image as string | null | undefined)
+    ?? null;
   const headerStatusVisual = resolveConversationStatusVisual(conv);
 
   return (

@@ -59,6 +59,7 @@ export async function POST(request: Request) {
   const contactName = ((data as { wa_contactName?: string }).wa_contactName
     ?? (data as { wa_name?: string }).wa_name
     ?? (data as { name?: string }).name)?.trim() || null;
+  const digitsOnly = number.replace(/\D/g, "");
 
   const hasUpdates = (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) || contactName;
   if (hasUpdates) {
@@ -73,12 +74,22 @@ export async function POST(request: Request) {
       contactUpdates.contact_name = contactName;
       contactUpdates.first_name = contactName;
     }
-    await supabase
-      .from("channel_contacts")
-      .update(contactUpdates)
-      .eq("channel_id", channelId)
-      .eq("company_id", companyId)
-      .in("jid", jids);
+    await Promise.all(
+      jids.map((jid) =>
+        supabase
+          .from("channel_contacts")
+          .upsert(
+            {
+              channel_id: channelId,
+              company_id: companyId,
+              jid,
+              ...(digitsOnly ? { phone: digitsOnly } : {}),
+              ...contactUpdates,
+            },
+            { onConflict: "channel_id,jid" }
+          )
+      )
+    );
     if (conversationId && contactName) {
       await supabase
         .from("conversations")
@@ -87,7 +98,7 @@ export async function POST(request: Request) {
     }
     await invalidateConversationList(companyId);
     if (conversationId) {
-      await invalidateConversationDetail(conversationId);
+      await invalidateConversationDetail(conversationId, companyId);
     }
   }
 

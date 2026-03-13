@@ -432,10 +432,12 @@ async function processOneMessage(
 
     // Cache Redis aqui só para o fluxo de atendimento (evitar hit no banco a cada mensagem). Telas de Conexões/canais não usam Redis.
     const redis = await getRedisClient();
-    const cacheKey = `uaz:instance:${instanceId}`;
+    const redisNs = (process.env.REDIS_NAMESPACE?.trim() || process.env.NODE_ENV || "dev").replace(/\s+/g, "_");
+    const cacheKeyV2 = `${redisNs}:uaz:instance:v2:${instanceId}`;
+    const cacheKeyLegacy = `uaz:instance:${instanceId}`;
 
     if (redis) {
-      const cached = await redis.get(cacheKey);
+      const cached = (await redis.get(cacheKeyV2)) || (await redis.get(cacheKeyLegacy));
       if (cached) {
         try {
           channel = JSON.parse(cached) as CachedChannel;
@@ -484,7 +486,7 @@ async function processOneMessage(
       };
 
       if (redis) {
-        await redis.set(cacheKey, JSON.stringify(channel), { EX: 300 }).catch(() => {});
+        await redis.set(cacheKeyV2, JSON.stringify(channel), { EX: 300 }).catch(() => {});
       }
     }
 
