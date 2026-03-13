@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { SideOver } from "@/components/SideOver";
 import { Loader2, UserPlus } from "lucide-react";
 
@@ -33,7 +33,10 @@ export function ReassignSideOver({
   const [error, setError] = useState("");
   const [selectedUserId, setSelectedUserId] = useState<string>("");
 
-  const apiHeaders = companySlug ? { "X-Company-Slug": companySlug } : undefined;
+  const apiHeaders = useMemo(
+    () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
+    [companySlug]
+  );
 
   const fetchAgents = useCallback(async () => {
     setLoading(true);
@@ -50,8 +53,10 @@ export function ReassignSideOver({
             user_id: string;
             full_name?: string | null;
             email?: string | null;
+            is_active?: boolean | null;
           }[];
           queueUsers.forEach((u) => {
+            if (u?.is_active === false) return;
             if (!u?.user_id || seen.has(u.user_id)) return;
             seen.add(u.user_id);
             allAgents.push({

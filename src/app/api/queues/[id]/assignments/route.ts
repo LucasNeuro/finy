@@ -53,18 +53,20 @@ export async function GET(
   const admin = createServiceRoleClient();
   const { data: allProfiles } = await admin
     .from("profiles")
-    .select("user_id, full_name, email")
+    .select("user_id, full_name, email, is_active")
     .eq("company_id", companyId);
 
   const allUsers = (allProfiles ?? []).map((p) => ({
     user_id: (p as { user_id: string }).user_id,
     full_name: (p as { full_name?: string }).full_name ?? null,
     email: (p as { email?: string }).email ?? null,
+    is_active: (p as { is_active?: boolean | null }).is_active ?? null,
   }));
 
-  const assignedUsers = userIds.length === 0 ? [] : allUsers.filter((u) => userIds.includes(u.user_id));
+  const activeUsers = allUsers.filter((u) => u.is_active !== false);
+  const assignedUsers = userIds.length === 0 ? [] : activeUsers.filter((u) => userIds.includes(u.user_id));
 
-  return NextResponse.json({ user_ids: userIds, users: assignedUsers, all_users: allUsers });
+  return NextResponse.json({ user_ids: userIds, users: assignedUsers, all_users: activeUsers });
 }
 
 /**
