@@ -20,7 +20,8 @@ export async function GET(request: Request) {
 
   let url: URL;
   try {
-    url = new URL(decodeURIComponent(raw.trim()));
+    // searchParams.get já devolve valor decodificado; evitar double decode em URLs assinadas
+    url = new URL(raw.trim());
   } catch {
     return new Response(null, { status: 400 });
   }
@@ -54,7 +55,8 @@ export async function GET(request: Request) {
     return new Response(blob, {
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "private, max-age=86400, stale-while-revalidate=3600",
+        // Avatar externo pode expirar; TTL curto evita manter URL quebrada por muito tempo.
+        "Cache-Control": "private, max-age=300, stale-while-revalidate=60",
       },
     });
   } catch {

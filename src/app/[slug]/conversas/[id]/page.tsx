@@ -49,6 +49,7 @@ type ConversationDetail = {
   ticket_status_color_hex?: string | null;
   /** Nome do status do Kanban (company_ticket_statuses) para exibição contextual */
   ticket_status_name?: string | null;
+  has_more_messages?: boolean;
   messages: Message[];
 };
 
@@ -1332,6 +1333,8 @@ export default function ConversaThreadPage({
     enabled: !!resolved?.id && !!slug,
     staleTime: 5 * 60 * 1000, // 5 minutos - Realtime atualiza em tempo real
     refetchOnWindowFocus: false, // Evita refetch ao fechar picker de reação (reação sumia e voltava)
+    refetchInterval: 15 * 1000,
+    refetchIntervalInBackground: true,
   });
 
   const [quickSearch, setQuickSearch] = useState<string | null>(null);
@@ -1516,8 +1519,8 @@ export default function ConversaThreadPage({
   }
 
   useEffect(() => {
-    if (resolved?.id) setHasMoreOlderMessages(true);
-  }, [resolved?.id]);
+    if (resolved?.id) setHasMoreOlderMessages(Boolean(conv?.has_more_messages ?? true));
+  }, [resolved?.id, conv?.has_more_messages]);
 
   useEffect(() => {
     if (convQueryError) setError(convQueryError instanceof Error ? convQueryError.message : "Erro ao carregar");
@@ -1556,7 +1559,7 @@ export default function ConversaThreadPage({
     if (!before) return;
     setLoadingOlderMessages(true);
     try {
-      const url = `/api/conversations/${resolved.id}/messages?before=${encodeURIComponent(before)}&limit=1000`;
+      const url = `/api/conversations/${resolved.id}/messages?before=${encodeURIComponent(before)}&limit=50`;
       const res = await fetch(url, { credentials: "include", headers: apiHeaders });
       if (!res.ok) return;
       const data = await res.json();
@@ -1578,7 +1581,7 @@ export default function ConversaThreadPage({
             scrollEl.scrollTop = prevScroll + (newHeight - prevHeight);
           }
         });
-        if (older.length < 1000) setHasMoreOlderMessages(false);
+        if (!data?.has_more || older.length < 50) setHasMoreOlderMessages(false);
       }
     } finally {
       setLoadingOlderMessages(false);

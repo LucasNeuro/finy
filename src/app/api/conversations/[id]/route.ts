@@ -18,11 +18,13 @@ import { NextResponse } from "next/server";
 
 const VIDEO_EXT = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
 const AUDIO_EXT = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
+const INITIAL_MESSAGES_LIMIT = 50;
 
 const MEDIA_MESSAGE_TYPES = ["image", "video", "audio", "ptt", "document", "sticker"] as const;
 
 /** Enriquece mensagens com media_cached_url do Redis (evita chamadas /download no frontend). */
 async function enrichMessagesWithCachedMedia(
+  companyId: string,
   conversationId: string,
   messages: Record<string, unknown>[]
 ): Promise<Record<string, unknown>[]> {
@@ -34,7 +36,7 @@ async function enrichMessagesWithCachedMedia(
     })
     .map((m) => m.id as string);
   if (mediaIds.length === 0) return messages;
-  const urlMap = await getCachedMediaUrlsBulk(conversationId, mediaIds);
+  const urlMap = await getCachedMediaUrlsBulk(conversationId, mediaIds, companyId);
   if (Object.keys(urlMap).length === 0) return messages;
   return messages.map((m) => {
     const id = m?.id as string | undefined;
@@ -117,10 +119,13 @@ export async function GET(
   const skipCache = new URL(request.url).searchParams.get("skip_cache") === "1" || new URL(request.url).searchParams.get("nocache") === "1";
 
   if (!skipCache) {
-    const cached = await getCachedConversationDetail(id);
+      const cached = await getCachedConversationDetail(companyId, id);
     if (cached) {
       let messages = Array.isArray(cached.messages) ? normalizeMessageTypes(cached.messages) : cached.messages;
-      messages = await enrichMessagesWithCachedMedia(id, messages as Record<string, unknown>[]);
+      messages = await enrichMessagesWithCachedMedia(companyId, id, messages as Record<string, unknown>[]);
+      const slicedMessages = Array.isArray(messages)
+        ? (messages as Record<string, unknown>[]).slice(-INITIAL_MESSAGES_LIMIT)
+        : messages;
       const rawStatusCached = (cached.status ?? "open").toString().toLowerCase().trim();
       const effectiveStatusCached =
         rawStatusCached === "closed"
@@ -165,11 +170,15 @@ export async function GET(
       }
       const res = NextResponse.json({
         ...cached,
-        messages,
+        messages: slicedMessages,
         ticket_status_name: ticket_status_name_cached,
         ticket_status_color_hex: ticket_status_color_hex_cached,
+        has_more_messages: Boolean(
+          (cached as { has_more_messages?: unknown })?.has_more_messages ??
+          (Array.isArray(messages) ? messages.length > (slicedMessages as unknown[]).length : false)
+        ),
       });
-      return withMetricsHeaders(res, { cacheHit: true, startTime });
+      return withMetricsHeaders(res, { cacheHit: true, startTime, route: "/api/conversations/[id]", payload: { messages: Array.isArray(slicedMessages) ? slicedMessages.length : 0 } });
     }
   }
 
@@ -311,7 +320,7 @@ export async function GET(
           }
           
           await invalidateConversationList(companyId);
-          await invalidateConversationDetail(id);
+          await invalidateConversationDetail(id, companyId);
         }
       }
     } catch {
@@ -319,7 +328,7 @@ export async function GET(
     }
   }
 
-  const MESSAGES_LIMIT = 5000;
+  const MESSAGES_LIMIT = INITIAL_MESSAGES_LIMIT;
   const messagesSelect = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
   let messages: unknown[] = [];
 
@@ -338,9 +347,9 @@ export async function GET(
           .from("messages")
           .select(messagesSelect)
           .eq("conversation_id", id)
-          .order("sent_at", { ascending: true })
+          .order("sent_at", { ascending: false })
           .limit(MESSAGES_LIMIT);
-        if (!res.error && res.data) messages = Array.isArray(res.data) ? res.data : [];
+        if (!res.error && res.data) messages = Array.isArray(res.data) ? [...res.data].reverse() : [];
       } catch {
         // fallback to user client below
       }
@@ -350,12 +359,12 @@ export async function GET(
         .from("messages")
         .select(messagesSelect)
         .eq("conversation_id", id)
-        .order("sent_at", { ascending: true })
+        .order("sent_at", { ascending: false })
         .limit(MESSAGES_LIMIT);
       if (res.error) {
         return NextResponse.json({ error: res.error.message }, { status: 500 });
       }
-      messages = Array.isArray(res.data) ? res.data : [];
+      messages = Array.isArray(res.data) ? [...res.data].reverse() : [];
     }
     if (messages.length > 0) {
       const SNAPSHOT_MAX = 1000;
@@ -372,7 +381,8 @@ export async function GET(
     .from("internal_notes")
     .select("id, content, created_at, author_id")
     .eq("conversation_id", id)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: false })
+    .limit(INITIAL_MESSAGES_LIMIT);
 
   if (notes && notes.length > 0) {
     const formattedNotes = notes.map((n) => ({
@@ -410,11 +420,16 @@ export async function GET(
   });
 
   messages = normalizeMessageTypes(messages as Record<string, unknown>[]);
-  messages = await enrichMessagesWithCachedMedia(id, messages as Record<string, unknown>[]);
+  messages = await enrichMessagesWithCachedMedia(companyId, id, messages as Record<string, unknown>[]);
 
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
   const displayPhone = contact_phone_from_cc ?? conversation.customer_phone;
   const canonicalPhone = toCanonicalDigits(displayPhone || conversation.customer_phone) ?? displayPhone ?? conversation.customer_phone;
+  const hasMoreMessages =
+    Array.isArray(snapshot)
+      ? snapshot.length > (Array.isArray(messages) ? messages.length : 0)
+      : Array.isArray(messages) && messages.length >= MESSAGES_LIMIT;
+
   const payload = {
     ...convRest,
     customer_name: (conversation.customer_name && conversation.customer_name.trim()) ? conversation.customer_name : (contact_name_from_cc ?? conversation.customer_name),
@@ -426,10 +441,11 @@ export async function GET(
     ticket_status_name: ticket_status_name ?? null,
     ticket_status_color_hex: ticket_status_color_hex ?? null,
     messages,
+    has_more_messages: hasMoreMessages,
   };
-  await setCachedConversationDetail(id, payload as Record<string, unknown>);
+  await setCachedConversationDetail(companyId, id, payload as Record<string, unknown>);
   const res = NextResponse.json(payload);
-  return withMetricsHeaders(res, { cacheHit: false, startTime });
+  return withMetricsHeaders(res, { cacheHit: false, startTime, route: "/api/conversations/[id]", payload: { messages: Array.isArray(messages) ? messages.length : 0 } });
 }
 
 export async function PATCH(
@@ -562,6 +578,6 @@ export async function PATCH(
     });
   }
 
-  await Promise.all([invalidateConversationList(companyId), invalidateConversationDetail(id)]);
+  await Promise.all([invalidateConversationList(companyId), invalidateConversationDetail(id, companyId)]);
   return NextResponse.json(updated);
 }

@@ -2,6 +2,7 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
+import { withMetricsHeaders } from "@/lib/api/metrics";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
@@ -10,12 +11,13 @@ import { NextResponse } from "next/server";
 
 const MEDIA_TYPES = ["image", "video", "audio", "ptt", "myaudio", "ptv", "document", "sticker"] as const;
 const MESSAGES_SELECT = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
-const MESSAGES_PAGE_LIMIT = 1000;
+const MESSAGES_PAGE_LIMIT = 50;
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startTime = performance.now();
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -27,7 +29,7 @@ export async function GET(
   const { id: conversationId } = await params;
   const { searchParams } = new URL(request.url);
   const before = searchParams.get("before");
-  const limit = Math.min(Number(searchParams.get("limit")) || MESSAGES_PAGE_LIMIT, 2000);
+  const limit = Math.min(Number(searchParams.get("limit")) || MESSAGES_PAGE_LIMIT, 200);
 
   const supabase = await createClient();
   const { data: conversation, error: convError } = await supabase
@@ -106,7 +108,14 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({ messages });
+  const payload = { messages, has_more: Array.isArray(messages) ? messages.length >= limit : false };
+  const res = NextResponse.json(payload);
+  return withMetricsHeaders(res, {
+    cacheHit: false,
+    startTime,
+    route: "/api/conversations/[id]/messages",
+    payload: { messages: Array.isArray(messages) ? messages.length : 0 },
+  });
 }
 
 export async function POST(

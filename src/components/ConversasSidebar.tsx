@@ -488,6 +488,16 @@ export function ConversasSidebar() {
     activeTab === "groups" ? "group" : activeTab === "contacts" ? "individual" : "all";
   const queryClient = useQueryClient();
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const prefetchTimeoutRef = useRef<number | null>(null);
+  const lastPrefetchedIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (prefetchTimeoutRef.current) {
+        window.clearTimeout(prefetchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Verificar se pode rolar os tabs
   const checkTabsScroll = () => {
@@ -572,8 +582,8 @@ export function ConversasSidebar() {
       fetch("/api/conversations/counts", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
     enabled: !!slug,
     staleTime: 45 * 1000,
-    refetchInterval: 60 * 1000,
-    refetchIntervalInBackground: false,
+    refetchInterval: 20 * 1000,
+    refetchIntervalInBackground: true,
   });
   const counts = {
     mine: typeof countsData?.mine === "number" ? countsData.mine : 0,
@@ -608,7 +618,7 @@ export function ConversasSidebar() {
   const groupsList: SidebarGroup[] = Array.isArray(groupsData) ? groupsData : [];
 
   const conversationsParams = new URLSearchParams();
-  conversationsParams.set("limit", "500");
+  conversationsParams.set("limit", "200");
   if (viewMode === "mine") conversationsParams.set("only_assigned_to_me", "1");
   if (viewMode === "unassigned") conversationsParams.set("only_unassigned", "1");
   if (viewMode === "mine_closed") {
@@ -641,11 +651,13 @@ export function ConversasSidebar() {
     getNextPageParam: (lastPage, allPages) => {
       const fetched = allPages.reduce((s, p) => s + (p.data?.length ?? 0), 0);
       const total = lastPage?.total ?? 0;
-      if ((lastPage?.data?.length ?? 0) < 500 || fetched >= total) return undefined;
+      if ((lastPage?.data?.length ?? 0) < 200 || fetched >= total) return undefined;
       return fetched;
     },
     enabled: !!slug,
     staleTime: 60 * 1000,
+    refetchInterval: 15 * 1000,
+    refetchIntervalInBackground: true,
   });
 
   const baseList = conversationsData?.pages?.[0]?.data ?? [];
@@ -1077,14 +1089,22 @@ export function ConversasSidebar() {
                     }
                   }}
                   onHover={slug ? (id) => {
-                    queryClient.prefetchQuery({
-                      queryKey: queryKeys.conversation(id),
-                      queryFn: () =>
-                        fetch(`/api/conversations/${id}`, {
-                          credentials: "include",
-                          headers: apiHeaders,
-                        }).then((r) => r.json()),
-                    });
+                    if (lastPrefetchedIdRef.current === id) return;
+                    if (prefetchTimeoutRef.current) {
+                      window.clearTimeout(prefetchTimeoutRef.current);
+                    }
+                    prefetchTimeoutRef.current = window.setTimeout(() => {
+                      queryClient.prefetchQuery({
+                        queryKey: queryKeys.conversation(id),
+                        queryFn: () =>
+                          fetch(`/api/conversations/${id}`, {
+                            credentials: "include",
+                            headers: apiHeaders,
+                          }).then((r) => r.json()),
+                        staleTime: 20_000,
+                      });
+                      lastPrefetchedIdRef.current = id;
+                    }, 120);
                   } : undefined}
                   showQueueColors={activeTab === "queues" || activeTab === "novos" || activeTab === "mine" || activeTab === "mine_closed"}
                   activeTab={activeTab}

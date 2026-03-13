@@ -179,6 +179,7 @@ export async function invalidateCounts(companyId: string): Promise<void> {
 }
 
 const DETAIL_KEY_PREFIX = "inbox:detail:";
+const DETAIL_KEY_PREFIX_V2 = "inbox:detail:v2:";
 /** Detalhe do chat: TTL para abrir conversa instantâneo ao trocar. Estilo Zendesk. */
 const DETAIL_TTL_SECONDS = 90;
 
@@ -187,12 +188,26 @@ const DETAIL_TTL_SECONDS = 90;
  * Evita múltiplas consultas ao banco ao clicar na conversa.
  */
 export async function getCachedConversationDetail(
-  conversationId: string
+  companyIdOrConversationId: string,
+  conversationId?: string
 ): Promise<Record<string, unknown> | null> {
   const redis = await getRedisClient();
   if (!redis) return null;
   try {
-    const key = `${DETAIL_KEY_PREFIX}${conversationId}`;
+    // v2 (isolado por empresa)
+    if (conversationId) {
+      const keyV2 = `${DETAIL_KEY_PREFIX_V2}${companyIdOrConversationId}:${conversationId}`;
+      const rawV2 = await redis.get(keyV2);
+      if (rawV2) {
+        return JSON.parse(rawV2) as Record<string, unknown>;
+      }
+      // fallback legado para transição suave
+      const legacyRaw = await redis.get(`${DETAIL_KEY_PREFIX}${conversationId}`);
+      if (!legacyRaw) return null;
+      return JSON.parse(legacyRaw) as Record<string, unknown>;
+    }
+    // legado
+    const key = `${DETAIL_KEY_PREFIX}${companyIdOrConversationId}`;
     const raw = await redis.get(key);
     if (!raw) return null;
     return JSON.parse(raw) as Record<string, unknown>;
@@ -202,14 +217,21 @@ export async function getCachedConversationDetail(
 }
 
 export async function setCachedConversationDetail(
-  conversationId: string,
-  payload: Record<string, unknown>
+  companyIdOrConversationId: string,
+  conversationIdOrPayload: string | Record<string, unknown>,
+  payloadMaybe?: Record<string, unknown>
 ): Promise<void> {
   const redis = await getRedisClient();
   if (!redis) return;
   try {
-    const key = `${DETAIL_KEY_PREFIX}${conversationId}`;
-    await redis.set(key, JSON.stringify(payload), { EX: DETAIL_TTL_SECONDS });
+    if (typeof conversationIdOrPayload === "string" && payloadMaybe) {
+      const keyV2 = `${DETAIL_KEY_PREFIX_V2}${companyIdOrConversationId}:${conversationIdOrPayload}`;
+      await redis.set(keyV2, JSON.stringify(payloadMaybe), { EX: DETAIL_TTL_SECONDS });
+      return;
+    }
+    // legado
+    const key = `${DETAIL_KEY_PREFIX}${companyIdOrConversationId}`;
+    await redis.set(key, JSON.stringify(conversationIdOrPayload), { EX: DETAIL_TTL_SECONDS });
   } catch {
     // ignore
   }
@@ -220,11 +242,19 @@ export async function setCachedConversationDetail(
  * Chamado quando: PATCH na conversa, claim, nova mensagem, reação, deletar mensagem,
  * arquivar/deletar chat, chat-details que altera essa conversa.
  */
-export async function invalidateConversationDetail(conversationId: string): Promise<void> {
+export async function invalidateConversationDetail(conversationId: string, companyId?: string): Promise<void> {
   const redis = await getRedisClient();
   if (!redis) return;
   try {
-    await redis.del(`${DETAIL_KEY_PREFIX}${conversationId}`);
+    const keysToDelete: string[] = [`${DETAIL_KEY_PREFIX}${conversationId}`];
+    if (companyId) {
+      keysToDelete.push(`${DETAIL_KEY_PREFIX_V2}${companyId}:${conversationId}`);
+    } else {
+      const pattern = `${DETAIL_KEY_PREFIX_V2}*:${conversationId}`;
+      const v2keys = await redis.keys(pattern);
+      if (v2keys.length > 0) keysToDelete.push(...v2keys);
+    }
+    await redis.del(keysToDelete);
   } catch {
     // ignore
   }

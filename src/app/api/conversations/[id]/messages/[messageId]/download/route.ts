@@ -61,7 +61,7 @@ export async function GET(
   const skipCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("renew") === "1";
 
   if (!skipCache) {
-    const cached = await getCachedMediaUrl(conversationId, messageId);
+    const cached = await getCachedMediaUrl(conversationId, messageId, companyId);
     if (cached?.fileURL) {
       return NextResponse.json({
         fileURL: cached.fileURL,
@@ -87,7 +87,7 @@ export async function GET(
     }
 
     const payload = { fileURL: signed.signedUrl, mimetype: null };
-    await setCachedMediaUrl(conversationId, messageId, payload);
+    await setCachedMediaUrl(conversationId, messageId, payload, companyId);
     return NextResponse.json(payload);
   }
 
@@ -147,6 +147,6 @@ export async function GET(
   }
 
   const payload = { fileURL: signed.signedUrl, mimetype: null };
-  await setCachedMediaUrl(conversationId, messageId, payload);
+  await setCachedMediaUrl(conversationId, messageId, payload, companyId);
   return NextResponse.json(payload);
 }
