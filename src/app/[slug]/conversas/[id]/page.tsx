@@ -61,6 +61,12 @@ type TicketStatusOption = {
   sort_order?: number;
 };
 
+type QueueOption = {
+  id: string;
+  name: string;
+  kind?: string;
+};
+
 type ChatDetails = {
   name?: string;
   wa_name?: string;
@@ -1241,6 +1247,10 @@ export default function ConversaThreadPage({
   const [deleteOptions, setDeleteOptions] = useState({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
   const [chatActionLoading, setChatActionLoading] = useState<string | null>(null);
   const [canTransfer, setCanTransfer] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferQueueId, setTransferQueueId] = useState<string>("");
+  const [transferSaving, setTransferSaving] = useState(false);
+  const [transferToast, setTransferToast] = useState<string | null>(null);
   const [messageSearchOpen, setMessageSearchOpen] = useState(false);
   const [messageSearchTerm, setMessageSearchTerm] = useState("");
   const [messageSearchIndex, setMessageSearchIndex] = useState(0);
@@ -1369,6 +1379,22 @@ export default function ConversaThreadPage({
     staleTime: 30_000,
   });
 
+  const { data: companyQueues = [] } = useQuery({
+    queryKey: ["conversation-transfer-queues", slug],
+    queryFn: async () => {
+      const res = await fetch("/api/queues?for_management=1", {
+        credentials: "include",
+        headers: apiHeaders,
+      });
+      if (!res.ok) return [] as QueueOption[];
+      const list = await res.json().catch(() => []);
+      if (!Array.isArray(list)) return [] as QueueOption[];
+      return list as QueueOption[];
+    },
+    enabled: !!slug && canTransfer,
+    staleTime: 60_000,
+  });
+
   const mergedMessages = useMemo(() => {
     const base = Array.isArray(conv?.messages) ? conv.messages : [];
     const deduped = base.filter((m, i, arr) => {
@@ -1426,6 +1452,12 @@ export default function ConversaThreadPage({
       return next;
     });
   }, [matchedMessageIds.length]);
+
+  useEffect(() => {
+    if (!transferToast) return;
+    const id = window.setTimeout(() => setTransferToast(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [transferToast]);
 
   const filteredQuickReplies = useMemo(() => {
     // Se não há termo de busca (quickSearch é null), não retorna nada
@@ -1679,6 +1711,67 @@ export default function ConversaThreadPage({
       queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug) });
     } finally {
       setChatActionLoading(null);
+    }
+  }
+
+  function openTransferSideOver() {
+    const currentQueueId = conv?.queue_id ?? "";
+    const firstOption = companyQueues.find((q) => q.id !== currentQueueId && q.kind !== "group")?.id ?? "";
+    setTransferQueueId(firstOption);
+    setTransferOpen(true);
+    setChatMenuOpen(false);
+  }
+
+  async function handleTransferQueue() {
+    if (!resolved?.id || !transferQueueId) return;
+    setTransferSaving(true);
+    setError(null);
+    const targetQueueName = companyQueues.find((q) => q.id === transferQueueId)?.name ?? "a fila selecionada";
+    try {
+      let targetStatus = "open";
+      try {
+        const statusRes = await fetch(`/api/queues/${encodeURIComponent(transferQueueId)}/ticket-statuses`, {
+          credentials: "include",
+          headers: apiHeaders,
+        });
+        const statusList = await statusRes.json().catch(() => []);
+        if (statusRes.ok && Array.isArray(statusList)) {
+          const sorted = [...statusList].sort((a, b) => Number(a?.sort_order ?? 0) - Number(b?.sort_order ?? 0));
+          const openCandidates = sorted.filter((s) => !s?.is_closed);
+          const preferred =
+            openCandidates.find((s) => ["open", "new", "novo", "in_queue"].includes(String(s?.slug ?? "").toLowerCase())) ??
+            openCandidates[0];
+          if (preferred?.slug) {
+            targetStatus = String(preferred.slug);
+          }
+        }
+      } catch {
+        // fallback para "open"
+      }
+
+      const res = await fetch(`/api/conversations/${resolved.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          queue_id: transferQueueId,
+          assigned_to: null,
+          status: targetStatus,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError(err?.error ?? "Falha ao transferir atendimento");
+        return;
+      }
+      setTransferOpen(false);
+      setTransferToast(`Transferido para ${targetQueueName}.`);
+      await refetchConversation();
+      queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug) });
+      window.dispatchEvent(new CustomEvent("conversations-status-reset"));
+    } finally {
+      setTransferSaving(false);
     }
   }
 
@@ -2300,7 +2393,12 @@ export default function ConversaThreadPage({
             <Search className="h-4 w-4" />
           </button>
           {canTransfer && (
-            <button type="button" className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]" aria-label="Transferir">
+            <button
+              type="button"
+              onClick={openTransferSideOver}
+              className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"
+              aria-label="Transferir para outra fila"
+            >
               <ArrowRightLeft className="h-4 w-4" />
             </button>
           )}
@@ -2832,6 +2930,66 @@ export default function ConversaThreadPage({
         </div>
       </div>
 
+      <SideOver
+        open={transferOpen}
+        onClose={() => setTransferOpen(false)}
+        title="Transferir para outra fila"
+        width={560}
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-[#F8FAFC] p-3 text-sm">
+            <p className="font-medium text-[#1E293B]">{displayName || name || "Conversa"}</p>
+            <p className="mt-1 text-[#64748B]">
+              Fila atual: <span className="font-medium text-[#1E293B]">{conv?.queue_name || "Sem fila"}</span>
+            </p>
+            <p className="mt-1 text-xs text-[#64748B]">
+              Ao transferir, o atendimento vai para a nova fila como <strong>Novo</strong> e sem atendente atribuído.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-[#334155]">Nova fila</label>
+            <select
+              value={transferQueueId}
+              onChange={(e) => setTransferQueueId(e.target.value)}
+              className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B]"
+            >
+              <option value="">Selecione uma fila</option>
+              {companyQueues
+                .filter((q) => q.kind !== "group" && q.id !== (conv?.queue_id ?? null))
+                .map((q) => (
+                  <option key={q.id} value={q.id}>
+                    {q.name}
+                  </option>
+                ))}
+            </select>
+            {companyQueues.filter((q) => q.kind !== "group" && q.id !== (conv?.queue_id ?? null)).length === 0 && (
+              <p className="mt-2 text-xs text-[#94A3B8]">Nenhuma outra fila disponível para transferência.</p>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setTransferOpen(false)}
+              disabled={transferSaving}
+              className="flex-1 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC] disabled:opacity-60"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleTransferQueue}
+              disabled={transferSaving || !transferQueueId}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange/90 disabled:opacity-60"
+            >
+              {transferSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
+              Transferir
+            </button>
+          </div>
+        </div>
+      </SideOver>
+
       {/* Gravação de vídeo pela câmera: SideOver largo — Parar → depois Enviar ou Descartar */}
       <SideOver
         open={!!(recordingVideo || recordedVideoBlob)}
@@ -3250,6 +3408,19 @@ export default function ConversaThreadPage({
           </div>
         </div>
       </SideOver>
+      {transferToast && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-lg bg-[#0F172A] px-4 py-3 text-sm text-white shadow-lg flex items-start gap-2">
+          <span className="flex-1">{transferToast}</span>
+          <button
+            type="button"
+            onClick={() => setTransferToast(null)}
+            className="ml-2 rounded-full p-1 text-[#E2E8F0] hover:bg-white/10"
+            aria-label="Fechar aviso"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
