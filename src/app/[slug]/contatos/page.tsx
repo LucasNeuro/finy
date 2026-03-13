@@ -62,6 +62,16 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   return s.slice(0, 14) + "…";
 }
 
+function canonicalContactDigits(phone: string | null | undefined, jid: string | null | undefined): string | null {
+  const phoneDigits = (phone ?? "").replace(/\D/g, "").trim();
+  const jidDigits = (jid ?? "").replace(/@.*$/, "").replace(/\D/g, "").trim();
+  const digits = phoneDigits || jidDigits;
+  if (!digits) return null;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) return digits;
+  return digits;
+}
+
 /** URL de avatar: se for externa (http/https), usa proxy para evitar CORS/referrer e permitir cache. */
 function avatarSrc(avatarUrl: string | null): string | null {
   if (!avatarUrl?.trim()) return null;
@@ -824,6 +834,36 @@ export default function ContatosPage() {
   const groups = groupsData ?? [];
   const communities = communitiesData ?? [];
 
+  const dedupedContacts = useMemo(() => {
+    const byKey = new Map<string, Contact>();
+    for (const c of contacts) {
+      const canonical = canonicalContactDigits(c.phone, c.jid);
+      const key = `${c.channel_id}:${canonical || c.jid || c.id}`;
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, c);
+        continue;
+      }
+      const prevScore =
+        (prev.contact_name?.trim() ? 4 : 0) +
+        (prev.first_name?.trim() ? 2 : 0) +
+        (prev.avatar_url?.trim() ? 2 : 0) +
+        (prev.phone?.trim() ? 1 : 0);
+      const nextScore =
+        (c.contact_name?.trim() ? 4 : 0) +
+        (c.first_name?.trim() ? 2 : 0) +
+        (c.avatar_url?.trim() ? 2 : 0) +
+        (c.phone?.trim() ? 1 : 0);
+      if (nextScore > prevScore) byKey.set(key, c);
+      else if (nextScore === prevScore) {
+        const prevTs = new Date(prev.synced_at || 0).getTime();
+        const nextTs = new Date(c.synced_at || 0).getTime();
+        if (nextTs > prevTs) byKey.set(key, c);
+      }
+    }
+    return Array.from(byKey.values());
+  }, [contacts]);
+
   const fetchBlockList = useCallback(() => {
     if (!filterChannelId) {
       setBlockList([]);
@@ -1121,10 +1161,10 @@ export default function ContatosPage() {
       },
       {
         header: "Nome",
-        accessorFn: (c) => c.contact_name || c.first_name || "—",
+        accessorFn: (c) => c.contact_name || c.first_name || formatPhoneBrazil(c.phone || c.jid || "") || "—",
         cell: ({ row }) => {
           const c = row.original;
-          const name = c.contact_name || c.first_name || "—";
+          const name = c.contact_name || c.first_name || formatPhoneBrazil(c.phone || c.jid || "") || "—";
           const avatarUrl = c.avatar_url?.trim() || null;
           return (
             <div className="flex items-center gap-3">
@@ -1173,19 +1213,54 @@ export default function ContatosPage() {
         ),
       },
       {
-        header: "Status",
-        id: "status",
+        header: "Filas",
+        id: "queues",
         cell: ({ row }) => {
-          const c = row.original;
-          const isBlocked =
-            filterChannelId &&
-            c.channel_id === filterChannelId &&
-            blockList.some((jid) => jid === c.jid || jid === c.jid?.split("@")[0]);
-          if (!isBlocked) return <span className="text-[#94A3B8]">—</span>;
+          const queues = Array.isArray(row.original.queue_names) ? row.original.queue_names : [];
+          if (queues.length === 0) return <span className="text-[#94A3B8]">—</span>;
           return (
-            <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-              Bloqueado
-            </span>
+            <div className="flex flex-wrap gap-1">
+              {queues.slice(0, 2).map((q) => (
+                <span
+                  key={q}
+                  className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                  title={q}
+                >
+                  {q}
+                </span>
+              ))}
+              {queues.length > 2 && (
+                <span className="inline-flex items-center rounded-md bg-[#F1F5F9] px-2 py-0.5 text-xs font-medium text-[#64748B]">
+                  +{queues.length - 2}
+                </span>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        header: "Tags",
+        id: "tags",
+        cell: ({ row }) => {
+          const tags = Array.isArray(row.original.tag_names) ? row.original.tag_names : [];
+          if (tags.length === 0) return <span className="text-[#94A3B8]">—</span>;
+          return (
+            <div className="flex flex-wrap gap-1">
+              {tags.slice(0, 2).map((t) => (
+                <span
+                  key={t}
+                  className="inline-flex items-center rounded-md bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700"
+                  title={t}
+                >
+                  {t}
+                </span>
+              ))}
+              {tags.length > 2 && (
+                <span className="inline-flex items-center rounded-md bg-[#F1F5F9] px-2 py-0.5 text-xs font-medium text-[#64748B]">
+                  +{tags.length - 2}
+                </span>
+              )}
+            </div>
           );
         },
       },
@@ -1216,7 +1291,7 @@ export default function ContatosPage() {
         ),
       },
     ],
-    [channels, filterChannelId, blockList, selectedContactIds]
+    [channels, selectedContactIds]
   );
 
   const groupColumns = useMemo<ColumnDef<Group>[]>(
@@ -1371,15 +1446,15 @@ export default function ContatosPage() {
 
   const searchLower = listSearch.trim().toLowerCase();
   const filteredContacts = useMemo(() => {
-    if (!searchLower) return contacts;
-    return contacts.filter(
+    if (!searchLower) return dedupedContacts;
+    return dedupedContacts.filter(
       (c) =>
         (c.contact_name?.toLowerCase().includes(searchLower) ||
           c.first_name?.toLowerCase().includes(searchLower) ||
           c.phone?.toLowerCase().includes(searchLower) ||
           c.jid?.toLowerCase().includes(searchLower))
     );
-  }, [contacts, searchLower]);
+  }, [dedupedContacts, searchLower]);
 
   const sortedFilteredContacts = useMemo(() => {
     const channelOrder: Record<string, number> = {};
@@ -1584,7 +1659,7 @@ export default function ContatosPage() {
         <div>
         <h1 className="text-2xl font-bold text-[#1E293B]">Contatos e grupos</h1>
           <p className="mt-0.5 text-sm text-[#64748B]">
-            Total: <span className="font-medium tabular-nums text-[#1E293B]">{contacts.length}</span> contato{contacts.length !== 1 ? "s" : ""} · <span className="font-medium tabular-nums text-[#1E293B]">{groups.length}</span> grupo{groups.length !== 1 ? "s" : ""}
+            Total: <span className="font-medium tabular-nums text-[#1E293B]">{dedupedContacts.length}</span> contato{dedupedContacts.length !== 1 ? "s" : ""} · <span className="font-medium tabular-nums text-[#1E293B]">{groups.length}</span> grupo{groups.length !== 1 ? "s" : ""}
             {filterChannelId ? ` (${channelName(filterChannelId)})` : " (todas as instâncias)"}
           </p>
         </div>
@@ -1704,7 +1779,7 @@ export default function ContatosPage() {
           }`}
           >
           <Users className="h-4 w-4" />
-          Contatos ({contacts.length})
+          Contatos ({dedupedContacts.length})
           </button>
           <button
             type="button"
@@ -1744,7 +1819,7 @@ export default function ContatosPage() {
         </div>
       ) : activeTab === "contacts" ? (
         <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden flex flex-col">
-          {contacts.length === 0 ? (
+          {dedupedContacts.length === 0 ? (
             <div className="p-8 text-center text-[#64748B]">
               <Users className="mx-auto h-12 w-12 text-[#94A3B8]" />
               <p className="mt-2">Nenhum contato sincronizado.</p>
@@ -1933,7 +2008,7 @@ export default function ContatosPage() {
                 </div>
               )}
               <div className="overflow-auto max-h-[60vh] min-h-[200px]">
-                <table className="w-full min-w-[520px] border-collapse">
+                <table className="w-full min-w-[760px] border-collapse">
                   <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
                     {table.getHeaderGroups().map((hg) => (
                       <tr key={hg.id} className="border-b border-[#E2E8F0]">
@@ -2512,6 +2587,20 @@ export default function ContatosPage() {
         channelName={detailContact ? channelName(detailContact.channel_id) : ""}
         companySlug={slug}
         onBlockChange={() => { fetchBlockList(); mutateContacts(); }}
+        onTagsSaved={(contactId, tagNames) => {
+          mutateContacts(
+            (prev) =>
+              Array.isArray(prev)
+                ? prev.map((c) =>
+                    c.id === contactId
+                      ? { ...c, tag_names: tagNames }
+                      : c
+                  )
+                : prev,
+            { revalidate: false }
+          );
+          mutateContacts();
+        }}
       />
 
       <AddToAgendaModal

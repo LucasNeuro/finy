@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useState, useEffect, memo, useRef } from "react";
+import { useState, useEffect, memo, useRef, useMemo } from "react";
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive, Hash, Layers } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
@@ -77,6 +77,25 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   return s.slice(0, 14) + "…";
 }
 
+function canonicalContactDigits(phone: string | null | undefined, jid: string | null | undefined): string | null {
+  const phoneDigits = (phone ?? "").replace(/\D/g, "").trim();
+  const jidDigits = (jid ?? "").replace(/@.*$/, "").replace(/\D/g, "").trim();
+  const digits = phoneDigits || jidDigits;
+  if (!digits) return null;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) return digits;
+  return digits;
+}
+
+function avatarProxySrc(raw: string | null | undefined): string | null {
+  const value = (raw ?? "").trim();
+  if (!value) return null;
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    return `/api/contacts/avatar?url=${encodeURIComponent(value)}`;
+  }
+  return value;
+}
+
 function normalizeConversationStatus(c: Conversation): string {
   const raw = String(c.status || "open").trim().toLowerCase();
   return raw || "open";
@@ -109,6 +128,7 @@ type SidebarContact = {
   phone: string | null;
   contact_name: string | null;
   first_name: string | null;
+  avatar_url?: string | null;
   synced_at: string;
 };
 
@@ -120,6 +140,7 @@ type SidebarGroup = {
   name: string | null;
   topic: string | null;
   invite_link: string | null;
+  avatar_url?: string | null;
   synced_at: string | null;
   left_at: string | null;
 };
@@ -330,8 +351,10 @@ const ContactListItem = memo(function ContactListItem({
 }) {
   const router = useRouter();
   const [starting, setStarting] = useState(false);
-  const displayName = (contact.contact_name ?? contact.first_name ?? contact.phone ?? contact.jid) ?? "—";
+  const [imgError, setImgError] = useState(false);
+  const displayName = (contact.contact_name ?? contact.first_name ?? formatPhoneBrazil(contact.phone ?? contact.jid) ?? contact.jid) ?? "—";
   const initial = displayName.slice(0, 1).toUpperCase();
+  const avatarSrc = !imgError ? avatarProxySrc(contact.avatar_url) : null;
 
   const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -372,16 +395,24 @@ const ContactListItem = memo(function ContactListItem({
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
           {starting ? (
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
+          ) : avatarSrc ? (
+            <img
+              src={avatarSrc}
+              alt=""
+              className="h-full w-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={() => setImgError(true)}
+            />
           ) : (
             initial
           )}
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-[#1E293B]">
-            {contact.contact_name || contact.first_name || "—"}
+            {displayName}
           </p>
           <p className="truncate text-xs text-[#64748B] mt-0.5">
-            {contact.phone || contact.jid || ""}
+            {formatPhoneBrazil(contact.phone || contact.jid)}
           </p>
         </div>
       </button>
@@ -400,8 +431,10 @@ const GroupListItem = memo(function GroupListItem({
 }) {
   const router = useRouter();
   const [opening, setOpening] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const displayName = (group.name ?? group.topic ?? group.jid) ?? "—";
   const initial = displayName.slice(0, 1).toUpperCase();
+  const avatarSrc = !imgError ? avatarProxySrc(group.avatar_url) : null;
 
   const handleClick = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -442,6 +475,16 @@ const GroupListItem = memo(function GroupListItem({
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
           {opening ? (
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
+          ) : avatarSrc ? (
+            <img
+              src={avatarSrc}
+              alt=""
+              className="h-full w-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={() => setImgError(true)}
+            />
+          ) : initial ? (
+            <span>{initial}</span>
           ) : (
             <Users className="h-5 w-5" />
           )}
@@ -606,7 +649,36 @@ export function ConversasSidebar() {
     enabled: !!slug && activeTab === "contacts",
     staleTime: 2 * 60 * 1000,
   });
-  const contactsList: SidebarContact[] = Array.isArray(contactsData) ? contactsData : [];
+  const contactsListRaw: SidebarContact[] = Array.isArray(contactsData) ? contactsData : [];
+  const contactsList = useMemo(() => {
+    const byKey = new Map<string, SidebarContact>();
+    for (const c of contactsListRaw) {
+      const canonical = canonicalContactDigits(c.phone, c.jid);
+      const key = `${c.channel_id}:${canonical || c.jid || c.id}`;
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, c);
+        continue;
+      }
+      const prevScore =
+        (prev.contact_name?.trim() ? 3 : 0) +
+        (prev.first_name?.trim() ? 2 : 0) +
+        (prev.avatar_url?.trim() ? 2 : 0) +
+        (prev.phone?.trim() ? 1 : 0);
+      const nextScore =
+        (c.contact_name?.trim() ? 3 : 0) +
+        (c.first_name?.trim() ? 2 : 0) +
+        (c.avatar_url?.trim() ? 2 : 0) +
+        (c.phone?.trim() ? 1 : 0);
+      if (nextScore > prevScore) byKey.set(key, c);
+      else if (nextScore === prevScore) {
+        const prevTs = new Date(prev.synced_at || 0).getTime();
+        const nextTs = new Date(c.synced_at || 0).getTime();
+        if (nextTs > prevTs) byKey.set(key, c);
+      }
+    }
+    return Array.from(byKey.values());
+  }, [contactsListRaw]);
 
   const { data: groupsData, isLoading: groupsLoading } = useQuery({
     queryKey: queryKeys.groups(slug ?? ""),
@@ -615,7 +687,33 @@ export function ConversasSidebar() {
     enabled: !!slug && activeTab === "groups",
     staleTime: 2 * 60 * 1000,
   });
-  const groupsList: SidebarGroup[] = Array.isArray(groupsData) ? groupsData : [];
+  const groupsListRaw: SidebarGroup[] = Array.isArray(groupsData) ? groupsData : [];
+  const groupsList = useMemo(() => {
+    const byKey = new Map<string, SidebarGroup>();
+    for (const g of groupsListRaw) {
+      const key = `${g.channel_id}:${g.jid}`;
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, g);
+        continue;
+      }
+      const prevScore =
+        (prev.name?.trim() ? 3 : 0) +
+        (prev.topic?.trim() ? 2 : 0) +
+        (prev.avatar_url?.trim() ? 2 : 0);
+      const nextScore =
+        (g.name?.trim() ? 3 : 0) +
+        (g.topic?.trim() ? 2 : 0) +
+        (g.avatar_url?.trim() ? 2 : 0);
+      if (nextScore > prevScore) byKey.set(key, g);
+      else if (nextScore === prevScore) {
+        const prevTs = new Date(prev.synced_at || 0).getTime();
+        const nextTs = new Date(g.synced_at || 0).getTime();
+        if (nextTs > prevTs) byKey.set(key, g);
+      }
+    }
+    return Array.from(byKey.values());
+  }, [groupsListRaw]);
 
   const conversationsParams = new URLSearchParams();
   conversationsParams.set("limit", "200");

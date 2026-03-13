@@ -12,6 +12,8 @@ export type Contact = {
   contact_name: string | null;
   first_name: string | null;
   avatar_url?: string | null;
+  queue_names?: string[];
+  tag_names?: string[];
   synced_at: string;
 };
 
@@ -108,6 +110,7 @@ type ContactDetailSideOverProps = {
   channelName: string;
   companySlug: string;
   onBlockChange?: () => void;
+  onTagsSaved?: (contactId: string, tagNames: string[]) => void;
 };
 
 function numberForApi(contact: Contact): string {
@@ -162,6 +165,7 @@ export function ContactDetailSideOver({
   channelName,
   companySlug,
   onBlockChange,
+  onTagsSaved,
 }: ContactDetailSideOverProps) {
   const [details, setDetails] = useState<ChatDetails | null>(null);
   const [loading, setLoading] = useState(false);
@@ -281,6 +285,11 @@ export function ContactDetailSideOver({
       if (!r.ok) {
         const data = await r.json().catch(() => null);
         setError(data?.error ?? "Falha ao salvar tags do contato");
+      } else {
+        const selectedNames = availableTags
+          .filter((t) => selectedTagIds.has(t.id))
+          .map((t) => t.name);
+        onTagsSaved?.(contact.id, selectedNames);
       }
     } finally {
       setSavingTags(false);

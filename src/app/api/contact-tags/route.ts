@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { createClient } from "@/lib/supabase/server";
 
 type ContactTagsPostBody =
@@ -28,17 +29,41 @@ export async function GET(request: Request) {
 
   // Resolve channel_contact_id from channel_id + number (ex.: chat sidebar)
   if (!channelContactId && channelIdParam?.trim() && numberParam?.trim()) {
-    const digits = numberParam.replace(/\D/g, "").trim();
-    const jid = digits ? `${digits}@s.whatsapp.net` : "";
-    if (jid) {
-      const { data: contactRow } = await supabase
+    const channelId = channelIdParam.trim();
+    const canonicalDigits = toCanonicalDigits(numberParam) ?? numberParam.replace(/\D/g, "").trim();
+    const rawDigits = numberParam.replace(/\D/g, "").trim();
+    const jidCandidates = Array.from(
+      new Set(
+        [numberParam.trim(), rawDigits ? `${rawDigits}@s.whatsapp.net` : "", canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : ""]
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    );
+    if (jidCandidates.length > 0) {
+      const { data: contactRows } = await supabase
         .from("channel_contacts")
-        .select("id")
+        .select("id, synced_at")
         .eq("company_id", companyId)
-        .eq("channel_id", channelIdParam.trim())
-        .eq("jid", jid)
-        .maybeSingle();
-      if (contactRow?.id) channelContactId = contactRow.id as string;
+        .eq("channel_id", channelId)
+        .in("jid", jidCandidates)
+        .order("synced_at", { ascending: false })
+        .limit(1);
+      if (Array.isArray(contactRows) && contactRows[0]?.id) {
+        channelContactId = contactRows[0].id as string;
+      }
+    }
+    if (!channelContactId && canonicalDigits) {
+      const { data: contactRowsByPhone } = await supabase
+        .from("channel_contacts")
+        .select("id, synced_at")
+        .eq("company_id", companyId)
+        .eq("channel_id", channelId)
+        .eq("phone", canonicalDigits)
+        .order("synced_at", { ascending: false })
+        .limit(1);
+      if (Array.isArray(contactRowsByPhone) && contactRowsByPhone[0]?.id) {
+        channelContactId = contactRowsByPhone[0].id as string;
+      }
     }
   }
 
@@ -137,27 +162,60 @@ export async function POST(request: Request) {
       );
     }
 
-    const digits = number.replace(/\D/g, "");
-    const jid = digits ? `${digits}@s.whatsapp.net` : "";
-    if (!jid) {
+    const canonicalDigits = toCanonicalDigits(number) ?? number.replace(/\D/g, "");
+    const rawDigits = number.replace(/\D/g, "");
+    const jidCandidates = Array.from(
+      new Set(
+        [number.trim(), rawDigits ? `${rawDigits}@s.whatsapp.net` : "", canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : ""]
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    );
+    if (!canonicalDigits && jidCandidates.length === 0) {
       return NextResponse.json({ error: "Número inválido" }, { status: 400 });
     }
 
-    const { data: contactRow, error: contactErr } = await supabase
+    const { data: contactRows, error: contactErr } = await supabase
       .from("channel_contacts")
-      .select("id")
+      .select("id, synced_at")
       .eq("company_id", companyId)
       .eq("channel_id", channelId)
-      .eq("jid", jid)
-      .maybeSingle();
+      .in("jid", jidCandidates)
+      .order("synced_at", { ascending: false })
+      .limit(1);
 
     if (contactErr) {
       return NextResponse.json({ error: contactErr.message }, { status: 500 });
     }
 
-    if (contactRow?.id) {
-      contactId = contactRow.id as string;
-    } else {
+    if (Array.isArray(contactRows) && contactRows[0]?.id) {
+      contactId = contactRows[0].id as string;
+    } else if (canonicalDigits) {
+      const { data: contactRowsByPhone, error: phoneErr } = await supabase
+        .from("channel_contacts")
+        .select("id, synced_at")
+        .eq("company_id", companyId)
+        .eq("channel_id", channelId)
+        .eq("phone", canonicalDigits)
+        .order("synced_at", { ascending: false })
+        .limit(1);
+      if (phoneErr) {
+        return NextResponse.json({ error: phoneErr.message }, { status: 500 });
+      }
+      if (Array.isArray(contactRowsByPhone) && contactRowsByPhone[0]?.id) {
+        contactId = contactRowsByPhone[0].id as string;
+      }
+    }
+
+    if (!contactId) {
+      const jidToInsert =
+        (canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : "") ||
+        jidCandidates[0] ||
+        "";
+      if (!jidToInsert) {
+        return NextResponse.json({ error: "Número inválido" }, { status: 400 });
+      }
+
       // Se ainda não existir em channel_contacts (ex.: recém criado manualmente),
       // criamos um registro mínimo apenas na nossa base, sem depender da UAZAPI.
       const now = new Date().toISOString();
@@ -166,8 +224,8 @@ export async function POST(request: Request) {
         .insert({
           company_id: companyId,
           channel_id: channelId,
-          jid,
-          phone: digits,
+          jid: jidToInsert,
+          phone: canonicalDigits || rawDigits || null,
           contact_name: null,
           first_name: null,
           synced_at: now,
