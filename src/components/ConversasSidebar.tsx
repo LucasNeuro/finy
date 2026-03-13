@@ -778,7 +778,7 @@ export function ConversasSidebar() {
             onClick={() => handleTabChange("novos")}
             className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
               activeTab === "novos"
-                ? "bg-amber-50 text-amber-800 shadow-md shadow-amber-200/60 border border-amber-200/70"
+                ? "bg-emerald-50 text-emerald-800 shadow-md shadow-emerald-200/60 border border-emerald-200/70"
                 : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
             title="Novos (não atribuídos)"
@@ -787,7 +787,7 @@ export function ConversasSidebar() {
             <Inbox className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Novos</span>
             {counts.unassigned > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
                 {counts.unassigned > 99 ? "99+" : counts.unassigned}
               </span>
             )}
