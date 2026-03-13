@@ -392,14 +392,14 @@ const ContactListItem = memo(function ContactListItem({
         disabled={starting}
         className="flex w-full items-center gap-3.5 p-3.5 text-left rounded-lg transition-all duration-150 hover:bg-[#F8FAFC] disabled:opacity-70"
       >
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
           {starting ? (
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
           ) : avatarSrc ? (
             <img
               src={avatarSrc}
               alt=""
-              className="h-full w-full object-cover"
+              className="h-full w-full rounded-full object-cover"
               referrerPolicy="no-referrer"
               onError={() => setImgError(true)}
             />
@@ -472,14 +472,14 @@ const GroupListItem = memo(function GroupListItem({
         disabled={opening}
         className="flex w-full items-center gap-3.5 p-3.5 text-left rounded-lg transition-all duration-150 hover:bg-[#F8FAFC] disabled:opacity-70"
       >
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#E2E8F0] to-[#CBD5E1] text-sm font-semibold text-[#64748B] shadow-sm ring-1 ring-white/50">
           {opening ? (
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#64748B] border-t-transparent" />
           ) : avatarSrc ? (
             <img
               src={avatarSrc}
               alt=""
-              className="h-full w-full object-cover"
+              className="h-full w-full rounded-full object-cover"
               referrerPolicy="no-referrer"
               onError={() => setImgError(true)}
             />
