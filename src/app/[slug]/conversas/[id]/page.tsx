@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, X } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
 import { SideOver } from "@/components/SideOver";
@@ -122,6 +122,38 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function renderHighlightedText(
+  value: string | null | undefined,
+  term: string,
+  isActive: boolean
+): React.ReactNode {
+  const text = String(value ?? "");
+  const query = term.trim().toLocaleLowerCase();
+  if (!query) return text;
+  const lower = text.toLocaleLowerCase();
+  if (!lower.includes(query)) return text;
+
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let hit = lower.indexOf(query, cursor);
+  while (hit !== -1) {
+    if (hit > cursor) nodes.push(text.slice(cursor, hit));
+    const end = hit + query.length;
+    nodes.push(
+      <mark
+        key={`${hit}-${end}`}
+        className={`rounded px-0.5 ${isActive ? "bg-yellow-300 text-[#1E293B]" : "bg-yellow-200 text-[#1E293B]"}`}
+      >
+        {text.slice(hit, end)}
+      </mark>
+    );
+    cursor = end;
+    hit = lower.indexOf(query, cursor);
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return <>{nodes}</>;
 }
 
 function resolveConversationStatusVisual(conv: ConversationDetail | null | undefined): {
@@ -598,6 +630,8 @@ function MessageBubble({
   apiHeaders,
   onReaction,
   onDeleteMessage,
+  searchTerm = "",
+  isActiveSearchHit = false,
 }: {
   m: Message;
   name: string;
@@ -605,6 +639,8 @@ function MessageBubble({
   apiHeaders?: Record<string, string>;
   onReaction?: (messageId: string, emoji: string) => void;
   onDeleteMessage?: (messageId: string, forEveryone: boolean) => void;
+  searchTerm?: string;
+  isActiveSearchHit?: boolean;
 }) {
   const type = m.message_type ?? "text";
   const displayType = inferDisplayType(type, m.content ?? "", m);
@@ -809,12 +845,12 @@ function MessageBubble({
 
   if (displayType === "internal_note") {
     return (
-      <div className="rounded-lg bg-purple-50 border border-purple-100 text-[#1E293B] max-w-[69%] px-3 py-2">
+      <div className={`rounded-lg bg-purple-50 border border-purple-100 text-[#1E293B] max-w-[69%] px-3 py-2 ${isActiveSearchHit ? "ring-2 ring-clicvend-orange/60" : ""}`}>
         <div className="flex items-center gap-1.5 mb-1 text-purple-600">
           <FileText className="h-3 w-3" />
           <span className="text-[10px] font-bold uppercase tracking-wider">Comentário Interno</span>
         </div>
-        <div className="whitespace-pre-wrap text-sm">{m.content}</div>
+        <div className="whitespace-pre-wrap text-sm">{renderHighlightedText(m.content, searchTerm, isActiveSearchHit)}</div>
         <div className="mt-1 flex items-center justify-end gap-1">
           <span className="text-[10px] text-purple-400">
             {new Date(m.sent_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
@@ -840,7 +876,7 @@ function MessageBubble({
             : ["audio", "ptt"].includes(resolvedDisplayType)
               ? "max-w-[65%] min-w-0 w-full px-1 py-0.5"
               : "max-w-[69%] px-3 py-2"
-      }`}
+      } ${isActiveSearchHit ? "ring-2 ring-clicvend-orange/60" : ""}`}
     >
       <p className="text-xs font-medium text-[#64748B] mb-0.5 flex items-center gap-2">
         {m.direction === "out" ? "Você" : name}
@@ -876,7 +912,7 @@ function MessageBubble({
               <Loader2 className="h-5 w-5 animate-spin shrink-0" /> Carregando imagem…
             </div>
           )}
-          {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm">{caption}</p>}
+          {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm">{renderHighlightedText(caption, searchTerm, isActiveSearchHit)}</p>}
         </div>
       )}
       {resolvedDisplayType === "video" && (effectiveMediaUrl || needsDownloadForMedia || canFetchDownload) && (
@@ -923,7 +959,7 @@ function MessageBubble({
             </div>
           )}
           {showCaptionForMedia && (
-            <p className="whitespace-pre-wrap text-sm text-[#1E293B]">{displayCaptionForMedia}</p>
+            <p className="whitespace-pre-wrap text-sm text-[#1E293B]">{renderHighlightedText(displayCaptionForMedia, searchTerm, isActiveSearchHit)}</p>
           )}
         </div>
       )}
@@ -950,7 +986,7 @@ function MessageBubble({
               onDownload={audioSrc ? () => window.open(audioSrc!, "_blank") : undefined}
             />
           )}
-          {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm mt-1">{caption}</p>}
+          {caption && !isPlaceholderCaption && <p className="whitespace-pre-wrap text-sm mt-1">{renderHighlightedText(caption, searchTerm, isActiveSearchHit)}</p>}
         </div>
       )}
       {resolvedDisplayType === "document" && (
@@ -1073,7 +1109,7 @@ function MessageBubble({
             </div>
           )}
           {showCaptionForMedia && (
-            <p className="whitespace-pre-wrap text-sm mt-1">{displayCaptionForMedia}</p>
+            <p className="whitespace-pre-wrap text-sm mt-1">{renderHighlightedText(displayCaptionForMedia, searchTerm, isActiveSearchHit)}</p>
           )}
         </div>
       )}
@@ -1091,7 +1127,7 @@ function MessageBubble({
         </div>
       )}
       {displayType === "text" && (
-        <p className="whitespace-pre-wrap text-sm">{m.content}</p>
+        <p className="whitespace-pre-wrap text-sm">{renderHighlightedText(m.content, searchTerm, isActiveSearchHit)}</p>
       )}
       <footer className={`${["video", "audio", "ptt", "image", "document"].includes(resolvedDisplayType) ? "mt-1 pt-1" : "mt-2 pt-1.5"} border-t border-[#E2E8F0]/60 flex items-center justify-between gap-2 flex-wrap`}>
         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
@@ -1205,6 +1241,9 @@ export default function ConversaThreadPage({
   const [deleteOptions, setDeleteOptions] = useState({ deleteChatDB: true, deleteMessagesDB: true, deleteChatWhatsApp: false });
   const [chatActionLoading, setChatActionLoading] = useState<string | null>(null);
   const [canTransfer, setCanTransfer] = useState(false);
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false);
+  const [messageSearchTerm, setMessageSearchTerm] = useState("");
+  const [messageSearchIndex, setMessageSearchIndex] = useState(0);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const [hasMoreOlderMessages, setHasMoreOlderMessages] = useState(true);
   const [inputEmojiPickerOpen, setInputEmojiPickerOpen] = useState(false);
@@ -1212,6 +1251,8 @@ export default function ConversaThreadPage({
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const messageSearchInputRef = useRef<HTMLInputElement>(null);
+  const messageNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const videoRecorderRef = useRef<MediaRecorder | null>(null);
@@ -1327,6 +1368,64 @@ export default function ConversaThreadPage({
     enabled: !!slug && !!conv,
     staleTime: 30_000,
   });
+
+  const mergedMessages = useMemo(() => {
+    const base = Array.isArray(conv?.messages) ? conv.messages : [];
+    const deduped = base.filter((m, i, arr) => {
+      const id = (m as Message).id;
+      const first = arr.findIndex((x) => (x as Message).id === id);
+      return first === i;
+    });
+    const toAdd = optimisticMessages.filter((opt) => {
+      const hasMatch = deduped.some(
+        (m) =>
+          (m as Message).direction === "out" &&
+          (m as Message).content === opt.content &&
+          !String((m as Message).id).startsWith("temp-") &&
+          Math.abs(new Date((m as Message).sent_at).getTime() - new Date(opt.sent_at).getTime()) < 20000
+      );
+      return !hasMatch;
+    });
+    return [...deduped, ...toAdd].sort(
+      (a, b) => new Date((a as Message).sent_at).getTime() - new Date((b as Message).sent_at).getTime()
+    ) as Message[];
+  }, [conv?.messages, optimisticMessages]);
+
+  const matchedMessageIds = useMemo(() => {
+    const term = messageSearchTerm.trim().toLocaleLowerCase();
+    if (!term) return [] as string[];
+    return mergedMessages
+      .filter((m) => {
+        const text = `${m.content ?? ""}\n${m.caption ?? ""}`.toLocaleLowerCase();
+        return text.includes(term);
+      })
+      .map((m) => String(m.id));
+  }, [mergedMessages, messageSearchTerm]);
+
+  useEffect(() => {
+    setMessageSearchIndex(0);
+  }, [messageSearchTerm, resolved?.id]);
+
+  const activeSearchMessageId = matchedMessageIds.length > 0
+    ? matchedMessageIds[((messageSearchIndex % matchedMessageIds.length) + matchedMessageIds.length) % matchedMessageIds.length]
+    : null;
+
+  useEffect(() => {
+    if (!activeSearchMessageId) return;
+    const node = messageNodeRefs.current[activeSearchMessageId];
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeSearchMessageId]);
+
+  const goToSearchResult = useCallback((direction: 1 | -1) => {
+    if (matchedMessageIds.length === 0) return;
+    setMessageSearchIndex((prev) => {
+      const next = prev + direction;
+      if (next < 0) return matchedMessageIds.length - 1;
+      if (next >= matchedMessageIds.length) return 0;
+      return next;
+    });
+  }, [matchedMessageIds.length]);
 
   const filteredQuickReplies = useMemo(() => {
     // Se não há termo de busca (quickSearch é null), não retorna nada
@@ -2184,7 +2283,20 @@ export default function ConversaThreadPage({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1" ref={menuRef}>
-          <button type="button" className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]" aria-label="Buscar">
+          <button
+            type="button"
+            onClick={() => {
+              setMessageSearchOpen((open) => {
+                const next = !open;
+                if (next) {
+                  setTimeout(() => messageSearchInputRef.current?.focus(), 0);
+                }
+                return next;
+              });
+            }}
+            className={`rounded p-2 ${messageSearchOpen ? "bg-[#E2E8F0] text-[#1E293B]" : "text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B]"}`}
+            aria-label="Buscar mensagens"
+          >
             <Search className="h-4 w-4" />
           </button>
           {canTransfer && (
@@ -2276,6 +2388,63 @@ export default function ConversaThreadPage({
         </div>
       </header>
 
+      {messageSearchOpen && (
+        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-2">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#94A3B8]" />
+              <input
+                ref={messageSearchInputRef}
+                value={messageSearchTerm}
+                onChange={(e) => setMessageSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    goToSearchResult(e.shiftKey ? -1 : 1);
+                  }
+                }}
+                placeholder="Buscar texto nas mensagens desta conversa"
+                className="h-9 w-full rounded-lg border border-[#E2E8F0] bg-white pl-8 pr-3 text-sm text-[#1E293B] outline-none focus:border-clicvend-orange"
+              />
+            </div>
+            <span className="min-w-[72px] text-center text-xs font-medium text-[#64748B]">
+              {matchedMessageIds.length === 0
+                ? "0 resultados"
+                : `${messageSearchIndex + 1}/${matchedMessageIds.length}`}
+            </span>
+            <button
+              type="button"
+              onClick={() => goToSearchResult(-1)}
+              disabled={matchedMessageIds.length === 0}
+              className="rounded border border-[#E2E8F0] p-1.5 text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Resultado anterior"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => goToSearchResult(1)}
+              disabled={matchedMessageIds.length === 0}
+              className="rounded border border-[#E2E8F0] p-1.5 text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Próximo resultado"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMessageSearchOpen(false);
+                setMessageSearchTerm("");
+              }}
+              className="rounded border border-[#E2E8F0] p-1.5 text-[#64748B] hover:bg-[#F8FAFC]"
+              aria-label="Fechar busca"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {resolved?.id && typeof window !== "undefined" && <RealtimeMessages conversationId={resolved.id} />}
       <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
         <div ref={messagesScrollRef} data-messages-scroll className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
@@ -2307,42 +2476,27 @@ export default function ConversaThreadPage({
                     </button>
                   </div>
                 )}
-                {(() => {
-                  const base = Array.isArray(conv?.messages) ? conv.messages : [];
-                  const deduped = base.filter((m, i, arr) => {
-                    const id = (m as Message).id;
-                    const first = arr.findIndex((x) => (x as Message).id === id);
-                    return first === i;
-                  });
-                  const toAdd = optimisticMessages.filter((opt) => {
-                    const hasMatch = deduped.some(
-                      (m) =>
-                        (m as Message).direction === "out" &&
-                        (m as Message).content === opt.content &&
-                        !String((m as Message).id).startsWith("temp-") &&
-                        Math.abs(new Date((m as Message).sent_at).getTime() - new Date(opt.sent_at).getTime()) < 20000
-                    );
-                    return !hasMatch;
-                  });
-                  const merged = [...deduped, ...toAdd].sort(
-                    (a, b) => new Date((a as Message).sent_at).getTime() - new Date((b as Message).sent_at).getTime()
-                  );
-                  return merged.map((m) => (
-                    <div
-                      key={(m as Message).id}
-                      className={`flex ${(m as Message).direction === "out" ? "justify-end" : "justify-start"}`}
-                    >
-                      <MessageBubble
-                        m={m as Message}
-                        name={name}
-                        conversationId={resolved?.id}
-                        apiHeaders={apiHeaders}
-                        onReaction={handleReaction}
-                        onDeleteMessage={handleDeleteMessage}
-                      />
-                    </div>
-                  ));
-                })()}
+                {mergedMessages.map((m) => (
+                  <div
+                    key={m.id}
+                    ref={(node) => {
+                      messageNodeRefs.current[String(m.id)] = node;
+                    }}
+                    data-message-id={String(m.id)}
+                    className={`flex ${m.direction === "out" ? "justify-end" : "justify-start"}`}
+                  >
+                    <MessageBubble
+                      m={m}
+                      name={name}
+                      conversationId={resolved?.id}
+                      apiHeaders={apiHeaders}
+                      onReaction={handleReaction}
+                      onDeleteMessage={handleDeleteMessage}
+                      searchTerm={messageSearchTerm}
+                      isActiveSearchHit={Boolean(activeSearchMessageId && String(m.id) === activeSearchMessageId)}
+                    />
+                  </div>
+                ))}
                 <div ref={messagesEndRef} data-messages-end />
               </>
             )}
