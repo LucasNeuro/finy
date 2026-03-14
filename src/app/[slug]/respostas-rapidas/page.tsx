@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   Download,
   Loader2,
@@ -63,9 +63,8 @@ type QuickReplyFormState = {
 };
 
 export default function RespostasRapidasPage() {
-  const pathname = usePathname();
-  const segments = pathname?.split("/").filter(Boolean) ?? [];
-  const slug = segments[0];
+  const params = useParams();
+  const slug = (params?.slug as string) ?? "";
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);

@@ -1823,7 +1823,9 @@ export default function ContatosPage() {
             <div className="p-8 text-center text-[#64748B]">
               <Users className="mx-auto h-12 w-12 text-[#94A3B8]" />
               <p className="mt-2">Nenhum contato sincronizado.</p>
-              <p className="mt-1 text-sm">Conecte um número em Conexões e clique em Sincronizar para trazer a agenda.</p>
+              <p className="mt-1 text-sm">
+                Conecte um número em Conexões e clique no botão da instância (ex.: IMBOX_01) para trazer contatos que têm conversa com ela — não usa agenda do celular.
+              </p>
             </div>
           ) : (
             <>
