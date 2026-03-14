@@ -13,7 +13,7 @@ import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { getChatDetails } from "@/lib/uazapi/client";
+import { getChatDetails, extractContactNameFromDetails } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
 const VIDEO_EXT = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
@@ -284,9 +284,8 @@ export async function GET(
       if (resolved) {
         const numberForApi = jidNorm || canonicalDigits || conversation.customer_phone || jid;
         const detailRes = await getChatDetails(resolved.token, numberForApi, { preview: true });
-        const data = detailRes.data as { wa_contactName?: string; wa_name?: string; name?: string; imagePreview?: string; image?: string; picture?: string } | undefined;
-        
-        const fetchedName = (data?.wa_contactName ?? data?.wa_name ?? data?.name)?.trim() || null;
+        const data = detailRes.data;
+        const fetchedName = extractContactNameFromDetails(data);
         const fetchedImage = (data?.imagePreview ?? data?.image ?? data?.picture)?.trim() || null;
 
         if (fetchedName || fetchedImage) {

@@ -603,6 +603,10 @@ export type ChatDetails = {
   wa_contactName?: string;
   wa_name?: string;
   name?: string;
+  pushName?: string;
+  contactName?: string;
+  contact_name?: string;
+  shortName?: string;
   image?: string;
   imagePreview?: string;
   phone?: string;
@@ -638,6 +642,15 @@ export type ChatDetails = {
   chatbot_disableUntil?: number;
   [key: string]: unknown;
 };
+
+/** Extrai nome do contato da resposta getChatDetails (UAZAPI pode retornar em vários campos). */
+export function extractContactNameFromDetails(data: ChatDetails | undefined): string | null {
+  if (!data) return null;
+  const raw =
+    data.wa_contactName ?? data.wa_name ?? data.name ?? data.pushName ?? data.contactName
+    ?? data.contact_name ?? data.shortName ?? null;
+  return (typeof raw === "string" && raw.trim()) ? raw.trim() : null;
+}
 
 export async function getChatDetails(
   token: string,

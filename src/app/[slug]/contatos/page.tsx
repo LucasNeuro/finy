@@ -19,6 +19,7 @@ import { GroupDetailSideOver, type Group } from "./GroupDetailSideOver";
 import { GroupManageSideOver } from "./GroupManageSideOver";
 import { CreateCommunitySideOver } from "./CreateCommunitySideOver";
 import { CreateGroupSideOver } from "./CreateGroupSideOver";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 
 type Channel = { id: string; name: string };
 
@@ -70,6 +71,19 @@ function canonicalContactDigits(phone: string | null | undefined, jid: string | 
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) return digits;
   return digits;
+}
+
+/** Nome para exibição: se contact_name/first_name for o número, mostra "Sem Nome" em vez do número na coluna NOME. */
+function displayContactName(c: { contact_name?: string | null; first_name?: string | null; phone?: string | null; jid?: string | null }): string {
+  const raw = (c.contact_name || c.first_name || "").trim();
+  if (!raw) return "Sem Nome";
+  const nameDigits = raw.replace(/\D/g, "").trim();
+  if (nameDigits.length >= 10) {
+    const canonicalPhone = canonicalContactDigits(c.phone, c.jid);
+    const canonicalName = toCanonicalDigits(nameDigits) ?? nameDigits;
+    if (canonicalPhone && canonicalName === canonicalPhone) return "Sem Nome";
+  }
+  return raw;
 }
 
 /** URL de avatar: se for externa (http/https), usa proxy para evitar CORS/referrer e permitir cache. */
@@ -533,8 +547,8 @@ function GroupsManageActions({
           </option>
           {availableContacts.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.contact_name || c.first_name || c.phone || c.jid}
-              {c.phone ? ` (${c.phone})` : ""}
+              {displayContactName(c)}
+              {c.phone ? ` (${formatPhoneBrazil(c.phone)})` : ""}
             </option>
           ))}
         </select>
@@ -554,7 +568,7 @@ function GroupsManageActions({
               <tbody>
                 {selectedParticipants.map((c) => (
                   <tr key={c.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
-                    <td className="px-3 py-2 text-[#1E293B]">{c.contact_name || c.first_name || "—"}</td>
+                    <td className="px-3 py-2 text-[#1E293B]">{displayContactName(c)}</td>
                     <td className="px-3 py-2 text-[#64748B]">{c.phone || c.jid}</td>
                     <td className="px-3 py-2 text-right">
                       <button
@@ -1100,16 +1114,16 @@ export default function ContatosPage() {
               });
             }}
             className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
-            aria-label={`Selecionar ${row.original.contact_name || row.original.first_name || "contato"}`}
+            aria-label={`Selecionar ${displayContactName(row.original)}`}
           />
         ),
       },
       {
         header: "Nome",
-        accessorFn: (c) => c.contact_name || c.first_name || formatPhoneBrazil(c.phone || c.jid || "") || "—",
+        accessorFn: (c) => displayContactName(c),
         cell: ({ row }) => {
           const c = row.original;
-          const name = c.contact_name || c.first_name || formatPhoneBrazil(c.phone || c.jid || "") || "—";
+          const name = displayContactName(c);
           const avatarUrl = c.avatar_url?.trim() || null;
           return (
             <div className="flex items-center gap-3">
@@ -1791,7 +1805,7 @@ export default function ContatosPage() {
                             .map((id) => {
                               const c = contacts.find((x) => x.id === id);
                               if (!c) return "";
-                              const name = (c.contact_name || c.first_name || "").trim() || "—";
+                              const name = displayContactName(c);
                               const phone = (c.phone || c.jid || "").trim() || "—";
                               const conn = channelName(c.channel_id);
                               return `"${name}";"${phone}";"${conn}"`;

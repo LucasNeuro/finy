@@ -1,7 +1,8 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { addContactToAgenda, getChatDetails } from "@/lib/uazapi/client";
+import { addContactToAgenda, getChatDetails, extractContactNameFromDetails } from "@/lib/uazapi/client";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { upsertChannelContactNoDuplicate } from "@/lib/channel-contacts";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -82,20 +83,20 @@ export async function POST(request: Request) {
       const now = new Date().toISOString();
       const displayName = contactName || firstName || number;
 
-      await supabase
-        .from("channel_contacts")
-        .upsert(
-          {
-            channel_id: channelId,
-            company_id: companyId,
-            jid,
-            phone: canonicalDigits || number || null,
-            contact_name: displayName || null,
-            first_name: firstName || contactName || displayName || null,
-            synced_at: now,
-          },
-          { onConflict: "channel_id,jid", ignoreDuplicates: false }
-        );
+      const { error: upsertErr } = await upsertChannelContactNoDuplicate(supabase, channelId, companyId, {
+        channel_id: channelId,
+        company_id: companyId,
+        jid,
+        phone: canonicalDigits || number || null,
+        contact_name: displayName || null,
+        first_name: firstName || contactName || displayName || null,
+        synced_at: now,
+      });
+      if (upsertErr) {
+        fail++;
+        if (!firstError) firstError = upsertErr.message;
+        continue;
+      }
 
       addedJids.push(jid);
       ok++;
@@ -112,8 +113,7 @@ export async function POST(request: Request) {
       try {
         const detail = await getChatDetails(resolved.token, jid, { preview: true });
         const imageUrl = detail.data?.imagePreview ?? detail.data?.image;
-        const nameFromDetail =
-          (detail.data?.wa_contactName ?? detail.data?.wa_name ?? detail.data?.name)?.trim() || null;
+        const nameFromDetail = extractContactNameFromDetails(detail.data);
         const updates: Record<string, unknown> = { synced_at: new Date().toISOString() };
         if (imageUrl && typeof imageUrl === "string" && imageUrl.trim()) {
           updates.avatar_url = imageUrl.trim();

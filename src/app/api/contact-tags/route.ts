@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { upsertChannelContactNoDuplicate } from "@/lib/channel-contacts";
 import { createClient } from "@/lib/supabase/server";
 
 type ContactTagsPostBody =
@@ -216,48 +217,24 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Número inválido" }, { status: 400 });
       }
 
-      // Evitar duplicação: busca por phone canônico antes de criar (pode existir com JID diferente).
-      if (canonicalDigits) {
-        const { data: existingByPhone } = await supabase
-          .from("channel_contacts")
-          .select("id")
-          .eq("company_id", companyId)
-          .eq("channel_id", channelId)
-          .eq("phone", canonicalDigits)
-          .limit(1)
-          .maybeSingle();
-        if (existingByPhone?.id) {
-          contactId = existingByPhone.id as string;
-        }
+      const now = new Date().toISOString();
+      const { id: newId, error: upsertErr } = await upsertChannelContactNoDuplicate(supabase, channelId, companyId, {
+        channel_id: channelId,
+        company_id: companyId,
+        jid: jidToInsert,
+        phone: canonicalDigits || rawDigits || null,
+        contact_name: null,
+        first_name: null,
+        synced_at: now,
+      });
+
+      if (upsertErr) {
+        return NextResponse.json(
+          { error: upsertErr.message ?? "Falha ao criar contato para atribuir tags" },
+          { status: 500 }
+        );
       }
-
-      if (!contactId) {
-        // Se ainda não existir em channel_contacts (ex.: recém criado manualmente),
-        // criamos um registro mínimo apenas na nossa base, sem depender da UAZAPI.
-        const now = new Date().toISOString();
-        const { data: inserted, error: insertErr } = await supabase
-          .from("channel_contacts")
-          .insert({
-            company_id: companyId,
-            channel_id: channelId,
-            jid: jidToInsert,
-            phone: canonicalDigits || rawDigits || null,
-            contact_name: null,
-            first_name: null,
-            synced_at: now,
-          })
-          .select("id")
-          .single();
-
-        if (insertErr || !inserted) {
-          return NextResponse.json(
-            { error: insertErr?.message ?? "Falha ao criar contato para atribuir tags" },
-            { status: 500 }
-          );
-        }
-
-        contactId = inserted.id as string;
-      }
+      if (newId) contactId = newId;
     }
   }
 

@@ -4,14 +4,13 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { listContacts, listGroups, getChatDetails, getGroupInfo, findChats } from "@/lib/uazapi/client";
+import { listGroups, getChatDetails, getGroupInfo, findChats, extractContactNameFromDetails } from "@/lib/uazapi/client";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
 /**
- * source=chats (padrão): traz apenas contatos que têm conversa com a instância (chats).
- * Não usa a agenda do celular — ideal para WhatsApp Business + WhatsApp normal no mesmo aparelho.
- * source=agenda: comportamento antigo — traz toda a agenda do celular (GET /contacts).
+ * Traz apenas contatos que têm conversa com a instância (chats).
+ * NÃO usa a agenda do celular — só contatos com chat aberto na instância.
  */
 
 const MAX_AVATAR_SYNC = 200;
@@ -53,7 +52,6 @@ export async function POST(
   const url = new URL(request.url);
   const streamProgress = url.searchParams.get("stream") === "1";
   const clearFirst = url.searchParams.get("clear") === "1";
-  const source = url.searchParams.get("source") || "chats"; // chats = só da instância; agenda = agenda do celular
 
   try {
     const companyId = await getCompanyIdFromRequest(request);
@@ -76,7 +74,7 @@ export async function POST(
     }
 
     if (!streamProgress) {
-      const result = await runSync(resolved.token, channelId, companyId, () => {}, clearFirst, source);
+      const result = await runSync(resolved.token, channelId, companyId, () => {}, clearFirst);
       return NextResponse.json(result);
     }
 
@@ -88,7 +86,7 @@ export async function POST(
         };
         try {
           send({ progress: 0 });
-          const result = await runSync(resolved.token, channelId, companyId, (p) => send({ progress: p }), clearFirst, source);
+          const result = await runSync(resolved.token, channelId, companyId, (p) => send({ progress: p }), clearFirst);
           send({ progress: 100, ...result });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Erro ao sincronizar";
@@ -119,10 +117,8 @@ async function runSync(
   channelId: string,
   companyId: string,
   onProgress: ProgressCallback,
-  clearFirst = false,
-  source: string = "chats"
+  clearFirst = false
 ): Promise<{ ok: boolean; contacts_synced?: number; groups_synced?: number; avatars_synced?: number; error?: string }> {
-  // Opcional: limpar tudo do canal antes (evita resquícios de duplicatas)
   const supabase = await createClient();
   if (clearFirst) {
     await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("company_id", companyId);
@@ -130,39 +126,40 @@ async function runSync(
   }
 
   onProgress(5);
-  const useChatsOnly = source !== "agenda";
 
   let contactsCount = 0;
   let avatars_synced = 0;
   let syncedJids: string[] = [];
   let groupsRes: { ok: boolean; data?: unknown[] };
 
-  if (useChatsOnly) {
-    // Apenas contatos que têm conversa com a instância (chats) — NÃO agenda do celular.
-    // Isola por instância: ideal para WhatsApp Business + WhatsApp normal no mesmo aparelho.
-    const seen = new Set<string>();
-    const allContactRows: { channel_id: string; company_id: string; jid: string; phone: string | null; contact_name: string | null; first_name: string | null }[] = [];
-    let offset = 0;
-    const limit = 100;
-    let hasMore = true;
+  // Apenas contatos que têm conversa com a instância (chats) — NÃO agenda do celular.
+  const seenByJid = new Set<string>();
+  const seenByPhone = new Set<string>();
+  const allContactRows: { channel_id: string; company_id: string; jid: string; phone: string | null; contact_name: string | null; first_name: string | null }[] = [];
+  let offset = 0;
+  const limit = 100;
+  let hasMore = true;
 
-    while (hasMore) {
-      const { data: chatsData, ok: chatsOk } = await findChats(token, {
-        limit,
-        offset,
-        sort: "-wa_lastMsgTimestamp",
-        wa_isGroup: false,
-      });
-      if (!chatsOk || !chatsData?.chats?.length) break;
+  while (hasMore) {
+    const { data: chatsData, ok: chatsOk } = await findChats(token, {
+      limit,
+      offset,
+      sort: "-wa_lastMsgTimestamp",
+      wa_isGroup: false,
+    });
+    if (!chatsOk || !chatsData?.chats?.length) break;
 
-      const chats = chatsData.chats as { wa_chatid?: string; wa_contactName?: string; wa_name?: string }[];
-      for (const chat of chats) {
+    const chats = chatsData.chats as { wa_chatid?: string; wa_contactName?: string; wa_name?: string }[];
+    for (const chat of chats) {
         const rawJid = (chat.wa_chatid ?? "").toString().trim();
         if (!rawJid || rawJid.endsWith("@g.us")) continue;
         const jid = normalizeContactJid(rawJid);
-        if (!jid || seen.has(jid)) continue;
-        seen.add(jid);
         const phone = toCanonicalDigits(jid.replace(/@.*$/, "").replace(/\D/g, "")) ?? (jid.replace(/@.*$/, "").replace(/\D/g, "") || null);
+        if (!jid) continue;
+        if (seenByJid.has(jid)) continue;
+        if (phone && seenByPhone.has(phone)) continue;
+        seenByJid.add(jid);
+        if (phone) seenByPhone.add(phone);
         const name = (chat.wa_contactName ?? chat.wa_name ?? "").trim() || null;
         allContactRows.push({
           channel_id: channelId,
@@ -172,88 +169,27 @@ async function runSync(
           contact_name: name,
           first_name: name,
         });
-      }
-      if (chats.length < limit) hasMore = false;
-      else offset += limit;
     }
+    if (chats.length < limit) hasMore = false;
+    else offset += limit;
+  }
 
-    if (allContactRows.length > 0) {
-      await supabase
-        .from("channel_contacts")
-        .delete()
-        .eq("channel_id", channelId)
-        .eq("company_id", companyId);
-      const { error: err } = await supabase.from("channel_contacts").insert(allContactRows);
-      if (!err) {
-        contactsCount = allContactRows.length;
-        syncedJids = allContactRows.map((r) => r.jid);
-      }
-    }
-    if (process.env.NODE_ENV !== "test" && contactsCount > 0) {
-      console.log("[sync-contacts] source=chats: trazidos", contactsCount, "contatos da instância (chats)");
-    }
-    groupsRes = await listGroups(token, { force: true, noparticipants: true });
-  } else {
-    // Comportamento antigo: agenda completa do celular (GET /contacts)
-    const [contactsRes, groupsResInner] = await Promise.all([
-      listContacts(token),
-      listGroups(token, { force: true, noparticipants: true }),
-    ]);
-    groupsRes = groupsResInner;
-    onProgress(15);
-
-    if (contactsRes.ok && Array.isArray(contactsRes.data) && contactsRes.data.length > 0) {
-      const seen = new Set<string>();
-      const rows = contactsRes.data
-        .map((c) => {
-          const rawJid = (typeof (c as { jid?: string }).jid === "string"
-            ? (c as { jid: string }).jid
-            : typeof (c as { JID?: string }).JID === "string"
-              ? (c as { JID: string }).JID
-              : ""
-          ).trim();
-          const jid = normalizeContactJid(rawJid);
-          if (!jid || seen.has(jid)) return null;
-          seen.add(jid);
-          const phone = toCanonicalDigits(jid.replace(/@.*$/, "").replace(/\D/g, "")) ?? (jid.replace(/@.*$/, "").replace(/\D/g, "") || null);
-          return {
-            channel_id: channelId,
-            company_id: companyId,
-            jid,
-            phone: phone || null,
-            contact_name: (
-              (c as { contactName?: string }).contactName
-              ?? (c as { contact_name?: string }).contact_name
-              ?? (c as { name?: string }).name
-              ?? (c as { pushName?: string }).pushName
-              ?? (c as { shortName?: string }).shortName
-              ?? (c as { wa_contactName?: string }).wa_contactName
-              ?? ""
-            ).trim() || null,
-            first_name: (
-              (c as { contact_FirstName?: string }).contact_FirstName
-              ?? (c as { contactName?: string }).contactName
-              ?? (c as { name?: string }).name
-              ?? (c as { pushName?: string }).pushName
-              ?? ""
-            ).trim() || null,
-          };
-        })
-        .filter((r): r is NonNullable<typeof r> => r !== null);
-      if (rows.length > 0) {
-        await supabase
-          .from("channel_contacts")
-          .delete()
-          .eq("channel_id", channelId)
-          .eq("company_id", companyId);
-        const { error: err } = await supabase.from("channel_contacts").insert(rows);
-        if (!err) {
-          contactsCount = rows.length;
-          syncedJids = rows.map((r) => r.jid);
-        }
-      }
+  if (allContactRows.length > 0) {
+    await supabase
+      .from("channel_contacts")
+      .delete()
+      .eq("channel_id", channelId)
+      .eq("company_id", companyId);
+    const { error: err } = await supabase.from("channel_contacts").insert(allContactRows);
+    if (!err) {
+      contactsCount = allContactRows.length;
+      syncedJids = allContactRows.map((r) => r.jid);
     }
   }
+  if (process.env.NODE_ENV !== "test" && contactsCount > 0) {
+    console.log("[sync-contacts] trazidos", contactsCount, "contatos da instância (chats)");
+  }
+  groupsRes = await listGroups(token, { force: true, noparticipants: true });
 
   onProgress(30);
 
@@ -264,8 +200,7 @@ async function runSync(
       try {
         const detail = await getChatDetails(token, jid, { preview: true });
         const imageUrl = detail.data?.imagePreview ?? detail.data?.image;
-        const nameFromDetail =
-          (detail.data?.wa_contactName ?? detail.data?.wa_name ?? detail.data?.name)?.trim() || null;
+        const nameFromDetail = extractContactNameFromDetails(detail.data);
         const updates: Record<string, unknown> = {
           synced_at: new Date().toISOString(),
         };

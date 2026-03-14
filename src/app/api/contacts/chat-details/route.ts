@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { getChatDetails } from "@/lib/uazapi/client";
+import { getChatDetails, extractContactNameFromDetails, type ChatDetails } from "@/lib/uazapi/client";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -56,16 +57,15 @@ export async function POST(request: Request) {
   const avatarUrl = (data as { imagePreview?: string; image?: string }).imagePreview
     || (data as { image?: string }).image
     || null;
-  const contactName = ((data as { wa_contactName?: string }).wa_contactName
-    ?? (data as { wa_name?: string }).wa_name
-    ?? (data as { name?: string }).name)?.trim() || null;
-  const digitsOnly = number.replace(/\D/g, "");
+  const contactName = extractContactNameFromDetails(data as ChatDetails);
+  const digits = number.replace(/\D/g, "").replace(/@.*$/, "");
+  const canonicalDigits = toCanonicalDigits(digits) ?? digits;
 
   const hasUpdates = (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) || contactName;
   if (hasUpdates) {
     const supabase = await createClient();
-    const jidNorm = number.includes("@") ? number : `${number.replace(/\D/g, "")}@s.whatsapp.net`;
-    const jids = number === jidNorm ? [number] : [number, jidNorm];
+    const canonicalJid = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : (number.includes("@") ? number : `${digits}@s.whatsapp.net`);
+    const jids = number.includes("@") && number !== canonicalJid ? [canonicalJid, number] : [canonicalJid];
     const contactUpdates: Record<string, unknown> = { synced_at: new Date().toISOString() };
     if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
       contactUpdates.avatar_url = avatarUrl.trim();
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
               channel_id: channelId,
               company_id: companyId,
               jid,
-              ...(digitsOnly ? { phone: digitsOnly } : {}),
+              ...(canonicalDigits ? { phone: canonicalDigits } : {}),
               ...contactUpdates,
             },
             { onConflict: "channel_id,jid" }
