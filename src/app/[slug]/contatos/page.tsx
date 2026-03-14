@@ -1703,7 +1703,7 @@ export default function ContatosPage() {
                 title={
                   syncing === ch.id
                     ? "Sincronizando contatos, grupos e comunidades…"
-                    : `Sincronizar contatos, grupos e comunidades: ${ch.name}`
+                    : `Sincronizar: traz contatos que têm conversa com ${ch.name} (não usa agenda do celular)`
                 }
               >
                 <span className="relative z-10 flex items-center justify-center gap-1 truncate">
