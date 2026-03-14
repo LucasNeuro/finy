@@ -10,7 +10,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Download, Upload } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SideOver } from "@/components/SideOver";
@@ -727,7 +727,9 @@ export default function ContatosPage() {
   const [addContactResult, setAddContactResult] = useState<{ ok: number; fail: number } | null>(null);
   const [addContactError, setAddContactError] = useState<string | null>(null);
   const [bulkContactsText, setBulkContactsText] = useState("");
-  const [bulkContactsRows, setBulkContactsRows] = useState<{ number: string; name: string }[]>([]);
+  const [bulkContactsRows, setBulkContactsRows] = useState<
+    { number: string; contact_name: string; first_name?: string }[]
+  >([]);
   const [bulkContactsImporting, setBulkContactsImporting] = useState(false);
   const [contactTagsLoading, setContactTagsLoading] = useState(false);
   const [availableContactTags, setAvailableContactTags] = useState<
@@ -783,6 +785,16 @@ export default function ContatosPage() {
       return next;
     });
   };
+
+  // Ao abrir o modal de adicionar contato, pré-selecionar o canal para evitar salvar no lugar errado
+  useEffect(() => {
+    if (!addContactSideOverOpen || channels.length === 0) return;
+    if (filterChannelId && channels.some((c) => c.id === filterChannelId)) {
+      setAddContactChannelId(filterChannelId);
+    } else if (channels.length === 1) {
+      setAddContactChannelId(channels[0].id);
+    }
+  }, [addContactSideOverOpen, filterChannelId, channels]);
 
   const contactsKey = useMemo(() => ["contacts", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
   const groupsKey = useMemo(() => ["groups", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
@@ -880,87 +892,20 @@ export default function ContatosPage() {
       .finally(() => setBlockListLoading(false));
   }, [filterChannelId, apiHeaders]);
 
-  const parseContactsCSVLine = (line: string, sep: string): string[] => {
-    const parts: string[] = [];
-    let current = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') {
-        inQuotes = !inQuotes;
-      } else if (!inQuotes && c === sep) {
-        parts.push(current.trim());
-        current = "";
-      } else {
-        current += c;
+  /** Extrai números de texto colado (linhas, vírgulas, ponto e vírgula). Mínimo 10 dígitos. */
+  const parsePastedNumbers = (text: string): { number: string; contact_name: string; first_name?: string }[] => {
+    const parts = text.split(/[\n\r,;\t]+/).map((p) => p.trim()).filter(Boolean);
+    const rows: { number: string; contact_name: string; first_name?: string }[] = [];
+    const seen = new Set<string>();
+    for (const part of parts) {
+      const digits = part.replace(/\D/g, "").trim();
+      if (digits.length >= 10 && !seen.has(digits)) {
+        seen.add(digits);
+        rows.push({ number: digits, contact_name: digits, first_name: undefined });
       }
     }
-    parts.push(current.trim());
-    return parts;
+    return rows;
   };
-
-  const handleDownloadContactsTemplate = () => {
-    const bom = "\uFEFF";
-    // Modelo mais próximo da tabela channel_contacts
-    const header = "phone;contact_name;first_name;avatar_url";
-    const example1 =
-      "5511999990000;João Silva;João;https://exemplo.com/avatar-joao.jpg";
-    const example2 =
-      "5548999991111;Maria - Cliente VIP;Maria;https://exemplo.com/avatar-maria.jpg";
-    const example3 = "5511944442222;Sem Nome (usa número);;";
-    const content = [header, example1, example2, example3].join("\n");
-    const blob = new Blob([bom + content], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "modelo-contatos.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const parseContactsCSVFile = (
-    file: File
-  ): Promise<{ number: string; name: string }[]> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const text = String(reader.result ?? "");
-        const lines = text
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean);
-        if (lines.length === 0) {
-          resolve([]);
-          return;
-        }
-        const first = lines[0].toLowerCase();
-        // Aceita cabeçalho antigo (telefone/número) ou novo (phone;contact_name;first_name;avatar_url)
-        const hasHeader =
-          first.includes("telefone") ||
-          first.includes("numero") ||
-          first.includes("phone");
-        const dataLines = hasHeader ? lines.slice(1) : lines;
-        const rows: { number: string; name: string }[] = [];
-        for (const line of dataLines) {
-          const sep = line.includes(";") ? ";" : ",";
-          const parts = parseContactsCSVLine(line, sep).map((p) =>
-            p.replace(/^"|"$/g, "").trim()
-          );
-          // Coluna 0: phone (obrigatório)
-          // Coluna 1: contact_name (opcional)
-          // Coluna 2: first_name (opcional, hoje ignorado)
-          // Coluna 3: avatar_url (opcional, hoje ignorado)
-          const number = (parts[0] ?? "").replace(/\D/g, "");
-          const contactName = (parts[1] ?? "").trim();
-          const name = contactName;
-          if (!number) continue;
-          rows.push({ number, name: name || number });
-        }
-        resolve(rows);
-      };
-      reader.onerror = () => reject(new Error("Erro ao ler arquivo"));
-      reader.readAsText(file, "UTF-8");
-    });
 
   useEffect(() => {
     setLoading(true);
@@ -2705,7 +2650,7 @@ export default function ContatosPage() {
               ))}
             </select>
             <p className="text-xs text-[#64748B]">
-              O contato será criado na agenda do WhatsApp da conexão selecionada.
+              Contatos serão salvos na agenda do WhatsApp e na lista do ClicVend desta conexão. Confira se é a conexão correta.
             </p>
           </div>
 
@@ -2723,12 +2668,14 @@ export default function ContatosPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-[#334155]">Nome</label>
+                  <label className="block text-sm font-medium text-[#334155]">
+                    Nome <span className="font-normal text-[#94A3B8]">(opcional)</span>
+                  </label>
                   <input
                     type="text"
                     value={addContactName}
                     onChange={(e) => setAddContactName(e.target.value)}
-                    placeholder="Nome que aparecerá na agenda"
+                    placeholder="Só o número já basta — nome e avatar vêm do WhatsApp"
                     className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
                   />
                 </div>
@@ -2822,53 +2769,40 @@ export default function ContatosPage() {
           {addContactTab === "bulk" && (
             <div className="space-y-4">
               <p className="text-sm text-[#64748B]">
-                Use uma planilha para importar vários contatos de uma vez (até{" "}
-                <span className="font-semibold">90 contatos</span> por importação). Cada linha deve ter{" "}
-                <span className="font-mono text-xs text-[#0F172A]">telefone;nome</span>. O cabeçalho é
-                opcional.
+                Cole a lista de números (até <span className="font-semibold">90 contatos</span>). Um por linha ou separados por vírgula/ponto e vírgula. Nome e avatar serão buscados automaticamente no WhatsApp.
               </p>
 
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleDownloadContactsTemplate}
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]"
-                >
-                  <Download className="h-4 w-4" />
-                  Baixar modelo (CSV)
-                </button>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]">
-                  <Upload className="h-4 w-4" />
-                  Enviar planilha preenchida
-                  <input
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="sr-only"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (!file) return;
-                      try {
-                        const rows = await parseContactsCSVFile(file);
-                        setBulkContactsRows(rows);
-                        setAddContactResult(null);
-                        setAddContactError(null);
-                      } catch {
-                        setAddContactError("Erro ao processar o arquivo. Use o modelo em CSV.");
-                      }
-                    }}
-                  />
-                </label>
+              <div>
+                <label className="block text-sm font-medium text-[#334155] mb-1">Números</label>
+                <textarea
+                  value={bulkContactsText}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setBulkContactsText(text);
+                    const rows = parsePastedNumbers(text);
+                    setBulkContactsRows(rows);
+                    setAddContactResult(null);
+                    setAddContactError(null);
+                  }}
+                  placeholder={"5511999990000\n5511988887777\n5548999991111"}
+                  rows={5}
+                  className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange font-mono"
+                />
+                <p className="mt-1 text-xs text-[#94A3B8]">
+                  Ex.: copie e cole do Excel, WhatsApp ou qualquer lista. Só os números.
+                </p>
               </div>
-
-              <pre className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2 text-xs text-[#475569]">
-telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente VIP{"\n"}5511944442222;Sem Nome (usa número)
-              </pre>
 
               {bulkContactsRows.length > 0 && (
                 <>
                   <p className="text-sm font-medium text-[#334155]">
-                    Preview: {bulkContactsRows.length} contato(s) pronto(s) para importar
+                    Preview: {bulkContactsRows.length} contato(s) — serão salvos em:{" "}
+                    <span className="font-semibold text-clicvend-orange">
+                      {channels.find((c) => c.id === addContactChannelId)?.name ?? "—"}
+                    </span>
+                  </p>
+                  <p className="text-xs text-[#64748B] mt-1">
+                    ℹ️ Nome e avatar serão buscados automaticamente no WhatsApp após a importação.
                   </p>
                   {bulkContactsRows.length > 90 && (
                     <p className="text-xs text-red-600">
@@ -2880,15 +2814,13 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                     <table className="min-w-full text-xs">
                       <thead className="sticky top-0 bg-[#F8FAFC]">
                         <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Telefone</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Nome</th>
+                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Número</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#E2E8F0]">
                         {bulkContactsRows.slice(0, 30).map((row, i) => (
                           <tr key={i}>
-                            <td className="px-2 py-1.5 text-[#1E293B]">{row.number}</td>
-                            <td className="px-2 py-1.5 text-[#64748B]">{row.name}</td>
+                            <td className="px-2 py-1.5 text-[#1E293B] font-mono">{row.number}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2898,6 +2830,20 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                         … e mais {bulkContactsRows.length - 30} contato(s).
                       </p>
                     )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBulkContactsText("");
+                        setBulkContactsRows([]);
+                        setAddContactResult(null);
+                        setAddContactError(null);
+                      }}
+                      className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+                    >
+                      Limpar
+                    </button>
                   </div>
                 </>
               )}
@@ -2931,6 +2877,11 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                 addContactSaving ||
                 !addContactChannelId ||
                 (addContactTab === "single" ? !addContactPhone.trim() : bulkContactsRows.length === 0)
+              }
+              title={
+                addContactTab === "bulk" && bulkContactsRows.length > 0
+                  ? `Importar ${Math.min(bulkContactsRows.length, 90)} contato(s) na agenda do WhatsApp`
+                  : undefined
               }
               onClick={async () => {
                 if (!addContactChannelId) return;
@@ -2989,47 +2940,39 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                       mutateContacts();
                     }
                   } else {
-                    let ok = 0;
-                    let fail = 0;
-                    let firstError: string | null = null;
                     const maxPerBatch = 90;
                     const rowsToProcess = bulkContactsRows.slice(0, maxPerBatch);
-                    for (const row of rowsToProcess) {
-                      const number = row.number.replace(/\D/g, "");
-                      const name = row.name.trim() || number;
-                      if (!number) {
-                        fail++;
-                        if (!firstError) firstError = "Telefone inválido em uma das linhas.";
-                        continue;
-                      }
-                      try {
-                        const res = await fetch("/api/contacts/add-to-agenda", {
-                          method: "POST",
-                          credentials: "include",
-                          headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
-                          body: JSON.stringify({ channel_id: addContactChannelId, number, name }),
-                        });
-                        if (res.ok) {
-                          ok++;
-                        } else {
-                          fail++;
-                          if (!firstError) {
-                            const data = await res.json().catch(() => ({}));
-                            firstError = data?.error ?? "Falha ao adicionar um dos contatos.";
-                          }
+                    const contactsPayload = rowsToProcess.map((row) => ({
+                      number: row.number.replace(/\D/g, ""),
+                      contact_name: row.contact_name.trim() || undefined,
+                      first_name: row.first_name?.trim() || undefined,
+                    }));
+                    try {
+                      const res = await fetch("/api/contacts/bulk-add", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
+                        body: JSON.stringify({
+                          channel_id: addContactChannelId,
+                          contacts: contactsPayload,
+                        }),
+                      });
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) {
+                        setAddContactError(data?.error ?? "Falha ao importar contatos.");
+                        setAddContactResult({ ok: 0, fail: rowsToProcess.length });
+                      } else {
+                        setAddContactResult({ ok: data.ok ?? 0, fail: data.fail ?? 0 });
+                        if (data.error) setAddContactError(data.error);
+                        if ((data.ok ?? 0) > 0) {
+                          mutateContacts();
+                          setBulkContactsText("");
+                          setBulkContactsRows([]);
                         }
-                      } catch {
-                        fail++;
-                        if (!firstError) firstError = "Erro de rede ao adicionar um dos contatos.";
                       }
-                    }
-                    if (bulkContactsRows.length > maxPerBatch && !firstError) {
-                      firstError = `Limite de ${maxPerBatch} contatos por importação. Apenas os primeiros ${maxPerBatch} foram processados.`;
-                    }
-                    setAddContactResult({ ok, fail });
-                    if (firstError) setAddContactError(firstError);
-                    if (ok > 0) {
-                      mutateContacts();
+                    } catch {
+                      setAddContactError("Erro de rede ao importar contatos.");
+                      setAddContactResult({ ok: 0, fail: rowsToProcess.length });
                     }
                   }
                 } finally {
@@ -3038,8 +2981,19 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
               }}
               className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
             >
-              {addContactSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Salvar
+              {addContactSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {addContactTab === "bulk" ? "Importando…" : "Salvando…"}
+                </>
+              ) : addContactTab === "bulk" && bulkContactsRows.length > 0 ? (
+                <>
+                  <Upload className="h-4 w-4" />
+                  Importar {Math.min(bulkContactsRows.length, 90)} contato(s)
+                </>
+              ) : (
+                "Salvar"
+              )}
             </button>
           </div>
         </div>

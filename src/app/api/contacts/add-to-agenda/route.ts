@@ -1,6 +1,8 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { addContactToAgenda } from "@/lib/uazapi/client";
+import { addContactToAgenda, getChatDetails } from "@/lib/uazapi/client";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -8,7 +10,8 @@ import { NextResponse } from "next/server";
  * POST /api/contacts/add-to-agenda
  * Body: { channel_id: string, number: string, name?: string }
  * Adiciona contato à agenda do WhatsApp (UAZAPI /contact/add).
- * Atualiza contact_name em channel_contacts para o nome novo aparecer na tabela.
+ * Faz upsert em channel_contacts. Busca nome e avatar na UAZAPI (igual ao bulk-add).
+ * Só o número é obrigatório — nome e avatar vêm do WhatsApp.
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -47,19 +50,52 @@ export async function POST(request: Request) {
   }
 
   const digits = number.replace(/\D/g, "");
-  const jid = digits ? `${digits}@s.whatsapp.net` : "";
-  if (jid && (name || number)) {
+  const canonicalDigits = toCanonicalDigits(number) ?? digits;
+  const jid = digits ? `${canonicalDigits || digits}@s.whatsapp.net` : "";
+  if (jid) {
     const supabase = await createClient();
+    const now = new Date().toISOString();
     await supabase
       .from("channel_contacts")
-      .update({
-        contact_name: name || null,
-        first_name: name || null,
-        synced_at: new Date().toISOString(),
-      })
-      .eq("channel_id", channelId)
-      .eq("company_id", companyId)
-      .eq("jid", jid);
+      .upsert(
+        {
+          channel_id: channelId,
+          company_id: companyId,
+          jid,
+          phone: canonicalDigits || digits || null,
+          contact_name: name || null,
+          first_name: name || null,
+          synced_at: now,
+        },
+        { onConflict: "channel_id,jid", ignoreDuplicates: false }
+      );
+
+    // Busca nome e avatar na UAZAPI (igual ao bulk-add e chat-details)
+    try {
+      const detail = await getChatDetails(resolved.token, jid, { preview: true });
+      const imageUrl = detail.data?.imagePreview ?? detail.data?.image;
+      const nameFromDetail =
+        (detail.data?.wa_contactName ?? detail.data?.wa_name ?? detail.data?.name)?.trim() || null;
+      const updates: Record<string, unknown> = { synced_at: new Date().toISOString() };
+      if (imageUrl && typeof imageUrl === "string" && imageUrl.trim()) {
+        updates.avatar_url = imageUrl.trim();
+      }
+      if (nameFromDetail) {
+        updates.contact_name = nameFromDetail;
+        updates.first_name = nameFromDetail;
+      }
+      if (Object.keys(updates).length > 1) {
+        await supabase
+          .from("channel_contacts")
+          .update(updates)
+          .eq("channel_id", channelId)
+          .eq("company_id", companyId)
+          .eq("jid", jid);
+      }
+    } catch {
+      // ignora — contato já foi salvo
+    }
+    await invalidateConversationList(companyId);
   }
 
   return NextResponse.json(result.data ?? { ok: true });

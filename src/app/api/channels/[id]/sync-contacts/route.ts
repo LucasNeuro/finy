@@ -133,6 +133,7 @@ async function runSync(
   const useChatsOnly = source !== "agenda";
 
   let contactsCount = 0;
+  let avatars_synced = 0;
   let syncedJids: string[] = [];
   let groupsRes: { ok: boolean; data?: unknown[] };
 
