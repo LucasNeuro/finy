@@ -238,25 +238,26 @@ export async function POST(request: Request) {
         const { data: inserted, error: insertErr } = await supabase
           .from("channel_contacts")
           .insert({
-          company_id: companyId,
-          channel_id: channelId,
-          jid: jidToInsert,
-          phone: canonicalDigits || rawDigits || null,
-          contact_name: null,
-          first_name: null,
-          synced_at: now,
-        })
-        .select("id")
-        .single();
+            company_id: companyId,
+            channel_id: channelId,
+            jid: jidToInsert,
+            phone: canonicalDigits || rawDigits || null,
+            contact_name: null,
+            first_name: null,
+            synced_at: now,
+          })
+          .select("id")
+          .single();
 
-      if (insertErr || !inserted) {
-        return NextResponse.json(
-          { error: insertErr?.message ?? "Falha ao criar contato para atribuir tags" },
-          { status: 500 }
-        );
+        if (insertErr || !inserted) {
+          return NextResponse.json(
+            { error: insertErr?.message ?? "Falha ao criar contato para atribuir tags" },
+            { status: 500 }
+          );
+        }
+
+        contactId = inserted.id as string;
       }
-
-      contactId = inserted.id as string;
     }
   }
 
