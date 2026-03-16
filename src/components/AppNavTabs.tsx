@@ -14,6 +14,7 @@ import {
   Inbox,
   UserCog,
   Ticket,
+  ChartLine,
 } from "lucide-react";
 
 const fetcher = (url: string, slug: string) =>
@@ -31,6 +32,8 @@ const ALL_TABS = [
   { href: "/conexoes", label: "Conexões", icon: Plug, requires: "channels.view" as const },
   // Filas
   { href: "/filas", label: "Filas", icon: Inbox, requires: "queues.view" as const },
+  // CRM Comercial
+  { href: "/crm", label: "CRM", icon: ChartLine, requires: "inbox.read" as const },
   // Contatos
   { href: "/contatos", label: "Contatos", icon: Users, requires: "contacts.view" as const },
   // Respostas rápidas

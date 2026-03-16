@@ -8,6 +8,7 @@ function isColumnMissingError(message: string): boolean {
   return (
     lower.includes("business_hours") ||
     lower.includes("special_dates") ||
+    lower.includes("queue_type") ||
     (lower.includes("column") && lower.includes("does not exist"))
   );
 }
@@ -29,13 +30,13 @@ export async function GET(
     return NextResponse.json({ error: "Queue ID required" }, { status: 400 });
   }
   const supabase = await createClient();
-  type QueueRow = { id: string; name: string; slug: string; created_at?: string; updated_at?: string; business_hours?: unknown; special_dates?: unknown };
+  type QueueRow = { id: string; name: string; slug: string; queue_type?: string; created_at?: string; updated_at?: string; business_hours?: unknown; special_dates?: unknown };
   let data: QueueRow | null = null;
   let error: { message: string } | null = null;
 
   const res = await supabase
     .from("queues")
-    .select("id, name, slug, created_at, updated_at, business_hours, special_dates")
+    .select("id, name, slug, queue_type, created_at, updated_at, business_hours, special_dates")
     .eq("id", queueId)
     .eq("company_id", companyId)
     .single();
@@ -52,7 +53,7 @@ export async function GET(
     if (fallback.error || !fallback.data) {
       return NextResponse.json({ error: "Queue not found" }, { status: 404 });
     }
-    return NextResponse.json({ ...fallback.data, business_hours: [], special_dates: [] });
+    return NextResponse.json({ ...fallback.data, queue_type: "standard", business_hours: [], special_dates: [] });
   }
   if (error || !data) {
     return NextResponse.json({ error: "Queue not found" }, { status: 404 });
@@ -86,7 +87,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Queue ID required" }, { status: 400 });
   }
 
-  let body: { name?: string; slug?: string; business_hours?: unknown; special_dates?: unknown };
+  let body: { name?: string; slug?: string; queue_type?: string; business_hours?: unknown; special_dates?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -105,7 +106,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Queue not found" }, { status: 404 });
   }
 
-  const updates: { name?: string; slug?: string; business_hours?: unknown; special_dates?: unknown; updated_at: string } = {
+  const updates: { name?: string; slug?: string; queue_type?: string; business_hours?: unknown; special_dates?: unknown; updated_at: string } = {
     updated_at: new Date().toISOString(),
   };
   if (typeof body?.name === "string" && body.name.trim()) {
@@ -113,6 +114,9 @@ export async function PATCH(
   }
   if (typeof body?.slug === "string" && body.slug.trim()) {
     updates.slug = body.slug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  }
+  if (typeof body?.queue_type === "string") {
+    updates.queue_type = body.queue_type === "commercial" ? "commercial" : "standard";
   }
   if (body?.business_hours !== undefined) {
     updates.business_hours = Array.isArray(body.business_hours) ? body.business_hours : [];
@@ -122,7 +126,7 @@ export async function PATCH(
   }
 
   if (Object.keys(updates).length <= 1) {
-    return NextResponse.json({ error: "Nenhuma alteração (name, slug, business_hours ou special_dates)" }, { status: 400 });
+    return NextResponse.json({ error: "Nenhuma alteração (name, slug, queue_type, business_hours ou special_dates)" }, { status: 400 });
   }
 
   const { data, error } = await supabase
@@ -130,10 +134,51 @@ export async function PATCH(
     .update(updates)
     .eq("id", queueId)
     .eq("company_id", companyId)
-    .select("id, name, slug, created_at, updated_at, business_hours, special_dates")
+    .select("id, name, slug, queue_type, created_at, updated_at, business_hours, special_dates")
     .single();
 
   if (error) {
+    // Compatibilidade com bancos que ainda não têm business_hours/special_dates/queue_type.
+    // (ex.: ambiente parcialmente migrado)
+    if (isColumnMissingError(error.message)) {
+      const lower = error.message.toLowerCase();
+      const missingBusinessHours = lower.includes("business_hours");
+      const missingQueueType = lower.includes("queue_type");
+      const fallbackUpdates: {
+        name?: string;
+        slug?: string;
+        queue_type?: string;
+        business_hours?: unknown;
+        updated_at: string;
+      } = { updated_at: updates.updated_at };
+
+      if (updates.name !== undefined) fallbackUpdates.name = updates.name;
+      if (updates.slug !== undefined) fallbackUpdates.slug = updates.slug;
+      if (!missingQueueType && updates.queue_type !== undefined) fallbackUpdates.queue_type = updates.queue_type;
+      if (!missingBusinessHours && updates.business_hours !== undefined) fallbackUpdates.business_hours = updates.business_hours;
+
+      const fallbackUpdate = await supabase
+        .from("queues")
+        .update(fallbackUpdates)
+        .eq("id", queueId)
+        .eq("company_id", companyId)
+        .select("id, name, slug, created_at, updated_at")
+        .single();
+
+      if (fallbackUpdate.error || !fallbackUpdate.data) {
+        return NextResponse.json(
+          { error: fallbackUpdate.error?.message ?? "Queue not found" },
+          { status: fallbackUpdate.error ? 500 : 404 }
+        );
+      }
+
+      return NextResponse.json({
+        ...fallbackUpdate.data,
+        queue_type: updates.queue_type ?? "standard",
+        business_hours: updates.business_hours ?? [],
+        special_dates: [],
+      });
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   return NextResponse.json(data);

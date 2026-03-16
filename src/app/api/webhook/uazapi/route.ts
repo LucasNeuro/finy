@@ -8,6 +8,8 @@ import {
 } from "@/lib/phone-canonical";
 import { getRedisClient } from "@/lib/redis/client";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
+import { isCommercialQueue, getCommercialContactOwner } from "@/lib/queue/commercial";
+import { getNextAgentForQueue } from "@/lib/queue/round-robin";
 import { NextResponse } from "next/server";
 
 /**
@@ -809,8 +811,40 @@ async function processOneMessage(
         { onConflict: "channel_id,jid", ignoreDuplicates: false }
       );
     } else {
-      // Nova conversa: fica em "Novos" (não atribuir). Só vai para fila/Meus quando o atendente clicar para pegar.
-      const assignedTo: string | null = null;
+      // Nova conversa: roteamento por carteira comercial → round-robin → padrão (Novos)
+      let assignedTo: string | null = null;
+      if (queueId) {
+        const commercial = await isCommercialQueue(supabase, companyId, queueId);
+        if (commercial) {
+          // 1. Verifica se o contato já tem dono na carteira
+          const ownerRow = await getCommercialContactOwner(
+            supabase,
+            companyId,
+            channelId,
+            canonicalDigits || displayPhone
+          );
+          if (ownerRow?.owner_user_id) {
+            assignedTo = ownerRow.owner_user_id;
+            console.log("[WEBHOOK] Contato com dono na carteira:", { assignedTo, phone: canonicalDigits });
+          } else {
+            // 2. Round-robin entre os consultores da fila
+            assignedTo = await getNextAgentForQueue(companyId, queueId);
+            // 3. Registra o dono para próximas mensagens
+            if (assignedTo) {
+              const { upsertCommercialContactOwner } = await import("@/lib/queue/commercial");
+              await upsertCommercialContactOwner(supabase, {
+                companyId,
+                channelId,
+                queueId,
+                phone: canonicalDigits || displayPhone,
+                ownerUserId: assignedTo,
+                source: "round_robin",
+              });
+              console.log("[WEBHOOK] Novo dono registrado via round-robin:", { assignedTo, phone: canonicalDigits });
+            }
+          }
+        }
+      }
 
       const { data: inserted, error: insertConvError } = await supabase
         .from("conversations")
@@ -836,7 +870,11 @@ async function processOneMessage(
         return false;
       }
       conversationId = inserted.id;
-      console.log("[WEBHOOK] Conversa criada (Novos):", { conversationId, queueId });
+      console.log("[WEBHOOK] Conversa criada:", {
+        conversationId,
+        queueId,
+        assignedTo: assignedTo ?? null,
+      });
       if (externalId !== canonicalExternalId) {
         await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("jid", externalId);
       }

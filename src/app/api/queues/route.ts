@@ -8,6 +8,7 @@ function isColumnMissingError(message: string): boolean {
   return (
     lower.includes("business_hours") ||
     lower.includes("special_dates") ||
+    lower.includes("queue_type") ||
     (lower.includes("column") && lower.includes("does not exist"))
   );
 }
@@ -45,13 +46,13 @@ export async function GET(request: Request) {
     }
   }
 
-  type Row = { id: string; name: string; slug: string; kind?: string; created_at?: string; business_hours?: unknown; special_dates?: unknown };
+  type Row = { id: string; name: string; slug: string; kind?: string; queue_type?: string; created_at?: string; business_hours?: unknown; special_dates?: unknown };
   let data: Row[] | null = null;
   let error: { message: string } | null = null;
 
   let q = supabase
     .from("queues")
-    .select("id, name, slug, kind, created_at, business_hours, special_dates")
+    .select("id, name, slug, kind, queue_type, created_at, business_hours, special_dates")
     .eq("company_id", companyId)
     .order("name");
   if (allowedQueueIds !== null) {
@@ -76,6 +77,7 @@ export async function GET(request: Request) {
     const withExtras = (fallback.data ?? []).map((row) => ({
       ...row,
       kind: "ticket" as string,
+      queue_type: "standard" as string,
       business_hours: [] as unknown,
       special_dates: [] as unknown,
     }));
@@ -100,7 +102,7 @@ export async function POST(request: Request) {
   if (adminError) {
     return NextResponse.json({ error: adminError.error }, { status: adminError.status });
   }
-  let body: { name?: string; slug?: string; use_groups?: boolean };
+  let body: { name?: string; slug?: string; use_groups?: boolean; queue_type?: string };
   try {
     body = await request.json();
   } catch {
@@ -109,6 +111,7 @@ export async function POST(request: Request) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
   const slug = typeof body?.slug === "string" ? body.slug.trim().toLowerCase().replace(/\s+/g, "-") : "";
   const useGroups = body?.use_groups === true;
+  const queueType = body?.queue_type === "commercial" ? "commercial" : "standard";
   if (!name || !slug) {
     return NextResponse.json({ error: "name and slug required" }, { status: 400 });
   }
@@ -133,8 +136,8 @@ export async function POST(request: Request) {
 
   const { data, error } = await supabase
     .from("queues")
-    .insert({ company_id: companyId, name, slug })
-    .select("id, name, slug, created_at")
+    .insert({ company_id: companyId, name, slug, queue_type: queueType })
+    .select("id, name, slug, queue_type, created_at")
     .single();
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

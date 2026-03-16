@@ -50,9 +50,11 @@ export default function FilasPage() {
 
   const [newQueueOpen, setNewQueueOpen] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newQueueType, setNewQueueType] = useState<"standard" | "commercial">("standard");
   const [useGroups, setUseGroups] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [search, setSearch] = useState("");
   const [linkedFilter, setLinkedFilter] = useState<"all" | "with" | "without">("all");
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
@@ -198,7 +200,7 @@ export default function FilasPage() {
       const r = await fetch("/api/queues", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ name: n, slug: slugVal, use_groups: useGroups }),
+        body: JSON.stringify({ name: n, slug: slugVal, use_groups: useGroups, queue_type: newQueueType }),
         credentials: "include",
       });
       const data = await r.json();
@@ -207,14 +209,20 @@ export default function FilasPage() {
         setCreating(false);
         return;
       }
-      setQueues((prev) => [...prev, { id: data.id, name: data.name, slug: data.slug }]);
+      setQueues((prev) => [
+        ...prev,
+        { id: data.id, name: data.name, slug: data.slug, queue_type: data.queue_type },
+      ]);
       setQueueChannelCount((prev) => ({ ...prev, [data.id]: 0 }));
       setNewName("");
+      setNewQueueType("standard");
       setUseGroups(false);
       setNewQueueOpen(false);
+      setFeedback({ type: "success", message: `Fila "${data.name}" criada com sucesso.` });
       if (useGroups) fetchQueues();
     } catch {
       setError("Erro de rede.");
+      setFeedback({ type: "error", message: "Não foi possível criar a fila. Tente novamente." });
     }
     setCreating(false);
   };
@@ -247,9 +255,16 @@ export default function FilasPage() {
           deletedIds.forEach((id) => next.delete(id));
           return next;
         });
+        setFeedback({
+          type: "success",
+          message:
+            deletedIds.length === 1
+              ? "Fila excluída com sucesso."
+              : `${deletedIds.length} filas excluídas com sucesso.`,
+        });
       }
     } catch {
-      // ignore
+      setFeedback({ type: "error", message: "Não foi possível excluir a(s) fila(s)." });
     }
   };
 
@@ -290,6 +305,7 @@ export default function FilasPage() {
       setLinkChannelsOpen(false);
       setSelectedChannelIdsToLink(new Set());
       await refreshAll();
+      setFeedback({ type: "success", message: "Vínculos aplicados com sucesso." });
     } finally {
       setLinkingChannels(false);
     }
@@ -408,6 +424,7 @@ export default function FilasPage() {
                 setNewQueueOpen(true);
                 setError("");
                 setNewName("");
+                setNewQueueType("standard");
                 setUseGroups(false);
               }}
               className="inline-flex items-center gap-1.5 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-clicvend-orange-dark"
@@ -423,6 +440,18 @@ export default function FilasPage() {
         Crie e edite filas para organizar conversas por setor (ex.: Comercial, Suporte). Para vincular cada fila aos
         números (até 8 caixas por número), use <strong>Conexões</strong> e abra <strong>Configurar</strong> no número.
       </p>
+
+      {feedback && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            feedback.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -467,7 +496,7 @@ export default function FilasPage() {
             </span>
           </div>
 
-          <div className="max-h-[420px] overflow-auto">
+          <div className="max-h-[300px] overflow-auto">
             {selectedQueueIds.size > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-clicvend-orange/10 border-b border-[#E2E8F0]">
                 <span className="text-sm font-medium text-[#1E293B]">
@@ -577,6 +606,15 @@ export default function FilasPage() {
                       <td className="px-4 py-3">
                         <p className="font-medium text-[#1E293B]">{q.name}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              q.queue_type === "commercial"
+                                ? "bg-blue-100 text-blue-700"
+                                : "bg-[#F1F5F9] text-[#475569]"
+                            }`}
+                          >
+                            {q.queue_type === "commercial" ? "Comercial" : "Padrao"}
+                          </span>
                           <span className="inline-flex items-center gap-1 rounded-full bg-[#F1F5F9] px-2 py-0.5 text-[11px] font-medium text-[#475569]">
                             <Users className="h-3 w-3" />
                             {queueAgentsCount[q.id] ?? 0} atendente{(queueAgentsCount[q.id] ?? 0) === 1 ? "" : "s"}
@@ -673,6 +711,17 @@ export default function FilasPage() {
               placeholder="Ex: Comercial, Suporte"
               className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
             />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[#334155]">Tipo da fila</label>
+            <select
+              value={newQueueType}
+              onChange={(e) => setNewQueueType(e.target.value === "commercial" ? "commercial" : "standard")}
+              className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="standard">Padrao</option>
+              <option value="commercial">Comercial (carteira privada + round-robin)</option>
+            </select>
           </div>
           <label className="flex cursor-pointer items-center gap-2">
             <input
@@ -780,6 +829,10 @@ export default function FilasPage() {
             setQueues((prev) =>
               prev.map((q) => (q.id === configQueue.id ? { ...q, ...updated } : q))
             );
+            setFeedback({
+              type: "success",
+              message: `Fila "${updated.name ?? configQueue.name}" atualizada com sucesso.`,
+            });
           }
         }}
       />

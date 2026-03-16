@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { SideOver } from "@/components/SideOver";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Loader2, MessageCircle, LogOut, Link2, Shield, Lock } from "lucide-react";
 
 export type Group = {
@@ -63,6 +64,7 @@ export function GroupDetailSideOver({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
 
   const apiHeaders = useMemo(
     () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
@@ -111,7 +113,7 @@ export function GroupDetailSideOver({
   const hasAnyInfo = !loading && (info || group);
 
   const handleLeave = () => {
-    if (!group || !window.confirm("Tem certeza que deseja sair deste grupo?")) return;
+    if (!group) return;
     setLeaving(true);
     setError(null);
     fetch("/api/groups/leave", {
@@ -231,7 +233,7 @@ export function GroupDetailSideOver({
                 <div className="border-t border-[#E2E8F0] pt-4">
                   <button
                     type="button"
-                    onClick={handleLeave}
+                    onClick={() => setConfirmLeaveOpen(true)}
                     disabled={leaving}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                   >
@@ -244,6 +246,18 @@ export function GroupDetailSideOver({
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={confirmLeaveOpen}
+        onClose={() => setConfirmLeaveOpen(false)}
+        title="Sair do grupo?"
+        message="Tem certeza que deseja sair deste grupo?"
+        confirmLabel="Sair"
+        variant="warning"
+        onConfirm={async () => {
+          setConfirmLeaveOpen(false);
+          handleLeave();
+        }}
+      />
     </SideOver>
   );
 }

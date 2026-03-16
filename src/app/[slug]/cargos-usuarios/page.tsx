@@ -95,6 +95,7 @@ export default function CargosUsuariosPage() {
   const [whatsProfilePhone, setWhatsProfilePhone] = useState<string | null>(null);
 
   const [deleteRoleConfirm, setDeleteRoleConfirm] = useState<Role | null>(null);
+  const [deleteSelectedRolesConfirmOpen, setDeleteSelectedRolesConfirmOpen] = useState(false);
 
   const fetchRoles = useCallback(() => {
     return fetch("/api/roles", { credentials: "include", headers: apiHeaders })
@@ -520,8 +521,6 @@ export default function CargosUsuariosPage() {
   const deleteSelectedRoles = async () => {
     if (selectedRoleIds.size === 0) return;
     const ids = Array.from(selectedRoleIds);
-    const ok = window.confirm(`Excluir ${ids.length} cargo(s) selecionado(s)?`);
-    if (!ok) return;
     setError("");
     try {
       await Promise.all(
@@ -703,7 +702,10 @@ export default function CargosUsuariosPage() {
                     )}
                     <button
                       type="button"
-                      onClick={deleteSelectedRoles}
+                      onClick={() => {
+                        if (selectedRoleIds.size === 0) return;
+                        setDeleteSelectedRolesConfirmOpen(true);
+                      }}
                       className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 last:border-r-0"
                       title="Excluir cargos selecionados"
                     >
@@ -1574,6 +1576,18 @@ export default function CargosUsuariosPage() {
             ? `Excluir o cargo "${deleteRoleConfirm.name}"? Usuários com este cargo precisarão ser reatribuídos.`
             : ""
         }
+        confirmLabel="Excluir"
+        variant="danger"
+      />
+      <ConfirmDialog
+        open={deleteSelectedRolesConfirmOpen}
+        onClose={() => setDeleteSelectedRolesConfirmOpen(false)}
+        onConfirm={async () => {
+          setDeleteSelectedRolesConfirmOpen(false);
+          await deleteSelectedRoles();
+        }}
+        title="Excluir cargos selecionados?"
+        message={`Excluir ${selectedRoleIds.size} cargo(s) selecionado(s)? Esta ação não pode ser desfeita.`}
         confirmLabel="Excluir"
         variant="danger"
       />

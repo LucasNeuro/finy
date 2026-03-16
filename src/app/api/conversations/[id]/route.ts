@@ -10,6 +10,7 @@ import {
 } from "@/lib/redis/inbox-state";
 import { getCachedMediaUrlsBulk } from "@/lib/redis/media-cache";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { isCommercialQueue } from "@/lib/queue/commercial";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
@@ -191,6 +192,19 @@ export async function GET(
     .single();
   if (convError || !conversation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  const [seeAllErr, manageErr] = await Promise.all([
+    requirePermission(companyId, PERMISSIONS.inbox.see_all),
+    requirePermission(companyId, PERMISSIONS.inbox.manage_tickets),
+  ]);
+  const canBypassCommercial = seeAllErr === null || manageErr === null;
+  if (user && !canBypassCommercial && conversation.queue_id) {
+    const commercial = await isCommercialQueue(supabase, companyId, conversation.queue_id);
+    if (commercial && conversation.assigned_to !== user.id) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
   }
 
   const [channelRes, queueRes, assigneeRes] = await Promise.all([
@@ -487,6 +501,18 @@ export async function PATCH(
     .single();
   if (fetchError || !existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const [seeAllErr, manageErr] = await Promise.all([
+    requirePermission(companyId, PERMISSIONS.inbox.see_all),
+    requirePermission(companyId, PERMISSIONS.inbox.manage_tickets),
+  ]);
+  const canBypassCommercial = seeAllErr === null || manageErr === null;
+  if (user && !canBypassCommercial && existing.queue_id) {
+    const commercial = await isCommercialQueue(supabase, companyId, existing.queue_id);
+    if (commercial && existing.assigned_to !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };

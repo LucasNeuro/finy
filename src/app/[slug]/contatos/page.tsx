@@ -10,7 +10,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload, Send } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SideOver } from "@/components/SideOver";
@@ -720,6 +720,13 @@ export default function ContatosPage() {
   const [createGroupContext, setCreateGroupContext] = useState<{ contacts: Contact[]; channelId: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Contact | null>(null);
   const [deleteGroupConfirm, setDeleteGroupConfirm] = useState<Group | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant?: "danger";
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deletingGroup, setDeletingGroup] = useState(false);
   const [blockList, setBlockList] = useState<string[]>([]);
@@ -750,6 +757,11 @@ export default function ContatosPage() {
     { id: string; name: string; color_hex: string | null; category_name: string; active: boolean }[]
   >([]);
   const [selectedNewContactTagIds, setSelectedNewContactTagIds] = useState<Set<string>>(new Set());
+  const [sendToQueueSideOverOpen, setSendToQueueSideOverOpen] = useState(false);
+  const [sendToQueueChannelId, setSendToQueueChannelId] = useState("");
+  const [sendToQueueQueueId, setSendToQueueQueueId] = useState("");
+  const [sendToQueueLoading, setSendToQueueLoading] = useState(false);
+  const [queues, setQueues] = useState<{ id: string; name: string; slug: string }[]>([]);
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -810,6 +822,15 @@ export default function ContatosPage() {
     }
   }, [addContactSideOverOpen, filterChannelId, channels]);
 
+  // Carrega filas ao abrir o SideOver de envio em massa
+  useEffect(() => {
+    if (!sendToQueueSideOverOpen || !slug) return;
+    fetch(`/api/queues?for_management=1`, { credentials: "include", headers: apiHeaders })
+      .then((r) => r.json())
+      .then((data) => setQueues(Array.isArray(data) ? data : []))
+      .catch(() => setQueues([]));
+  }, [sendToQueueSideOverOpen, slug, apiHeaders]);
+
   const contactsKey = useMemo(() => ["contacts", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
   const groupsKey = useMemo(() => ["groups", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
   const communitiesKey = useMemo(() => ["communities", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
@@ -859,6 +880,24 @@ export default function ContatosPage() {
   const contacts = contactsData ?? [];
   const groups = groupsData ?? [];
   const communities = communitiesData ?? [];
+
+  // Pré-seleciona canal ao abrir SideOver de envio em massa
+  useEffect(() => {
+    if (!sendToQueueSideOverOpen || channels.length === 0) return;
+    const ids = Array.from(selectedContactIds);
+    const selected = contacts.filter((c) => ids.includes(c.id));
+    const channelIds = [...new Set(selected.map((c) => c.channel_id))];
+    if (channelIds.length === 1) {
+      setSendToQueueChannelId(channelIds[0]);
+      setSendToQueueQueueId("");
+    } else if (filterChannelId && channels.some((c) => c.id === filterChannelId)) {
+      setSendToQueueChannelId(filterChannelId);
+      setSendToQueueQueueId("");
+    } else {
+      setSendToQueueChannelId(channels[0]?.id ?? "");
+      setSendToQueueQueueId("");
+    }
+  }, [sendToQueueSideOverOpen, selectedContactIds, contacts, filterChannelId, channels]);
 
   const dedupedContacts = useMemo(() => {
     const byKey = new Map<string, Contact>();
@@ -1687,8 +1726,15 @@ export default function ContatosPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (!window.confirm("Limpar contatos, grupos e comunidades desta conexão e sincronizar de novo com o WhatsApp? Isso remove duplicatas e atualiza a lista.")) return;
-                  handleSync(filterChannelId, true);
+                  setBulkConfirm({
+                    title: "Limpar e sincronizar?",
+                    message:
+                      "Limpar contatos, grupos e comunidades desta conexão e sincronizar de novo com o WhatsApp? Isso remove duplicatas e atualiza a lista.",
+                    confirmLabel: "Limpar e sincronizar",
+                    onConfirm: async () => {
+                      await handleSync(filterChannelId, true);
+                    },
+                  });
                 }}
                 disabled={syncing !== null}
                 className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60"
@@ -1848,30 +1894,60 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={contactsActionLoading}
-                      onClick={async () => {
-                        if (!window.confirm(`Bloquear ${selectedContactIds.size} contato(s) no WhatsApp?`)) return;
-                        setContactsActionLoading(true);
-                        try {
-                          const ids = Array.from(selectedContactIds);
-                          await Promise.all(
-                            ids.map((id) => {
-                              const c = contacts.find((x) => x.id === id);
-                              if (!c) return Promise.resolve();
-                              const number = (c.phone ?? c.jid ?? "").replace(/\D/g, "") || c.jid.replace(/@.*$/, "");
-                              return fetch("/api/contacts/block", {
-                                method: "POST",
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json", ...apiHeaders },
-                                body: JSON.stringify({ channel_id: c.channel_id, number, block: true }),
-                              });
-                            })
-                          );
-                          setSelectedContactIds(new Set());
-                          mutateContacts();
-                          if (filterChannelId) fetchBlockList();
-                        } finally {
-                          setContactsActionLoading(false);
+                      onClick={() => {
+                        const ids = Array.from(selectedContactIds);
+                        const selected = contacts.filter((c) => ids.includes(c.id));
+                        const channelIds = [...new Set(selected.map((c) => c.channel_id))];
+                        if (channelIds.length > 1) {
+                          setAlertMessage("Selecione contatos de uma única conexão para enviar em massa.");
+                          return;
                         }
+                        if (channelIds.length === 0) return;
+                        setSendToQueueSideOverOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] hover:text-clicvend-orange last:border-r-0"
+                      title="Adicionar os contatos à fila de envio em massa. Depois, na tela de Conversas, você poderá escrever a mensagem e enviar para todos com delay."
+                    >
+                      <Send className="h-4 w-4" />
+                      Enviar pra todos
+                    </button>
+                    <button
+                      type="button"
+                      disabled={contactsActionLoading}
+                      onClick={() => {
+                        const total = selectedContactIds.size;
+                        if (total === 0) return;
+                        setBulkConfirm({
+                          title: "Bloquear contatos?",
+                          message: `Bloquear ${total} contato(s) no WhatsApp?`,
+                          confirmLabel: "Bloquear",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setContactsActionLoading(true);
+                            try {
+                              const ids = Array.from(selectedContactIds);
+                              await Promise.all(
+                                ids.map((id) => {
+                                  const c = contacts.find((x) => x.id === id);
+                                  if (!c) return Promise.resolve();
+                                  const number = (c.phone ?? c.jid ?? "").replace(/\D/g, "") || c.jid.replace(/@.*$/, "");
+                                  return fetch("/api/contacts/block", {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                                    body: JSON.stringify({ channel_id: c.channel_id, number, block: true }),
+                                  });
+                                })
+                              );
+                              setSelectedContactIds(new Set());
+                              mutateContacts();
+                              if (filterChannelId) fetchBlockList();
+                              setAlertMessage(`✅ ${ids.length} contato(s) bloqueado(s).`);
+                            } finally {
+                              setContactsActionLoading(false);
+                            }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60 last:border-r-0"
                       title="Bloquear os contatos selecionados no WhatsApp. Eles não poderão enviar mensagens para este número."
@@ -1930,25 +2006,35 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={contactsActionLoading}
-                      onClick={async () => {
-                        if (!window.confirm(`Excluir ${selectedContactIds.size} contato(s) da lista? Eles continuarão no WhatsApp; apenas serão removidos desta lista.`)) return;
-                        setContactsActionLoading(true);
-                        try {
-                          const ids = Array.from(selectedContactIds);
-                          await Promise.all(
-                            ids.map((id) =>
-                              fetch(`/api/contacts/${encodeURIComponent(id)}`, {
-                                method: "DELETE",
-                                credentials: "include",
-                                headers: apiHeaders,
-                              })
-                            )
-                          );
-                          setSelectedContactIds(new Set());
-                          mutateContacts();
-                        } finally {
-                          setContactsActionLoading(false);
-                        }
+                      onClick={() => {
+                        const total = selectedContactIds.size;
+                        if (total === 0) return;
+                        setBulkConfirm({
+                          title: "Excluir contatos da lista?",
+                          message: `Excluir ${total} contato(s) da lista? Eles continuarão no WhatsApp; apenas serão removidos desta lista.`,
+                          confirmLabel: "Excluir",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setContactsActionLoading(true);
+                            try {
+                              const ids = Array.from(selectedContactIds);
+                              await Promise.all(
+                                ids.map((id) =>
+                                  fetch(`/api/contacts/${encodeURIComponent(id)}`, {
+                                    method: "DELETE",
+                                    credentials: "include",
+                                    headers: apiHeaders,
+                                  })
+                                )
+                              );
+                              setSelectedContactIds(new Set());
+                              mutateContacts();
+                              setAlertMessage(`✅ ${ids.length} contato(s) removido(s) da lista.`);
+                            } finally {
+                              setContactsActionLoading(false);
+                            }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60 last:border-r-0"
                       title="Remover os contatos selecionados apenas da lista desta aplicação. Eles continuam no WhatsApp e na agenda do celular."
@@ -2146,27 +2232,36 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={selectedGroupIds.size === 0 || deletingGroup}
-                      onClick={async () => {
+                      onClick={() => {
                         const ids = Array.from(selectedGroupIds);
-                        if (ids.length === 0 || !window.confirm(`Excluir ${ids.length} grupo(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`)) return;
-                        setDeletingGroup(true);
-                        try {
-                          for (const id of ids) {
-                            const g = groups.find((x) => x.id === id);
-                            if (g?.jid && g?.channel_id) {
-                              await fetch("/api/groups/delete", {
-                                method: "POST",
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json", ...apiHeaders },
-                                body: JSON.stringify({ channel_id: g.channel_id, groupjid: g.jid, leave_first: true }),
-                              });
+                        if (ids.length === 0) return;
+                        setBulkConfirm({
+                          title: "Excluir grupos selecionados?",
+                          message: `Excluir ${ids.length} grupo(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`,
+                          confirmLabel: "Excluir",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setDeletingGroup(true);
+                            try {
+                              for (const id of ids) {
+                                const g = groups.find((x) => x.id === id);
+                                if (g?.jid && g?.channel_id) {
+                                  await fetch("/api/groups/delete", {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                                    body: JSON.stringify({ channel_id: g.channel_id, groupjid: g.jid, leave_first: true }),
+                                  });
+                                }
+                              }
+                              setSelectedGroupIds(new Set());
+                              await Promise.all([mutateGroups(), mutateCommunities()]);
+                              setAlertMessage(`✅ ${ids.length} grupo(s) excluído(s).`);
+                            } finally {
+                              setDeletingGroup(false);
                             }
-                          }
-                          setSelectedGroupIds(new Set());
-                          await Promise.all([mutateGroups(), mutateCommunities()]);
-                        } finally {
-                          setDeletingGroup(false);
-                        }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 last:border-r-0"
                       title="Excluir grupos selecionados da lista e sair no WhatsApp"
@@ -2452,27 +2547,36 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={selectedCommunityIds.size === 0 || deletingGroup}
-                      onClick={async () => {
+                      onClick={() => {
                         const ids = Array.from(selectedCommunityIds);
-                        if (ids.length === 0 || !window.confirm(`Excluir ${ids.length} comunidade(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`)) return;
-                        setDeletingGroup(true);
-                        try {
-                          for (const id of ids) {
-                            const c = communities.find((x) => x.id === id);
-                            if (c?.jid && c?.channel_id) {
-                              await fetch("/api/groups/delete", {
-                                method: "POST",
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json", ...apiHeaders },
-                                body: JSON.stringify({ channel_id: c.channel_id, groupjid: c.jid, leave_first: true }),
-                              });
+                        if (ids.length === 0) return;
+                        setBulkConfirm({
+                          title: "Excluir comunidades selecionadas?",
+                          message: `Excluir ${ids.length} comunidade(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`,
+                          confirmLabel: "Excluir",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setDeletingGroup(true);
+                            try {
+                              for (const id of ids) {
+                                const c = communities.find((x) => x.id === id);
+                                if (c?.jid && c?.channel_id) {
+                                  await fetch("/api/groups/delete", {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                                    body: JSON.stringify({ channel_id: c.channel_id, groupjid: c.jid, leave_first: true }),
+                                  });
+                                }
+                              }
+                              setSelectedCommunityIds(new Set());
+                              await Promise.all([mutateGroups(), mutateCommunities()]);
+                              setAlertMessage(`✅ ${ids.length} comunidade(s) excluída(s).`);
+                            } finally {
+                              setDeletingGroup(false);
                             }
-                          }
-                          setSelectedCommunityIds(new Set());
-                          await Promise.all([mutateGroups(), mutateCommunities()]);
-                        } finally {
-                          setDeletingGroup(false);
-                        }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 last:border-r-0"
                       title="Excluir comunidades selecionadas da lista e sair no WhatsApp"
@@ -2563,6 +2667,104 @@ export default function ContatosPage() {
           mutateContacts();
         }}
       />
+
+      <SideOver
+        open={sendToQueueSideOverOpen}
+        onClose={() => {
+          setSendToQueueSideOverOpen(false);
+          setSendToQueueChannelId("");
+          setSendToQueueQueueId("");
+        }}
+        title="Enviar pra todos (fila de envio)"
+        width={480}
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-[#64748B]">
+            Os <strong>{selectedContactIds.size} contato(s)</strong> selecionado(s) serão adicionados à fila de envio. Depois, na tela de Conversas, você poderá escolher a mensagem e enviar para todos com delay entre cada envio.
+          </p>
+          <div>
+            <label className="block text-sm font-medium text-[#334155] mb-1.5">Conexão (inbox)</label>
+            <select
+              value={sendToQueueChannelId}
+              onChange={(e) => setSendToQueueChannelId(e.target.value)}
+              className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="">Selecione a conexão</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>{ch.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-[#334155] mb-1.5">Fila (opcional)</label>
+            <select
+              value={sendToQueueQueueId}
+              onChange={(e) => setSendToQueueQueueId(e.target.value)}
+              className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="">Nenhuma</option>
+              {queues.map((q) => (
+                <option key={q.id} value={q.id}>{q.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setSendToQueueSideOverOpen(false)}
+              className="rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={sendToQueueLoading || !sendToQueueChannelId}
+              onClick={async () => {
+                const ids = Array.from(selectedContactIds);
+                const selected = contacts.filter((c) => ids.includes(c.id));
+                const channelIds = [...new Set(selected.map((c) => c.channel_id))];
+                if (channelIds.length > 1 || !sendToQueueChannelId) {
+                  setAlertMessage("Selecione contatos de uma única conexão.");
+                  return;
+                }
+                if (!channelIds.includes(sendToQueueChannelId)) {
+                  setAlertMessage("A conexão selecionada não corresponde aos contatos.");
+                  return;
+                }
+                setSendToQueueLoading(true);
+                try {
+                  const r = await fetch("/api/broadcast-queue/add", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                    body: JSON.stringify({
+                      channel_id: sendToQueueChannelId,
+                      queue_id: sendToQueueQueueId || undefined,
+                      contact_ids: ids,
+                    }),
+                  });
+                  const data = await r.json();
+                  if (r.ok) {
+                    setAlertMessage(data.message ?? `${data.count} contato(s) adicionado(s) à fila de envio.`);
+                    setSelectedContactIds(new Set());
+                    setSendToQueueSideOverOpen(false);
+                  } else {
+                    setAlertMessage(data?.error ?? "Falha ao adicionar à fila.");
+                  }
+                } catch {
+                  setAlertMessage("Erro de rede ao adicionar à fila.");
+                } finally {
+                  setSendToQueueLoading(false);
+                }
+              }}
+              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+            >
+              {sendToQueueLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Salvar
+            </button>
+          </div>
+        </div>
+      </SideOver>
 
       <AddToAgendaModal
         open={addToAgendaModalOpen}
@@ -3030,6 +3232,20 @@ export default function ContatosPage() {
         confirmLabel="Excluir"
         variant="danger"
         onConfirm={handleDeleteGroup}
+      />
+      <ConfirmDialog
+        open={!!bulkConfirm}
+        onClose={() => setBulkConfirm(null)}
+        title={bulkConfirm?.title ?? ""}
+        message={bulkConfirm?.message ?? ""}
+        confirmLabel={bulkConfirm?.confirmLabel ?? "Confirmar"}
+        variant={bulkConfirm?.variant}
+        onConfirm={async () => {
+          const pending = bulkConfirm;
+          setBulkConfirm(null);
+          if (!pending) return;
+          await pending.onConfirm();
+        }}
       />
       {/* Toast simples para mensagens de feedback */}
       {alertMessage && (

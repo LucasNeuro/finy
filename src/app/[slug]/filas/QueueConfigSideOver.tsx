@@ -4,7 +4,15 @@ import { useState, useEffect, useCallback } from "react";
 import { SideOver } from "@/components/SideOver";
 import { Loader2, Settings, Users, Clock, Calendar } from "lucide-react";
 
-export type Queue = { id: string; name: string; slug: string; created_at?: string; business_hours?: BusinessHoursItem[]; special_dates?: SpecialDateItem[] };
+export type Queue = {
+  id: string;
+  name: string;
+  slug: string;
+  queue_type?: "standard" | "commercial";
+  created_at?: string;
+  business_hours?: BusinessHoursItem[];
+  special_dates?: SpecialDateItem[];
+};
 type BusinessHoursItem = { day: number; open: string; close: string };
 export type SpecialDateItem = { date: string; closed?: boolean } | { date: string; open: string; close: string };
 
@@ -38,6 +46,7 @@ export function QueueConfigSideOver({
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const [queueType, setQueueType] = useState<"standard" | "commercial">("standard");
 
   const [businessHours, setBusinessHours] = useState<BusinessHoursItem[]>([]);
   const [specialDates, setSpecialDates] = useState<SpecialDateItem[]>([]);
@@ -63,6 +72,7 @@ export function QueueConfigSideOver({
       if (r.ok) {
         setName(data.name ?? "");
         setSlug(data.slug ?? "");
+        setQueueType(data.queue_type === "commercial" ? "commercial" : "standard");
         setBusinessHours(Array.isArray(data.business_hours) ? data.business_hours : []);
         setSpecialDates(Array.isArray(data.special_dates) ? data.special_dates : []);
       } else {
@@ -155,12 +165,16 @@ export function QueueConfigSideOver({
       const r = await fetch(`/api/queues/${encodeURIComponent(queue.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ name: name.trim(), slug: slug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") }),
+        body: JSON.stringify({
+          name: name.trim(),
+          slug: slug.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""),
+          queue_type: queueType,
+        }),
         credentials: "include",
       });
       const data = await r.json();
       if (r.ok) {
-        onSaved({ name: data.name, slug: data.slug });
+        onSaved({ name: data.name, slug: data.slug, queue_type: data.queue_type });
       } else {
         setError(data?.error ?? "Falha ao salvar");
       }
@@ -311,6 +325,20 @@ export function QueueConfigSideOver({
                     className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 font-mono text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
                   />
                   <p className="mt-1 text-xs text-[#64748B]">Somente letras minúsculas, números e hífens.</p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-[#334155]">Tipo da fila</label>
+                  <select
+                    value={queueType}
+                    onChange={(e) => setQueueType(e.target.value === "commercial" ? "commercial" : "standard")}
+                    className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                  >
+                    <option value="standard">Padrao</option>
+                    <option value="commercial">Comercial (carteira privada + round-robin)</option>
+                  </select>
+                  <p className="mt-1 text-xs text-[#64748B]">
+                    Em filas comerciais, consultores veem apenas a propria carteira. Gestor continua com visao completa.
+                  </p>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button

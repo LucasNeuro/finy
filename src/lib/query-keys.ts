@@ -10,6 +10,8 @@ export const queryKeys = {
   conversation: (id: string) => ["inbox", "conversation", id] as const,
   contacts: (slug: string) => ["inbox", "contacts", slug] as const,
   groups: (slug: string) => ["inbox", "groups", slug] as const,
+  broadcastQueue: (slug: string, status?: string) =>
+    ["inbox", "broadcast-queue", slug, status ?? "pending"] as const,
   roles: (slug: string) => ["inbox", "roles", slug] as const,
   // Tickets
   queues: (slug: string) => ["tickets", "queues", slug] as const,

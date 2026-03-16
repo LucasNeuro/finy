@@ -5,6 +5,7 @@ import {
   invalidateConversationDetail,
   invalidateConversationList,
 } from "@/lib/redis/inbox-state";
+import { isCommercialQueue } from "@/lib/queue/commercial";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -39,7 +40,7 @@ export async function POST(
 
   const { data: conversation, error: fetchErr } = await supabase
     .from("conversations")
-    .select("id, assigned_to, status, company_id")
+    .select("id, assigned_to, status, company_id, queue_id")
     .eq("id", id)
     .eq("company_id", companyId)
     .single();
@@ -53,6 +54,23 @@ export async function POST(
       { error: "Chamado já está atribuído a outro atendente." },
       { status: 400 }
     );
+  }
+
+  if (conversation.queue_id) {
+    const [seeAllErr, manageErr] = await Promise.all([
+      requirePermission(companyId, PERMISSIONS.inbox.see_all),
+      requirePermission(companyId, PERMISSIONS.inbox.manage_tickets),
+    ]);
+    const canBypassCommercial = seeAllErr === null || manageErr === null;
+    if (!canBypassCommercial) {
+      const commercial = await isCommercialQueue(supabase, companyId, conversation.queue_id);
+      if (commercial) {
+        return NextResponse.json(
+          { error: "Chamados da fila comercial são distribuídos automaticamente." },
+          { status: 400 }
+        );
+      }
+    }
   }
 
   const now = new Date().toISOString();

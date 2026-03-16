@@ -3,6 +3,7 @@ import { getProfileForCompany, requirePermission } from "@/lib/auth/get-profile"
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { withMetricsHeaders } from "@/lib/api/metrics";
 import { getCachedCounts, setCachedCounts } from "@/lib/redis/inbox-state";
+import { getCommercialQueueIdSet } from "@/lib/queue/commercial";
 import {
   getCachedCountsFromSupabase,
   setCachedCountsInSupabase,
@@ -104,6 +105,64 @@ export async function GET(request: Request) {
   }
 
   const { active: activeStatuses, closed: closedStatuses, unassigned: unassignedStatuses } = await resolveStatusSlugs(supabase, companyId);
+  const commercialQueueIds =
+    user && !canSeeAll && !canManageTickets
+      ? await getCommercialQueueIdSet(supabase, companyId, allowedQueueIds)
+      : new Set<string>();
+  const shouldRestrictCommercial = !!user && !canSeeAll && !canManageTickets && commercialQueueIds.size > 0;
+
+  if (shouldRestrictCommercial && user) {
+    const statuses = [...new Set([...activeStatuses, ...closedStatuses])];
+    let q = supabase
+      .from("conversations")
+      .select("status, assigned_to, is_group, queue_id, channel_id, external_id")
+      .eq("company_id", companyId)
+      .in("status", statuses);
+
+    if (allowedQueueIds !== null) {
+      if (allowedGroupKeys.length === 0) {
+        q = q.in("queue_id", allowedQueueIds);
+      } else {
+        const groupPart = `external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`;
+        const queuePart = allowedQueueIds.length > 0 ? `queue_id.in.(${allowedQueueIds.join(",")})` : "";
+        q = q.or(queuePart ? `${queuePart},${groupPart}` : groupPart);
+      }
+    }
+
+    const { data: rows } = await q;
+    const list = ((rows ?? []) as Array<{
+      status: string | null;
+      assigned_to: string | null;
+      is_group: boolean | null;
+      queue_id: string | null;
+      channel_id: string | null;
+      external_id: string | null;
+    }>)
+      .filter((r) => {
+        if (!r.queue_id || !commercialQueueIds.has(r.queue_id)) return true;
+        return r.assigned_to === user.id;
+      });
+
+    const isActive = (s: string | null) => activeStatuses.includes(String(s ?? "").toLowerCase());
+    const isClosed = (s: string | null) => closedStatuses.includes(String(s ?? "").toLowerCase());
+    const isUnassignedStatus = (s: string | null) => unassignedStatuses.includes(String(s ?? "").toLowerCase());
+
+    const payload = {
+      mine: list.filter((r) => r.assigned_to === user.id && isActive(r.status)).length,
+      queues: list.filter((r) => isActive(r.status)).length,
+      individual: list.filter((r) => r.assigned_to === user.id && !r.is_group && isActive(r.status)).length,
+      groups: list.filter((r) => r.assigned_to === user.id && !!r.is_group && isActive(r.status)).length,
+      unassigned: list.filter((r) => r.assigned_to == null && isUnassignedStatus(r.status)).length,
+      mine_closed: list.filter((r) => r.assigned_to === user.id && isClosed(r.status)).length,
+    };
+    if (userId) {
+      await setCachedCounts(companyId, userId, payload);
+      await setCachedCountsInSupabase(companyId, userId, payload);
+    }
+    const res = NextResponse.json(payload);
+    return withMetricsHeaders(res, { cacheHit: false, startTime });
+  }
+
   let queuesQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).in("status", activeStatuses);
   let mineQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").in("status", activeStatuses);
   let individualQ = supabase.from("conversations").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("assigned_to", user?.id ?? "").eq("is_group", false).in("status", activeStatuses);
@@ -120,7 +179,9 @@ export async function GET(request: Request) {
       unassignedQ = unassignedQ.in("queue_id", allowedQueueIds);
       mineClosedQ = mineClosedQ.in("queue_id", allowedQueueIds);
     } else {
-      const orPred = `queue_id.in.(${allowedQueueIds.join(",")}),external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`;
+      const groupPart = `external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`;
+      const queuePart = allowedQueueIds.length > 0 ? `queue_id.in.(${allowedQueueIds.join(",")})` : "";
+      const orPred = queuePart ? `${queuePart},${groupPart}` : groupPart;
       queuesQ = queuesQ.or(orPred);
       mineQ = mineQ.or(orPred);
       individualQ = individualQ.or(orPred);

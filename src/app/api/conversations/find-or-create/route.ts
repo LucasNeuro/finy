@@ -2,6 +2,8 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toCanonicalDigits, normalizeWhatsAppJid } from "@/lib/phone-canonical";
+import { isCommercialQueue } from "@/lib/queue/commercial";
+import { getNextAgentForQueue } from "@/lib/queue/round-robin";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -38,6 +40,7 @@ export async function GET(request: Request) {
   }
 
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
   // Contato (ticket): normalizar JID/customer_phone para formato canônico antes de buscar/inserir (evita duplicatas)
   const jidNorm = normalizeWhatsAppJid(jid);
@@ -190,6 +193,27 @@ export async function GET(request: Request) {
   const defaultCq = list.find((cq) => cq.is_default) ?? list[0];
   const queueId =
     defaultCq?.queue_id ?? (chData as { queue_id?: string | null }).queue_id ?? null;
+  let assignedTo: string | null = null;
+  if (queueId) {
+    const commercial = await isCommercialQueue(supabase, companyId, queueId);
+    if (commercial) {
+      if (user?.id) {
+        const { data: ownAssignment } = await supabase
+          .from("queue_assignments")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("queue_id", queueId)
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (ownAssignment?.id) {
+          assignedTo = user.id;
+        }
+      }
+      if (!assignedTo) {
+        assignedTo = await getNextAgentForQueue(companyId, queueId);
+      }
+    }
+  }
 
   const { data: inserted, error: insertErr } = await supabase
     .from("conversations")
@@ -203,7 +227,7 @@ export async function GET(request: Request) {
       customer_phone: canonicalPhone ?? "—",
       customer_name: customerName,
       queue_id: queueId,
-      assigned_to: null,
+      assigned_to: assignedTo,
       status: "open",
       last_message_at: new Date().toISOString(),
     })

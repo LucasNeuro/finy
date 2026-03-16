@@ -5,6 +5,26 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 const ROUND_ROBIN_KEY_PREFIX = "queue:round-robin:";
 
+async function listQueueAgentIds(
+  companyId: string,
+  queueId: string
+): Promise<string[]> {
+  const supabase = createServiceRoleClient();
+  const { data: assignments, error } = await supabase
+    .from("queue_assignments")
+    .select("user_id")
+    .eq("queue_id", queueId)
+    .eq("company_id", companyId);
+
+  if (error || !assignments || assignments.length === 0) {
+    return [];
+  }
+
+  return assignments
+    .map((a: { user_id: string }) => a.user_id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
 /**
  * Distribuição round-robin de conversas por fila usando Redis + Supabase.
  *
@@ -24,22 +44,10 @@ export async function getNextAgentForQueue(
 ): Promise<string | null> {
   if (!queueId) return null;
 
-  const supabase = createServiceRoleClient();
-  const redis = await getRedisClient();
-
-  // 1. Buscar atendentes da fila (queue_assignments)
-  const { data: assignments, error } = await supabase
-    .from("queue_assignments")
-    .select("user_id")
-    .eq("queue_id", queueId)
-    .eq("company_id", companyId);
-
-  if (error || !assignments || assignments.length === 0) {
-    return null;
-  }
-
-  const agentIds = assignments.map((a: { user_id: string }) => a.user_id);
+  const agentIds = await listQueueAgentIds(companyId, queueId);
   if (agentIds.length === 0) return null;
+
+  const redis = await getRedisClient();
 
   // Se só tem um atendente, retorna ele
   if (agentIds.length === 1) {
@@ -80,6 +88,64 @@ export async function getNextAgentForQueue(
   }
 
   return nextAgentId;
+}
+
+/**
+ * Consulta estado atual do round-robin sem avançar o ponteiro.
+ * Útil para painéis de distribuição/monitoramento.
+ */
+export async function peekNextAgentForQueue(
+  companyId: string,
+  queueId: string
+): Promise<{ lastAgentId: string | null; nextAgentId: string | null; agentIds: string[] }> {
+  if (!queueId) return { lastAgentId: null, nextAgentId: null, agentIds: [] };
+  const agentIds = await listQueueAgentIds(companyId, queueId);
+  if (agentIds.length === 0) return { lastAgentId: null, nextAgentId: null, agentIds: [] };
+
+  if (agentIds.length === 1) {
+    return {
+      lastAgentId: agentIds[0] as string,
+      nextAgentId: agentIds[0] as string,
+      agentIds,
+    };
+  }
+
+  const redis = await getRedisClient();
+  const redisKey = `${ROUND_ROBIN_KEY_PREFIX}${companyId}:${queueId}`;
+  let lastAgentId: string | null = null;
+
+  if (redis) {
+    try {
+      const cached = await redis.get(redisKey);
+      if (cached) lastAgentId = cached;
+    } catch {
+      // ignorar erro Redis; fallback usa início da lista
+    }
+  }
+
+  if (!lastAgentId) {
+    return {
+      lastAgentId: null,
+      nextAgentId: agentIds[0] as string,
+      agentIds,
+    };
+  }
+
+  const lastIndex = agentIds.indexOf(lastAgentId);
+  if (lastIndex < 0) {
+    return {
+      lastAgentId,
+      nextAgentId: agentIds[0] as string,
+      agentIds,
+    };
+  }
+
+  const nextIndex = (lastIndex + 1) % agentIds.length;
+  return {
+    lastAgentId,
+    nextAgentId: agentIds[nextIndex] as string,
+    agentIds,
+  };
 }
 
 /**
