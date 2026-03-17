@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { UserCog, Users, Plus, Loader2, Settings, Trash2, Briefcase, UserCircle, Eye, EyeOff, List, UserPlus, Search, ChevronLeft, ChevronRight } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
@@ -46,8 +48,25 @@ const USERS_PAGE_SIZE = 6;
 
 export default function CargosUsuariosPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = getCompanySlug(pathname);
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessUsers = permissions.includes("users.view") || permissions.includes("users.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessUsers) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessUsers, router]);
 
   const [activeTab, setActiveTab] = useState<"cargos" | "usuarios">("cargos");
   const [roles, setRoles] = useState<Role[]>([]);
@@ -609,6 +628,10 @@ export default function CargosUsuariosPage() {
       setBulkQueueSaving(false);
     }
   };
+
+  if (slug && permissionsData !== undefined && !canAccessUsers) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-4 bg-[#F1F5F9] p-4 md:p-6">

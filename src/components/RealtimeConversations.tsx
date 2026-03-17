@@ -10,8 +10,8 @@ import { queryKeys } from "@/lib/query-keys";
 const INVALIDATE_DEBOUNCE_MS = 1200;
 /** Invalidação na aba Meus quando chega mensagem na conversa do agente (para o card subir). */
 const MINE_UPDATE_DEBOUNCE_MS = 200;
-/** Janela (ms) para considerar "mensagem nova" para aviso sonoro e subir card. Ex.: 30 s. */
-const RECENT_MESSAGE_MS = 30_000;
+/** Janela (ms) para considerar "mensagem nova" para aviso sonoro e subir card. 60s para tolerar latência. */
+const RECENT_MESSAGE_MS = 60_000;
 
 /** URL do áudio para notificação (opcional). Se não existir, usa beep por Web Audio. */
 const NOTIFICATION_SOUND_URL = "/sounds/new-message.mp3";
@@ -28,17 +28,26 @@ function playNewMessageSound() {
 
 function playBeepFallback() {
   try {
-    const ctx = new (typeof window !== "undefined" && window.AudioContext ? window.AudioContext : (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 800;
-    osc.type = "sine";
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.15);
+    const Ctx = typeof window !== "undefined" && window.AudioContext ? window.AudioContext : (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const play = () => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 800;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.15);
+    };
+    if (ctx.state === "suspended") {
+      ctx.resume().then(play).catch(() => {});
+    } else {
+      play();
+    }
   } catch {
     // ignorar
   }
@@ -74,6 +83,23 @@ export function RealtimeConversations() {
   const companyId = (permissionsData as { company_id?: string } | undefined)?.company_id ?? null;
   const currentUserId = (permissionsData as { user_id?: string } | undefined)?.user_id ?? null;
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
+
+  // Desbloqueia áudio no primeiro clique (política de autoplay do navegador)
+  useEffect(() => {
+    const unlock = () => {
+      if (typeof window === "undefined") return;
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      if (ctx.state === "suspended") ctx.resume();
+    };
+    window.addEventListener("click", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("click", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mineDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastInvalidateRef = useRef(0);
@@ -111,13 +137,19 @@ export function RealtimeConversations() {
           const isRecentMessage = lastMsgAt && now.getTime() - msgTime < RECENT_MESSAGE_MS;
           const isOtherConversation = id && id !== openConversationId;
           const isMyConversation = currentUserId && assignedTo === currentUserId;
+          const isUnassignedNew = assignedTo == null || assignedTo === "";
 
-          if (isRecentMessage && isOtherConversation && isMyConversation) {
+          if (isRecentMessage && isOtherConversation && (isMyConversation || isUnassignedNew)) {
             playNewMessageSound();
             if (mineDebounceRef.current) clearTimeout(mineDebounceRef.current);
             mineDebounceRef.current = setTimeout(() => {
               mineDebounceRef.current = null;
-              queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug, "mine") });
+              if (isMyConversation) {
+                queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug, "mine") });
+              }
+              if (isUnassignedNew) {
+                queryClient.invalidateQueries({ queryKey: queryKeys.conversationListInfinite(slug, "unassigned") });
+              }
               queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug) });
             }, MINE_UPDATE_DEBOUNCE_MS);
           }

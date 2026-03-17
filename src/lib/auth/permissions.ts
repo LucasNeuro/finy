@@ -37,6 +37,10 @@ export const PERMISSIONS = {
   quickreplies: { view: "quickreplies.view", manage: "quickreplies.manage" },
   // Tags
   tags: { view: "tags.view", manage: "tags.manage" },
+  // CRM Comercial
+  crm: { view: "crm.view", manage: "crm.manage" },
+  // Envio em massa (fila de envio / broadcast)
+  broadcast: { view: "broadcast.view", manage: "broadcast.manage" },
   // Perfil (próprio perfil / link de acesso / foto)
   profile: { view: "profile.view" },
 } as const;
@@ -51,6 +55,8 @@ export type PermissionKey =
   | (typeof PERMISSIONS)["contacts"][keyof (typeof PERMISSIONS)["contacts"]]
   | (typeof PERMISSIONS)["quickreplies"][keyof (typeof PERMISSIONS)["quickreplies"]]
   | (typeof PERMISSIONS)["tags"][keyof (typeof PERMISSIONS)["tags"]]
+  | (typeof PERMISSIONS)["crm"][keyof (typeof PERMISSIONS)["crm"]]
+  | (typeof PERMISSIONS)["broadcast"][keyof (typeof PERMISSIONS)["broadcast"]]
   | (typeof PERMISSIONS)["profile"][keyof (typeof PERMISSIONS)["profile"]];
 
 const ALL_PERMISSION_KEYS: PermissionKey[] = [
@@ -81,6 +87,10 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.quickreplies.manage,
   PERMISSIONS.tags.view,
   PERMISSIONS.tags.manage,
+  PERMISSIONS.crm.view,
+  PERMISSIONS.crm.manage,
+  PERMISSIONS.broadcast.view,
+  PERMISSIONS.broadcast.manage,
   PERMISSIONS.profile.view,
 ];
 
@@ -139,6 +149,14 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
     keys: [PERMISSIONS.tags.view, PERMISSIONS.tags.manage],
   },
   {
+    label: "Módulo CRM Comercial",
+    keys: [PERMISSIONS.crm.view, PERMISSIONS.crm.manage],
+  },
+  {
+    label: "Módulo Envio em massa",
+    keys: [PERMISSIONS.broadcast.view, PERMISSIONS.broadcast.manage],
+  },
+  {
     label: "Perfil (próprio perfil da empresa)",
     keys: [PERMISSIONS.profile.view],
   },
@@ -172,6 +190,10 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.quickreplies.manage]: "Ação: gerenciar Respostas rápidas",
   [PERMISSIONS.tags.view]: "Acesso: ver Tags",
   [PERMISSIONS.tags.manage]: "Ação: gerenciar Tags",
+  [PERMISSIONS.crm.view]: "Acesso: ver CRM Comercial",
+  [PERMISSIONS.crm.manage]: "Ação: gerenciar CRM Comercial (carteiras, distribuição e painel)",
+  [PERMISSIONS.broadcast.view]: "Acesso: ver Envio em massa (fila de envio)",
+  [PERMISSIONS.broadcast.manage]: "Ação: gerenciar Envio em massa (adicionar/remover e disparar)",
   [PERMISSIONS.profile.view]: "Acesso: ver Perfil (próprio perfil, link de acesso, foto)",
 };
 

@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import {
   Inbox,
   Plus,
@@ -41,8 +44,25 @@ function getCompanySlug(pathname: string | null): string {
 
 export default function FilasPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = getCompanySlug(pathname);
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessQueues = permissions.includes("queues.view") || permissions.includes("queues.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessQueues) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessQueues, router]);
 
   const [queues, setQueues] = useState<Queue[]>([]);
   const [queueChannelCount, setQueueChannelCount] = useState<Record<string, number>>({});
@@ -341,6 +361,10 @@ export default function FilasPage() {
       setPageIndex(Math.max(0, pageCount - 1));
     }
   }, [pageCount, pageIndex]);
+
+  if (slug && permissionsData !== undefined && !canAccessQueues) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-4 p-6">

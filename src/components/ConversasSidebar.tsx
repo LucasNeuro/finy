@@ -4,7 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo, useRef, useMemo } from "react";
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive, Hash, Layers, Send } from "lucide-react";
+import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive, Hash, Layers, Send, Plug } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { queryKeys } from "@/lib/query-keys";
@@ -638,6 +638,7 @@ export function ConversasSidebar() {
   const [activeTab, setActiveTab] = useState<TabId>("mine");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
   const [unassigning, setUnassigning] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
   const statusScrollRef = useRef<HTMLDivElement>(null);
@@ -649,6 +650,7 @@ export function ConversasSidebar() {
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab);
     setStatusFilter("all");
+    setChannelFilter("all");
     if (tab === "broadcast_queue") {
       router.push(`${base}/conversas/broadcast`);
     }
@@ -746,7 +748,7 @@ export function ConversasSidebar() {
       container.removeEventListener("scroll", checkStatusScroll);
       window.removeEventListener("resize", checkStatusScroll);
     };
-  }, [activeTab, statusFilter]);
+  }, [activeTab, statusFilter, channelFilter]);
 
   const { data: permissionsData } = useQuery({
     queryKey: queryKeys.permissions(slug ?? ""),
@@ -756,6 +758,8 @@ export function ConversasSidebar() {
     staleTime: 5 * 60 * 1000,
   });
   const inboxSeeAll = permissionsData?.inbox_see_all === true;
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessBroadcast = permissions.includes("broadcast.view") || permissions.includes("broadcast.manage");
 
   const { data: countsData } = useQuery({
     queryKey: queryKeys.counts(slug ?? ""),
@@ -915,6 +919,34 @@ export function ConversasSidebar() {
   const allConversations = conversationsData?.pages?.flatMap((p) => p.data ?? []) ?? [];
   const totalFromApi = conversationsData?.pages?.[0]?.total ?? 0;
 
+  const channelOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    for (const c of allConversations) {
+      const id = (c.channel_id ?? "").trim();
+      if (!id) continue;
+      const existing = map.get(id);
+      const name = (c.channel_name ?? "").trim() || id.slice(0, 8);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(id, { id, name, count: 1 });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [allConversations]);
+
+  useEffect(() => {
+    if (channelFilter === "all") return;
+    if (!channelOptions.some((opt) => opt.id === channelFilter)) {
+      setChannelFilter("all");
+    }
+  }, [channelFilter, channelOptions]);
+
+  const conversationsForChannel =
+    channelFilter === "all"
+      ? allConversations
+      : allConversations.filter((c) => (c.channel_id ?? "") === channelFilter);
+
   const errorMessage =
     conversationsError?.message === "Failed to fetch"
       ? "Erro de conexão. Verifique sua internet ou se o servidor está no ar."
@@ -922,23 +954,29 @@ export function ConversasSidebar() {
 
   const filtered = (() => {
     let list = search.trim()
-      ? allConversations.filter(
+      ? conversationsForChannel.filter(
           (c) =>
             (c.customer_name ?? "").toLowerCase().includes(search.toLowerCase()) ||
             (c.customer_phone ?? "").includes(search)
         )
-      : allConversations;
+      : conversationsForChannel;
     if (typeFilter === "group") list = list.filter((c) => c.is_group === true);
     else if (typeFilter === "individual") list = list.filter((c) => c.is_group !== true);
     if (statusFilter !== "all") {
       list = list.filter((c) => normalizeConversationStatus(c) === statusFilter);
     }
+    // Sempre ordenar por última mensagem: quem enviou por último sobe na fila (priorizar resposta)
+    list = [...list].sort((a, b) => {
+      const at = new Date(a.last_message_at || 0).getTime();
+      const bt = new Date(b.last_message_at || 0).getTime();
+      return bt - at;
+    });
     return list;
   })();
 
   const statusOptions = (() => {
     const map = new Map<string, { label: string; color: string | null; count: number }>();
-    for (const c of allConversations) {
+    for (const c of conversationsForChannel) {
       const key = normalizeConversationStatus(c);
       const current = map.get(key);
       const label = c.ticket_status_name?.trim() || statusFallbackLabel(key);
@@ -1133,25 +1171,27 @@ export function ConversasSidebar() {
               </span>
             )}
           </button>
-          <button
-            type="button"
-            onClick={() => handleTabChange("broadcast_queue")}
-            className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
-              activeTab === "broadcast_queue"
-                ? "bg-blue-50 text-blue-600 shadow-md shadow-blue-200/50 border border-blue-200/70"
-                : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
-            }`}
-            title="Envio em fila"
-            aria-label="Envio em fila"
-          >
-            <Send className="h-5 w-5 shrink-0" />
-            <span className="truncate text-xs font-semibold">Envio em fila</span>
-            {broadcastQueueItems.length > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
-                {broadcastQueueItems.length > 99 ? "99+" : broadcastQueueItems.length}
-              </span>
-            )}
-          </button>
+          {canAccessBroadcast && (
+            <button
+              type="button"
+              onClick={() => handleTabChange("broadcast_queue")}
+              className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
+                activeTab === "broadcast_queue"
+                  ? "bg-blue-50 text-blue-600 shadow-md shadow-blue-200/50 border border-blue-200/70"
+                  : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
+              }`}
+              title="Envio em fila"
+              aria-label="Envio em fila"
+            >
+              <Send className="h-5 w-5 shrink-0" />
+              <span className="truncate text-xs font-semibold">Envio em fila</span>
+              {broadcastQueueItems.length > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
+                  {broadcastQueueItems.length > 99 ? "99+" : broadcastQueueItems.length}
+                </span>
+              )}
+            </button>
+          )}
         </div>
         <button
           type="button"
@@ -1189,8 +1229,43 @@ export function ConversasSidebar() {
                 }`}
               >
                 Todos
-                <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">{allConversations.length}</span>
+                <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">{conversationsForChannel.length}</span>
               </button>
+              {channelOptions.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setChannelFilter("all")}
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                    channelFilter === "all"
+                      ? "bg-sky-50 text-sky-700 border border-sky-200"
+                      : "bg-white text-[#64748B] border border-[#E2E8F0] hover:bg-[#F8FAFC]"
+                  }`}
+                  title="Mostrar todas as instâncias"
+                >
+                  <Plug className="h-3 w-3" />
+                  Todas instâncias
+                </button>
+              )}
+              {channelOptions.length > 1 &&
+                channelOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setChannelFilter(opt.id)}
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                      channelFilter === opt.id
+                        ? "bg-sky-50 text-sky-700 border border-sky-200"
+                        : "bg-white text-[#64748B] border border-[#E2E8F0] hover:bg-[#F8FAFC]"
+                    }`}
+                    title={`Instância: ${opt.name}`}
+                  >
+                    <Plug className="h-3 w-3" />
+                    <span className="max-w-[120px] truncate">{opt.name}</span>
+                    <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">
+                      {opt.count}
+                    </span>
+                  </button>
+                ))}
               {statusOptions.map((opt) => (
                 <button
                   key={opt.key}

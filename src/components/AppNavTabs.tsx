@@ -33,7 +33,7 @@ const ALL_TABS = [
   // Filas
   { href: "/filas", label: "Filas", icon: Inbox, requires: "queues.view" as const },
   // CRM Comercial
-  { href: "/crm", label: "CRM", icon: ChartLine, requires: "inbox.read" as const },
+  { href: "/crm", label: "CRM", icon: ChartLine, requires: "crm.view" as const },
   // Contatos
   { href: "/contatos", label: "Contatos", icon: Users, requires: "contacts.view" as const },
   // Respostas rápidas

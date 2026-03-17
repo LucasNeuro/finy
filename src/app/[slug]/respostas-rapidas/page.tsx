@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import {
   Download,
   Loader2,
@@ -64,7 +66,25 @@ type QuickReplyFormState = {
 
 export default function RespostasRapidasPage() {
   const params = useParams();
+  const router = useRouter();
   const slug = (params?.slug as string) ?? "";
+  const apiHeadersForPerms = slug ? { "X-Company-Slug": slug } : undefined;
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeadersForPerms }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessQuickReplies = permissions.includes("quickreplies.view") || permissions.includes("quickreplies.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessQuickReplies) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessQuickReplies, router]);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -664,6 +684,10 @@ export default function RespostasRapidasPage() {
       .map((qid) => queues.find((q) => q.id === qid)?.name)
       .filter(Boolean)
       .join(", ") || "—";
+
+  if (slug && permissionsData !== undefined && !canAccessQuickReplies) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-4 p-6">

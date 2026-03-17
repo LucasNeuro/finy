@@ -28,6 +28,7 @@ export async function GET(request: Request) {
   const jid = searchParams.get("jid")?.trim();
   const customerPhone = searchParams.get("customer_phone")?.trim() || "";
   const customerName = searchParams.get("customer_name")?.trim() || null;
+  const assignToMe = searchParams.get("assign_to_me") === "1";
   const isGroup =
     (searchParams.get("is_group") === "1" || searchParams.get("kind") === "group") &&
     (jid?.endsWith("@g.us") ?? false);
@@ -137,7 +138,7 @@ export async function GET(request: Request) {
 
   const { data: existing } = await supabase
     .from("conversations")
-    .select("id")
+    .select("id, assigned_to")
     .eq("company_id", companyId)
     .eq("channel_id", channelId)
     .eq("external_id", canonicalJid)
@@ -145,6 +146,14 @@ export async function GET(request: Request) {
     .maybeSingle();
 
   if (existing?.id) {
+    if (assignToMe && user?.id && !(existing as { assigned_to?: string | null }).assigned_to) {
+      await supabase
+        .from("conversations")
+        .update({ assigned_to: user.id, updated_at: new Date().toISOString() })
+        .eq("id", existing.id)
+        .eq("company_id", companyId)
+        .is("assigned_to", null);
+    }
     return NextResponse.json({ id: existing.id });
   }
 
@@ -152,7 +161,7 @@ export async function GET(request: Request) {
   if (canonicalPhone && canonicalPhone !== "—" && canonicalPhone.replace(/\D/g, "").length >= 10) {
     const { data: byPhone } = await supabase
       .from("conversations")
-      .select("id, external_id")
+      .select("id, external_id, assigned_to")
       .eq("company_id", companyId)
       .eq("channel_id", channelId)
       .eq("kind", "ticket")
@@ -167,6 +176,14 @@ export async function GET(request: Request) {
           .update({ external_id: canonicalJid, wa_chat_jid: canonicalJid, updated_at: new Date().toISOString() })
           .eq("id", existingId)
           .eq("company_id", companyId);
+      }
+      if (assignToMe && user?.id && !(byPhone as { assigned_to?: string | null }).assigned_to) {
+        await supabase
+          .from("conversations")
+          .update({ assigned_to: user.id, updated_at: new Date().toISOString() })
+          .eq("id", existingId)
+          .eq("company_id", companyId)
+          .is("assigned_to", null);
       }
       return NextResponse.json({ id: existingId });
     }
@@ -194,7 +211,9 @@ export async function GET(request: Request) {
   const queueId =
     defaultCq?.queue_id ?? (chData as { queue_id?: string | null }).queue_id ?? null;
   let assignedTo: string | null = null;
-  if (queueId) {
+  if (assignToMe && user?.id) {
+    assignedTo = user.id;
+  } else if (queueId) {
     const commercial = await isCommercialQueue(supabase, companyId, queueId);
     if (commercial) {
       if (user?.id) {

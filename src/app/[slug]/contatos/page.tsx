@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import {
   useReactTable,
   getCoreRowModel,
@@ -697,6 +699,7 @@ function GroupsManageActions({
 
 export default function ContatosPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = pathname?.split("/").filter(Boolean)[0] ?? "";
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
@@ -762,6 +765,22 @@ export default function ContatosPage() {
   const [sendToQueueQueueId, setSendToQueueQueueId] = useState("");
   const [sendToQueueLoading, setSendToQueueLoading] = useState(false);
   const [queues, setQueues] = useState<{ id: string; name: string; slug: string }[]>([]);
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessContacts = permissions.includes("contacts.view") || permissions.includes("contacts.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessContacts) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessContacts, router]);
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -1042,6 +1061,33 @@ export default function ContatosPage() {
     setDetailOpen(true);
   };
 
+  const openContactChat = useCallback(async (contact: Contact) => {
+    const base = slug ? `/${slug}` : "";
+    const jid = (contact.jid || "").trim();
+    if (!jid) return;
+    try {
+      const params = new URLSearchParams({
+        channel_id: contact.channel_id,
+        jid,
+        customer_phone: contact.phone ?? "",
+        customer_name: (contact.contact_name ?? contact.first_name ?? "").trim(),
+        assign_to_me: "1",
+      });
+      const res = await fetch(`/api/conversations/find-or-create?${params.toString()}`, {
+        credentials: "include",
+        headers: apiHeaders ?? {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.id) {
+        router.push(`${base}/conversas/${data.id}`);
+        return;
+      }
+      setAlertMessage(data?.error ?? "Não foi possível abrir o chat.");
+    } catch {
+      setAlertMessage("Erro de rede ao abrir o chat.");
+    }
+  }, [slug, apiHeaders, router]);
+
   const openGroupDetail = (group: Group) => {
     setDetailGroup(group);
     setDetailGroupOpen(true);
@@ -1269,6 +1315,15 @@ export default function ContatosPage() {
           <div className="inline-flex rounded-lg border border-[#E2E8F0] bg-white overflow-hidden">
             <button
               type="button"
+              onClick={() => openContactChat(row.original)}
+              className="rounded-none border-r border-[#E2E8F0] p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange last:border-r-0"
+              title="Abrir chat"
+              aria-label="Abrir chat do contato"
+            >
+              <MessageCircle className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
               onClick={() => openDetail(row.original)}
               className="rounded-none border-r border-[#E2E8F0] p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange last:border-r-0"
               title="Ver detalhes"
@@ -1289,7 +1344,7 @@ export default function ContatosPage() {
         ),
       },
     ],
-    [channels, selectedContactIds]
+    [channels, selectedContactIds, openContactChat]
   );
 
   const groupColumns = useMemo<ColumnDef<Group>[]>(
@@ -1650,6 +1705,10 @@ export default function ContatosPage() {
     const id = window.setTimeout(() => setAlertMessage(null), 5000);
     return () => window.clearTimeout(id);
   }, [alertMessage]);
+
+  if (slug && permissionsData !== undefined && !canAccessContacts) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-4 px-4 py-6 sm:px-6">
@@ -2054,7 +2113,7 @@ export default function ContatosPage() {
                   </div>
                 </div>
               )}
-              <div className="overflow-auto max-h-[60vh] min-h-[200px]">
+              <div className="max-h-[300px] overflow-auto min-h-[200px]">
                 <table className="w-full min-w-[760px] border-collapse">
                   <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
                     {table.getHeaderGroups().map((hg) => (
@@ -2652,6 +2711,7 @@ export default function ContatosPage() {
         channelName={detailContact ? channelName(detailContact.channel_id) : ""}
         companySlug={slug}
         onBlockChange={() => { fetchBlockList(); mutateContacts(); }}
+        onOpenChat={openContactChat}
         onTagsSaved={(contactId, tagNames) => {
           mutateContacts(
             (prev) =>

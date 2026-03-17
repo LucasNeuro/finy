@@ -21,6 +21,7 @@ import {
   Check,
   Copy,
   Sparkles,
+  ZapOff,
 } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { useBroadcastStore } from "@/stores/broadcast-store";
@@ -196,6 +197,22 @@ export default function BroadcastPage() {
 
   const selectedIds = useBroadcastStore((s) => s.selectedQueueItemIds);
 
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessBroadcast = permissions.includes("broadcast.view") || permissions.includes("broadcast.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessBroadcast) {
+      router.replace(`${base}/conversas`);
+    }
+  }, [slug, base, permissionsData, canAccessBroadcast, router]);
+
   const { data: queueData } = useQuery({
     queryKey: queryKeys.broadcastQueue(slug ?? ""),
     queryFn: () =>
@@ -228,6 +245,7 @@ export default function BroadcastPage() {
   const [quickIndex, setQuickIndex] = useState(0);
   const [quickReplySearch, setQuickReplySearch] = useState("");
   const [correctingText, setCorrectingText] = useState(false);
+  const [useUazapiQueue, setUseUazapiQueue] = useState(true);
   const [pendingMedia, setPendingMedia] = useState<{
     type: string;
     file: string;
@@ -404,6 +422,43 @@ export default function BroadcastPage() {
     setSending(true);
     setSendProgress({ current: 0, total: selectedItems.length, error: "" });
 
+    if (useUazapiQueue) {
+      const body: Record<string, unknown> = {
+        item_ids: selectedItems.map((i: { id: string }) => i.id),
+        content,
+      };
+      if (isAudio && audioBase64) {
+        body.type = "ptt";
+        body.file = audioBase64;
+      } else if (isMedia) {
+        body.type = pendingMedia!.type;
+        body.file = pendingMedia!.file;
+        body.caption = pendingMedia!.caption || content || undefined;
+        body.docName = pendingMedia!.docName;
+      }
+
+      const res = await fetch("/api/broadcast-queue/send-via-uazapi", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      setSending(false);
+      setSendValue("");
+      setPendingMedia(null);
+      setRecordedAudioBlob(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.broadcastQueue(slug ?? "") });
+
+      if (res.ok) {
+        setSendProgress({ current: 0, total: 0, error: "" });
+      } else {
+        setSendProgress((p) => ({ ...p, error: data?.error ?? "Falha ao enviar campanha" }));
+      }
+      return;
+    }
+
     let successCount = 0;
     let failCount = 0;
 
@@ -462,6 +517,10 @@ export default function BroadcastPage() {
     await handleSend();
   }
 
+  if (slug && permissionsData !== undefined && !canAccessBroadcast) {
+    return null;
+  }
+
   return (
     <div className="flex h-full flex-col bg-white">
       {/* Header */}
@@ -480,7 +539,8 @@ export default function BroadcastPage() {
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-lg font-semibold text-[#1E293B]">Envio em massa</h1>
           <p className="truncate text-sm text-[#64748B]">
-            {selectedItems.length} contato(s) selecionado(s) · delay ~35s entre cada envio
+            {selectedItems.length} contato(s) selecionado(s)
+            {useUazapiQueue ? " · envio otimizado (delay 25–45s)" : " · envio manual (~35s)"}
           </p>
         </div>
       </header>
@@ -490,9 +550,23 @@ export default function BroadcastPage() {
 
         {selectedItems.length > 0 && (
           <div className="border-b border-[#E2E8F0] px-4 py-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-              Destinatários ({selectedItems.length})
-            </p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                Destinatários ({selectedItems.length})
+              </p>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-[#64748B]">
+                <input
+                  type="checkbox"
+                  checked={useUazapiQueue}
+                  onChange={(e) => setUseUazapiQueue(e.target.checked)}
+                  className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                />
+                <span className="flex items-center gap-1">
+                  {useUazapiQueue ? <Zap className="h-4 w-4 text-amber-500" /> : <ZapOff className="h-4 w-4" />}
+                  Envio otimizado (recomendado)
+                </span>
+              </label>
+            </div>
             <div className="flex flex-wrap gap-2">
               {selectedItems.map((item: { id: string; channel_name?: string | null; contact?: { contact_name?: string | null; first_name?: string | null; phone?: string | null; jid?: string | null } | null }) => (
                 <span

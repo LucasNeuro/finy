@@ -20,6 +20,7 @@ Este diretorio foi organizado por categoria para facilitar manutencao, busca e e
 - `design/references/README.md`
 
 ### `features/`
+- `features/ENVIO-EM-FILA-CENARIO-ATUAL.md`
 - `features/FLUXO-FILAS-E-CAIXAS-DE-ENTRADA.md`
 
 ### `guides/`

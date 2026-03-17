@@ -1464,6 +1464,60 @@ export async function sendMenu(
 }
 
 /**
+ * Cria campanha simples via UAZAPI POST /sender/simple.
+ * Usa delay aleatório (delayMin–delayMax) para reduzir risco de bloqueio.
+ * numbers: JIDs no formato ["5511999999999@s.whatsapp.net"]
+ * scheduled_for: timestamp em ms ou minutos a partir de agora (0 = imediato).
+ */
+export type SendCampaignSimplePayload = {
+  numbers: string[];
+  type: "text" | "image" | "video" | "audio" | "document" | "sticker";
+  delayMin: number;
+  delayMax: number;
+  scheduled_for: number;
+  folder?: string;
+  info?: string;
+  text?: string;
+  file?: string;
+  docName?: string;
+  linkPreview?: boolean;
+};
+
+export type SendCampaignSimpleResponse = {
+  folder_id?: string;
+  count?: number;
+  status?: string;
+};
+
+export async function sendCampaignSimple(
+  token: string,
+  payload: SendCampaignSimplePayload
+): Promise<{ ok: boolean; data?: SendCampaignSimpleResponse; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<SendCampaignSimpleResponse>("/sender/simple", {
+    method: "POST",
+    token,
+    body: {
+      numbers: payload.numbers,
+      type: payload.type,
+      delayMin: Math.max(0, payload.delayMin),
+      delayMax: Math.max(payload.delayMin, payload.delayMax),
+      scheduled_for: payload.scheduled_for,
+      ...(payload.folder && { folder: payload.folder }),
+      ...(payload.info && { info: payload.info }),
+      ...(payload.text != null && payload.text !== "" && { text: payload.text }),
+      ...(payload.file && { file: payload.file }),
+      ...(payload.docName && { docName: payload.docName }),
+      ...(payload.linkPreview != null && { linkPreview: payload.linkPreview }),
+    },
+  });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
  * Baixa mídia de uma mensagem (UAZAPI POST /message/download).
  * id: ID da mensagem na UAZAPI (pode ser "owner:messageid" ou apenas messageid).
  * Retorna fileURL, mimetype, base64Data (se return_base64), transcription (se transcribe).
@@ -1589,6 +1643,7 @@ export const uazapi = {
   sendText,
   sendMedia,
   sendMenu,
+  sendCampaignSimple,
   messageDownload,
   sendMessagePresence,
   sendReaction,

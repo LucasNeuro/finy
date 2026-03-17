@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import {
   ChartLine,
   RefreshCw,
@@ -165,6 +167,7 @@ function formatDate(iso: string | null): string {
 
 export default function CrmCommercialPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = getCompanySlug(pathname);
   const apiHeaders = useMemo(() => (slug ? { "X-Company-Slug": slug } : undefined), [slug]);
 
@@ -216,6 +219,22 @@ export default function CrmCommercialPage() {
 
   const canManage = overview?.can_manage ?? false;
   const selectedQueueId = queueId === "all" ? null : queueId;
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessCrm = permissions.includes("crm.view") || permissions.includes("crm.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessCrm) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessCrm, router]);
 
   const loadOverview = useCallback(async () => {
     const qs = new URLSearchParams();
@@ -587,6 +606,10 @@ export default function CrmCommercialPage() {
         : activeTab === "distribuicao"
           ? "consultor(es)"
           : "consultor(es)";
+
+  if (slug && permissionsData !== undefined && !canAccessCrm) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-4 p-6">

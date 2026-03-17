@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, GripVertical, LayoutGrid, Table2, Settings2, UserPlus, MessageSquare, ChevronLeft, ChevronRight, X, Hash, Layers, UserCheck } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -74,6 +74,7 @@ function statusToApi(slug: string): string {
 
 export default function TicketsPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
@@ -529,15 +530,14 @@ export default function TicketsPage() {
     }));
   }, [tickets, statusColumns, optimisticStatusById]);
 
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessTickets) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessTickets, router]);
+
   if (slug && permissionsData !== undefined && !canAccessTickets) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-[#F1F5F9] p-8">
-        <h1 className="text-lg font-semibold text-[#0F172A]">Sem permissão</h1>
-        <p className="max-w-md text-center text-sm text-[#64748B]">
-          Você não tem acesso ao módulo Tickets. Peça ao administrador para conceder a permissão &quot;Acesso: ver módulo Tickets&quot; no seu cargo.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   return (
