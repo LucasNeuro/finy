@@ -118,7 +118,7 @@ export default function HomePage() {
   };
 
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-white flex flex-col">
       <LandingHeader onPedirAcesso={() => setModal("pedir-acesso")} />
 
       {/* Hero - Menos verde, fundo neutro */}
@@ -276,7 +276,7 @@ export default function HomePage() {
       </section>
 
       {/* Newsletter */}
-      <section className="border-t border-[#E2E8F0] bg-white py-20">
+      <section className="border-t border-[#E2E8F0] bg-white py-20 pb-24">
         <div className="mx-auto w-[92%] max-w-xl text-center">
           <h2 className="text-2xl font-bold text-[#1E293B]">Assine nossa newsletter</h2>
           <p className="mt-2 text-[#64748B]">Receba novidades e dicas para melhorar seu atendimento</p>

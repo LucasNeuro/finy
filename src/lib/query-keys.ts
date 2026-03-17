@@ -12,6 +12,7 @@ export const queryKeys = {
   groups: (slug: string) => ["inbox", "groups", slug] as const,
   broadcastQueue: (slug: string, status?: string) =>
     ["inbox", "broadcast-queue", slug, status ?? "pending"] as const,
+  broadcastPipelines: (slug: string) => ["inbox", "broadcast-pipelines", slug] as const,
   roles: (slug: string) => ["inbox", "roles", slug] as const,
   // Tickets
   queues: (slug: string) => ["tickets", "queues", slug] as const,

@@ -494,7 +494,7 @@ export default function RespostasRapidasPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.text) {
         setFormAiError(
-          data?.error ?? "Falha ao gerar sugestão. Verifique MISTRAL_API_KEY no .env ou ignore este botão."
+          data?.error ?? "Sugestão indisponível no momento. Ignore ou tente mais tarde."
         );
         return;
       }

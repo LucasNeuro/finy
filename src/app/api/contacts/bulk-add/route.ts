@@ -25,6 +25,7 @@ export async function POST(request: Request) {
   let body: {
     channel_id?: string;
     contacts?: { number: string; contact_name?: string; first_name?: string }[];
+    tag_ids?: string[];
   };
   try {
     body = await request.json();
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
 
   const channelId = typeof body?.channel_id === "string" ? body.channel_id.trim() : "";
   const contacts = Array.isArray(body?.contacts) ? body.contacts : [];
+  const tagIds = Array.isArray(body?.tag_ids)
+    ? body.tag_ids.map((t) => String(t).trim()).filter(Boolean)
+    : [];
   if (!channelId || contacts.length === 0) {
     return NextResponse.json(
       { error: "channel_id e contacts são obrigatórios" },
@@ -83,7 +87,7 @@ export async function POST(request: Request) {
       const now = new Date().toISOString();
       const displayName = contactName || firstName || number;
 
-      const { error: upsertErr } = await upsertChannelContactNoDuplicate(supabase, channelId, companyId, {
+      const { id: contactId, error: upsertErr } = await upsertChannelContactNoDuplicate(supabase, channelId, companyId, {
         channel_id: channelId,
         company_id: companyId,
         jid,
@@ -96,6 +100,17 @@ export async function POST(request: Request) {
         fail++;
         if (!firstError) firstError = upsertErr.message;
         continue;
+      }
+
+      if (tagIds.length > 0 && contactId) {
+        const tagRows = tagIds.map((tagId) => ({
+          company_id: companyId,
+          channel_contact_id: contactId,
+          tag_id: tagId,
+        }));
+        await supabase
+          .from("contact_tags")
+          .upsert(tagRows, { onConflict: "channel_contact_id,tag_id", ignoreDuplicates: true });
       }
 
       addedJids.push(jid);

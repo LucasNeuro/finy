@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { useQuery } from "@tanstack/react-query";
@@ -701,7 +701,10 @@ export default function ContatosPage() {
   const pathname = usePathname();
   const router = useRouter();
   const slug = pathname?.split("/").filter(Boolean)[0] ?? "";
-  const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+  const apiHeaders = useMemo(
+    () => (slug ? { "X-Company-Slug": slug } : undefined),
+    [slug]
+  );
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -948,11 +951,14 @@ export default function ContatosPage() {
     return Array.from(byKey.values());
   }, [contacts]);
 
+  const blockListFetchingRef = useRef(false);
   const fetchBlockList = useCallback(() => {
     if (!filterChannelId) {
       setBlockList([]);
       return;
     }
+    if (blockListFetchingRef.current) return;
+    blockListFetchingRef.current = true;
     setBlockListLoading(true);
     fetch(`/api/contacts/blocklist?channel_id=${encodeURIComponent(filterChannelId)}`, {
       credentials: "include",
@@ -961,7 +967,10 @@ export default function ContatosPage() {
       .then((r) => r.json())
       .then((data) => setBlockList(Array.isArray(data?.blockList) ? data.blockList : []))
       .catch(() => setBlockList([]))
-      .finally(() => setBlockListLoading(false));
+      .finally(() => {
+        blockListFetchingRef.current = false;
+        setBlockListLoading(false);
+      });
   }, [filterChannelId, apiHeaders]);
 
   /** Extrai números de texto colado (linhas, vírgulas, ponto e vírgula). Mínimo 10 dígitos. */
@@ -1505,7 +1514,9 @@ export default function ContatosPage() {
         (c.contact_name?.toLowerCase().includes(searchLower) ||
           c.first_name?.toLowerCase().includes(searchLower) ||
           c.phone?.toLowerCase().includes(searchLower) ||
-          c.jid?.toLowerCase().includes(searchLower))
+          c.jid?.toLowerCase().includes(searchLower) ||
+          (Array.isArray(c.tag_names) &&
+            c.tag_names.some((t) => t?.toLowerCase().includes(searchLower))))
     );
   }, [dedupedContacts, searchLower]);
 
@@ -1739,7 +1750,7 @@ export default function ContatosPage() {
               onChange={(e) => setListSearch(e.target.value)}
               placeholder={
                 activeTab === "contacts"
-                  ? "Buscar contatos..."
+                  ? "Buscar por nome, número ou tag..."
                   : activeTab === "groups"
                     ? "Buscar grupos..."
                     : activeTab === "blocked"
@@ -2808,6 +2819,7 @@ export default function ContatosPage() {
                     setAlertMessage(data.message ?? `${data.count} contato(s) adicionado(s) à fila de envio.`);
                     setSelectedContactIds(new Set());
                     setSendToQueueSideOverOpen(false);
+                    router.push(`/${slug}/conversas/broadcast?openFlow=1&autoSelect=1`);
                   } else {
                     setAlertMessage(data?.error ?? "Falha ao adicionar à fila.");
                   }
@@ -3044,6 +3056,45 @@ export default function ContatosPage() {
 
           {addContactTab === "bulk" && (
             <div className="space-y-4">
+              <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                <p className="text-sm font-medium text-[#334155] mb-2">Tag em massa</p>
+                <p className="text-xs text-[#64748B] mb-2">
+                  Opcional. A tag será aplicada a todos os contatos importados.
+                </p>
+                {contactTagsLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-[#64748B]">
+                    <Loader2 className="h-3 w-3 animate-spin text-clicvend-orange" />
+                    Carregando tags…
+                  </div>
+                ) : availableContactTags.length === 0 ? (
+                  <p className="text-xs text-[#94A3B8]">
+                    Nenhuma tag cadastrada. Crie em <span className="font-medium">Tags e formulários</span>.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {availableContactTags.map((tag) => (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        onClick={() => toggleNewContactTag(tag.id)}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          selectedNewContactTagIds.has(tag.id)
+                            ? "border-transparent text-white"
+                            : "border-[#E2E8F0] text-[#475569] bg-white hover:bg-[#F8FAFC]"
+                        }`}
+                        style={
+                          selectedNewContactTagIds.has(tag.id) && tag.color_hex
+                            ? { backgroundColor: tag.color_hex }
+                            : undefined
+                        }
+                      >
+                        <span className="truncate">{tag.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <p className="text-sm text-[#64748B]">
                 Cole a lista de números (até <span className="font-semibold">90 contatos</span>). Um por linha ou separados por vírgula/ponto e vírgula. Nome e avatar serão buscados automaticamente no WhatsApp.
               </p>
@@ -3231,6 +3282,7 @@ export default function ContatosPage() {
                         body: JSON.stringify({
                           channel_id: addContactChannelId,
                           contacts: contactsPayload,
+                          tag_ids: selectedNewContactTagIds.size > 0 ? Array.from(selectedNewContactTagIds) : undefined,
                         }),
                       });
                       const data = await res.json().catch(() => ({}));
@@ -3244,6 +3296,7 @@ export default function ContatosPage() {
                           mutateContacts();
                           setBulkContactsText("");
                           setBulkContactsRows([]);
+                          setSelectedNewContactTagIds(new Set());
                         }
                       }
                     } catch {

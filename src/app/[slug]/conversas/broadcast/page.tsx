@@ -1,7 +1,8 @@
+
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -22,13 +23,140 @@ import {
   Copy,
   Sparkles,
   ZapOff,
+  GitBranch,
+  PlayCircle,
+  Clock,
+  FolderOpen,
+  Power,
+  PowerOff,
+  Pencil,
+  XCircle,
 } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { useBroadcastStore } from "@/stores/broadcast-store";
 import { EmojiReactionPicker } from "@/components/EmojiReactionPicker";
 import { ChannelIcon } from "@/components/ChannelIcon";
+import { BroadcastFlowCanvas, type BroadcastFlowConfig } from "@/components/BroadcastFlowCanvas";
 
 const BROADCAST_DELAY_MS = 35000;
+
+const FLOW_NODES = [
+  { id: "lista", label: "Lista", desc: "Contatos" },
+  { id: "horario", label: "Horário", desc: "Envio" },
+  { id: "delay", label: "Cadência", desc: "Delay" },
+  { id: "mensagem", label: "Mensagem", desc: "Texto" },
+  { id: "envio", label: "Envio", desc: "Final" },
+];
+
+type Status = "draft" | "scheduled" | "running" | "completed" | "failed";
+
+const STAGE_INTERVAL_MS = 1800;
+
+function PipelineFlowMini({ status, isRunning }: { status?: string; isRunning?: boolean }) {
+  const s = (status ?? "draft") as Status;
+  const running = isRunning ?? (s === "running");
+  const effectiveStatus = running ? "running" : s;
+
+  // Feedback em tempo real: avança etapa a cada ~2.2s enquanto está rodando
+  const [animatedStage, setAnimatedStage] = useState(0);
+  useEffect(() => {
+    if (!running || effectiveStatus !== "running") {
+      setAnimatedStage(0);
+      return;
+    }
+    setAnimatedStage(0);
+    const t = setInterval(() => {
+      setAnimatedStage((prev) => (prev < 4 ? prev + 1 : prev));
+    }, STAGE_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [running, effectiveStatus]);
+
+  const getStageState = (index: number): "completed" | "active" | "failed" | "pending" => {
+    if (effectiveStatus === "completed") return "completed";
+    if (effectiveStatus === "failed") return index < 4 ? "completed" : index === 4 ? "failed" : "pending";
+    if (effectiveStatus === "running") {
+      if (index < animatedStage) return "completed";
+      if (index === animatedStage) return "active";
+      return "pending";
+    }
+    return "pending";
+  };
+
+  const getConnectorColor = (nextState: string) => {
+    if (nextState === "completed") return "bg-emerald-400";
+    if (nextState === "active") return "bg-blue-500";
+    if (nextState === "failed") return "bg-red-400";
+    return "bg-[#E2E8F0]";
+  };
+
+  return (
+    <div className="flex w-full min-w-0 items-start" role="img" aria-label="Etapas do fluxo">
+      {FLOW_NODES.map((node, i) => {
+        const state = getStageState(i);
+        const isLast = i === FLOW_NODES.length - 1;
+        const nextState = !isLast ? getStageState(i + 1) : null;
+        const badgeText =
+          state === "completed"
+            ? "Concluído"
+            : state === "active"
+              ? "Em execução"
+              : state === "failed"
+                ? "Falhou"
+                : "Pendente";
+        return (
+          <div key={node.id} className="contents">
+            <div className="flex flex-col items-center shrink-0">
+              <div
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-white shadow-md transition-all duration-300 ${
+                  state === "completed"
+                    ? "bg-emerald-400"
+                    : state === "active"
+                      ? "bg-blue-600"
+                      : state === "failed"
+                        ? "bg-red-500"
+                        : "bg-[#94A3B8]"
+                } ${state === "active" ? "ring-2 ring-blue-300 ring-offset-2 animate-pulse" : ""}`}
+              >
+                {state === "completed" ? (
+                  <Check className="h-5 w-5 text-white" strokeWidth={3} />
+                ) : state === "active" ? (
+                  <Loader2 className="h-5 w-5 text-white animate-spin" />
+                ) : state === "failed" ? (
+                  <XCircle className="h-5 w-5 text-white" strokeWidth={2.5} />
+                ) : (
+                  <span className="text-sm font-bold text-white">{i + 1}</span>
+                )}
+              </div>
+              <p className="mt-1.5 text-[10px] font-bold uppercase tracking-wide text-[#64748B] text-center whitespace-nowrap">
+                {node.label}
+              </p>
+              <span
+                className={`mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                  state === "completed"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : state === "active"
+                      ? "bg-blue-100 text-blue-700"
+                      : state === "failed"
+                        ? "bg-red-100 text-red-700"
+                        : "bg-[#F1F5F9] text-[#64748B]"
+                }`}
+              >
+                {badgeText}
+              </span>
+            </div>
+            {!isLast && (
+              <div
+                className={`h-0.5 flex-1 min-w-[12px] mx-1 mt-5 shrink-0 self-start transition-colors ${getConnectorColor(
+                  nextState ?? "pending"
+                )}`}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function formatPhoneBrazil(raw: string | null | undefined): string {
   let s = (raw ?? "").trim().replace(/\D/g, "");
@@ -194,6 +322,7 @@ export default function BroadcastPage() {
   const base = slug ? `/${slug}` : "";
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
   const queryClient = useQueryClient();
+  const searchParams = useSearchParams();
 
   const selectedIds = useBroadcastStore((s) => s.selectedQueueItemIds);
 
@@ -206,12 +335,15 @@ export default function BroadcastPage() {
   });
   const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
   const canAccessBroadcast = permissions.includes("broadcast.view") || permissions.includes("broadcast.manage");
+  const canManageBroadcast = permissions.includes("broadcast.manage");
 
   useEffect(() => {
     if (slug && permissionsData !== undefined && !canAccessBroadcast) {
       router.replace(`${base}/conversas`);
     }
   }, [slug, base, permissionsData, canAccessBroadcast, router]);
+
+  const selectAllQueueItems = useBroadcastStore((s) => s.selectAllQueueItems);
 
   const { data: queueData } = useQuery({
     queryKey: queryKeys.broadcastQueue(slug ?? ""),
@@ -220,6 +352,30 @@ export default function BroadcastPage() {
     enabled: !!slug,
     staleTime: 10 * 1000,
   });
+
+  const [runningPipelineId, setRunningPipelineId] = useState<string | null>(null);
+
+  const { data: pipelinesData, error: pipelinesErrDetail } = useQuery({
+    queryKey: queryKeys.broadcastPipelines(slug ?? ""),
+    queryFn: async () => {
+      const r = await fetch("/api/broadcast-pipelines", { credentials: "include", headers: apiHeaders });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json?.error ?? "Erro ao carregar fluxos");
+      return json;
+    },
+    enabled: !!slug,
+    staleTime: 15 * 1000,
+    refetchInterval: (query) => {
+      if (runningPipelineId) return 2000;
+      const pipelines = query.state.data?.pipelines ?? [];
+      const hasRunning = pipelines.some((p: { status?: string }) => p.status === "running");
+      const hasScheduled = pipelines.some((p: { status?: string }) => p.status === "scheduled");
+      return hasRunning || hasScheduled ? 2000 : false;
+    },
+  });
+
+  const pipelines = Array.isArray(pipelinesData?.pipelines) ? pipelinesData.pipelines : [];
+  const pipelinesLoadError = pipelinesErrDetail?.message;
 
   const { data: quickReplies } = useQuery({
     queryKey: ["quick-replies", slug],
@@ -234,6 +390,21 @@ export default function BroadcastPage() {
   const allItems = Array.isArray(queueData?.items) ? queueData.items : [];
   const selectedItems = allItems.filter((i: { id: string }) => selectedIds.has(i.id));
 
+  const urlParamsReplaced = useRef(false);
+  useEffect(() => {
+    if (!searchParams) return;
+    const openFlow = searchParams.get("openFlow") === "1";
+    const autoSelect = searchParams.get("autoSelect") === "1";
+    if (openFlow) setViewTab("fluxo");
+    if (autoSelect && allItems.length > 0 && selectedIds.size === 0) {
+      selectAllQueueItems(allItems.map((i: { id: string }) => i.id));
+    }
+    if ((openFlow || autoSelect) && !urlParamsReplaced.current) {
+      urlParamsReplaced.current = true;
+      router.replace(`${base}/conversas/broadcast`, { scroll: false });
+    }
+  }, [searchParams, allItems, selectedIds.size, selectAllQueueItems, base, router]);
+
   // Input state — idêntico ao chat normal
   const [sendValue, setSendValue] = useState("");
   const [sending, setSending] = useState(false);
@@ -246,6 +417,12 @@ export default function BroadcastPage() {
   const [quickReplySearch, setQuickReplySearch] = useState("");
   const [correctingText, setCorrectingText] = useState(false);
   const [useUazapiQueue, setUseUazapiQueue] = useState(true);
+  const [viewTab, setViewTab] = useState<"fluxo" | "envio" | "fluxos">("fluxo");
+  const [pipelineName, setPipelineName] = useState("");
+  const [editingPipelineId, setEditingPipelineId] = useState<string | null>(null);
+  const [editingPipelineConfig, setEditingPipelineConfig] = useState<Record<string, unknown> | null>(null);
+  const [flowSaveStatus, setFlowSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [flowSaveError, setFlowSaveError] = useState<string | null>(null);
   const [pendingMedia, setPendingMedia] = useState<{
     type: string;
     file: string;
@@ -400,6 +577,68 @@ export default function BroadcastPage() {
 
   const canSend = (sendValue.trim() || pendingMedia || recordedAudioBlob) && selectedItems.length > 0 && !sending;
 
+  function handleEditFlow(p: { id: string; name: string; config?: Record<string, unknown> }) {
+    setEditingPipelineId(p.id);
+    setPipelineName(p.name);
+    setEditingPipelineConfig((p.config ?? {}) as Record<string, unknown>);
+    setViewTab("fluxo");
+  }
+
+  function clearEditFlow() {
+    setEditingPipelineId(null);
+    setPipelineName("");
+    setEditingPipelineConfig(null);
+  }
+
+  async function handleSaveFlow(
+    payload: { name: string; config: Record<string, unknown> },
+    options?: { schedule?: boolean }
+  ) {
+    if (!apiHeaders || !payload.name.trim()) {
+      setFlowSaveStatus("error");
+      setFlowSaveError("Informe o nome do pipeline");
+      return;
+    }
+    setFlowSaveStatus("saving");
+    setFlowSaveError(null);
+    const body = {
+      name: payload.name,
+      config: payload.config,
+      queue_item_ids: selectedItems.map((i: { id: string }) => i.id),
+      status: options?.schedule ? "scheduled" : "draft",
+    };
+    const isEdit = !!editingPipelineId;
+    try {
+      const res = isEdit
+        ? await fetch(`/api/broadcast-pipelines/${editingPipelineId}`, {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify(body),
+          })
+        : await fetch("/api/broadcast-pipelines", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify(body),
+          });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setFlowSaveStatus("success");
+        clearEditFlow();
+        setViewTab("fluxos");
+        setTimeout(() => setFlowSaveStatus("idle"), 3000);
+        queryClient.invalidateQueries({ queryKey: queryKeys.broadcastPipelines(slug ?? "") });
+      } else {
+        setFlowSaveStatus("error");
+        setFlowSaveError(typeof data?.error === "string" ? data.error : "Erro ao salvar fluxo");
+      }
+    } catch {
+      setFlowSaveStatus("error");
+      setFlowSaveError("Erro de conexão ao salvar fluxo");
+    }
+  }
+
   async function handleSend() {
     if (!canSend || !apiHeaders) return;
 
@@ -491,7 +730,8 @@ export default function BroadcastPage() {
         successCount++;
       } else {
         const err = await res.json().catch(() => ({}));
-        setSendProgress((p) => ({ ...p, error: err?.error ?? "Falha ao enviar" }));
+        const msg = typeof err?.error === "string" ? err.error : `Erro ${res.status}: ${res.statusText}`;
+        setSendProgress((p) => ({ ...p, error: msg }));
         failCount++;
       }
 
@@ -517,6 +757,69 @@ export default function BroadcastPage() {
     await handleSend();
   }
 
+  async function handleRunPipeline(pipelineId: string) {
+    if (!apiHeaders) return;
+    setRunningPipelineId(pipelineId);
+    try {
+      const res = await fetch(`/api/broadcast-pipelines/${pipelineId}/run`, {
+        method: "POST",
+        credentials: "include",
+        headers: apiHeaders,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.broadcastPipelines(slug ?? "") });
+        queryClient.invalidateQueries({ queryKey: queryKeys.broadcastQueue(slug ?? "") });
+      } else {
+        setFlowSaveError(data?.error ?? "Erro ao executar fluxo");
+      }
+    } catch {
+      setFlowSaveError("Erro de conexão ao executar fluxo");
+    } finally {
+      setRunningPipelineId(null);
+    }
+  }
+
+  async function handleTogglePipeline(pipelineId: string, currentStatus: string) {
+    if (!apiHeaders) return;
+    const newStatus = currentStatus === "scheduled" ? "draft" : "scheduled";
+    try {
+      const res = await fetch(`/api/broadcast-pipelines/${pipelineId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { ...apiHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.broadcastPipelines(slug ?? "") });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setFlowSaveError(data?.error ?? "Erro ao atualizar");
+      }
+    } catch {
+      setFlowSaveError("Erro de conexão");
+    }
+  }
+
+  async function handleDeletePipeline(pipelineId: string, name: string) {
+    if (!apiHeaders || !confirm(`Excluir o fluxo "${name}"? Esta ação não pode ser desfeita.`)) return;
+    try {
+      const res = await fetch(`/api/broadcast-pipelines/${pipelineId}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: apiHeaders,
+      });
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.broadcastPipelines(slug ?? "") });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setFlowSaveError(data?.error ?? "Erro ao excluir");
+      }
+    } catch {
+      setFlowSaveError("Erro de conexão");
+    }
+  }
+
   if (slug && permissionsData !== undefined && !canAccessBroadcast) {
     return null;
   }
@@ -537,51 +840,262 @@ export default function BroadcastPage() {
           <Users className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold text-[#1E293B]">Envio em massa</h1>
+          <h1 className="truncate text-lg font-semibold text-[#1E293B]">Fluxo de envio</h1>
           <p className="truncate text-sm text-[#64748B]">
             {selectedItems.length} contato(s) selecionado(s)
             {useUazapiQueue ? " · envio otimizado (delay 25–45s)" : " · envio manual (~35s)"}
           </p>
         </div>
+        <div className="flex shrink-0 items-center gap-1 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-1">
+          <button
+            type="button"
+            onClick={() => setViewTab("fluxo")}
+            className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${viewTab === "fluxo" ? "bg-white text-[#1E293B] shadow-sm" : "text-[#64748B] hover:text-[#1E293B]"}`}
+          >
+            <GitBranch className="h-4 w-4" />
+            Fluxo
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewTab("envio")}
+            className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${viewTab === "envio" ? "bg-white text-[#1E293B] shadow-sm" : "text-[#64748B] hover:text-[#1E293B]"}`}
+          >
+            <Send className="h-4 w-4" />
+            Envio rápido
+          </button>
+          <button
+            type="button"
+            onClick={() => { setViewTab("fluxos"); setFlowSaveError(null); }}
+            className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${viewTab === "fluxos" ? "bg-white text-[#1E293B] shadow-sm" : "text-[#64748B] hover:text-[#1E293B]"}`}
+          >
+            <FolderOpen className="h-4 w-4" />
+            Fluxos salvos
+            {pipelines.length > 0 && (
+              <span className="rounded-full bg-clicvend-orange/20 px-1.5 py-0.5 text-[10px] font-semibold text-clicvend-orange">
+                {pipelines.length}
+              </span>
+            )}
+          </button>
+        </div>
       </header>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto">
-
-        {selectedItems.length > 0 && (
-          <div className="border-b border-[#E2E8F0] px-4 py-3">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                Destinatários ({selectedItems.length})
-              </p>
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-[#64748B]">
-                <input
-                  type="checkbox"
-                  checked={useUazapiQueue}
-                  onChange={(e) => setUseUazapiQueue(e.target.checked)}
-                  className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
-                />
-                <span className="flex items-center gap-1">
-                  {useUazapiQueue ? <Zap className="h-4 w-4 text-amber-500" /> : <ZapOff className="h-4 w-4" />}
-                  Envio otimizado (recomendado)
-                </span>
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {selectedItems.map((item: { id: string; channel_name?: string | null; contact?: { contact_name?: string | null; first_name?: string | null; phone?: string | null; jid?: string | null } | null }) => (
-                <span
-                  key={item.id}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-white border border-[#E2E8F0] px-3 py-1.5 text-sm text-[#334155] shadow-sm"
+      <div className="flex-1 overflow-y-auto min-h-0 flex flex-col">
+        {selectedItems.length > 0 && viewTab === "fluxo" && (
+          <div className="flex-1 flex flex-col p-4 min-h-0">
+            {editingPipelineId && (
+              <div className="mb-4 flex items-center justify-between rounded-lg bg-amber-50 px-4 py-2 text-sm text-amber-800 border border-amber-200">
+                <span>Editando fluxo existente — alterações serão salvas no mesmo fluxo.</span>
+                <button
+                  type="button"
+                  onClick={clearEditFlow}
+                  className="text-amber-700 hover:text-amber-900 underline"
                 >
-                  <ChannelIcon variant="outline" provider="generic" channelName={item.channel_name} size={16} />
-                  {item.contact?.contact_name || item.contact?.first_name || formatPhoneBrazil(item.contact?.phone ?? item.contact?.jid)}
-                </span>
-              ))}
-            </div>
+                  Cancelar edição
+                </button>
+              </div>
+            )}
+            {flowSaveStatus === "success" && (
+              <div className="mb-4 rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-800 border border-emerald-200">
+                Fluxo salvo com sucesso.
+              </div>
+            )}
+            {flowSaveStatus === "error" && flowSaveError && (
+              <div className="mb-4 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700 border border-red-200">
+                {flowSaveError}
+              </div>
+            )}
+            <BroadcastFlowCanvas
+              key={editingPipelineId ?? "new"}
+              recipientCount={selectedItems.length}
+              pipelineName={pipelineName}
+              onPipelineNameChange={setPipelineName}
+              onSave={handleSaveFlow}
+              saving={flowSaveStatus === "saving"}
+              apiHeaders={apiHeaders}
+              className="flex-1 min-h-0"
+              initialConfig={editingPipelineConfig ? (editingPipelineConfig as BroadcastFlowConfig) : undefined}
+            />
           </div>
         )}
 
-        {selectedItems.length === 0 && (
+        {selectedItems.length > 0 && viewTab === "envio" && (
+          <>
+            <div className="border-b border-[#E2E8F0] px-4 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">
+                  Destinatários ({selectedItems.length})
+                </p>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-[#64748B]">
+                  <input
+                    type="checkbox"
+                    checked={useUazapiQueue}
+                    onChange={(e) => setUseUazapiQueue(e.target.checked)}
+                    className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
+                  />
+                  <span className="flex items-center gap-1">
+                    {useUazapiQueue ? <Zap className="h-4 w-4 text-amber-500" /> : <ZapOff className="h-4 w-4" />}
+                    Envio otimizado (recomendado)
+                  </span>
+                </label>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {selectedItems.map((item: { id: string; channel_name?: string | null; contact?: { contact_name?: string | null; first_name?: string | null; phone?: string | null; jid?: string | null } | null }) => (
+                  <span
+                    key={item.id}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-white border border-[#E2E8F0] px-3 py-1.5 text-sm text-[#334155] shadow-sm"
+                  >
+                    <ChannelIcon variant="outline" provider="generic" channelName={item.channel_name} size={16} />
+                    {item.contact?.contact_name || item.contact?.first_name || formatPhoneBrazil(item.contact?.phone ?? item.contact?.jid)}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {sendProgress.error && (
+              <div className="mx-4 mt-2 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
+                {sendProgress.error}
+              </div>
+            )}
+
+            {sending && (
+              <div className="mx-4 mt-2 flex items-center gap-2 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Enviando {sendProgress.current} de {sendProgress.total}…
+              </div>
+            )}
+          </>
+        )}
+
+        {viewTab === "fluxos" && (
+          <div className="flex-1 p-4">
+            {(flowSaveError || pipelinesLoadError) && (
+              <div className="mb-4 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700 border border-red-200">
+                <p>{flowSaveError ?? pipelinesLoadError}</p>
+                {(pipelinesLoadError?.includes("status") ?? flowSaveError?.includes("status")) && (
+                  <p className="mt-2 text-xs">
+                    Execute a migration no Supabase: <code className="rounded bg-red-100 px-1">npx supabase db push</code> ou rode o SQL da migration 20260319000001 no SQL Editor.
+                  </p>
+                )}
+              </div>
+            )}
+            <h2 className="text-sm font-semibold text-[#334155] mb-3">Fluxos salvos</h2>
+            <p className="text-sm text-[#64748B] mb-4">
+              Clique em &quot;Executar&quot; para enviar agora. Para envio automático no horário configurado, marque &quot;Agendar execução no horário configurado&quot; ao salvar. O horário é em Brasília.
+            </p>
+            <p className="text-xs text-[#94A3B8] mb-4">
+              O status &quot;Enviado para fila&quot; significa que as mensagens foram aceitas pelo WhatsApp. A entrega pode levar alguns minutos e pode falhar em alguns casos (número não cadastrado, bloqueado, etc.).
+            </p>
+            {pipelines.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center rounded-lg border border-[#E2E8F0] bg-[#F8FAFC]">
+                <GitBranch className="h-12 w-12 text-[#94A3B8] mb-3" />
+                <p className="text-sm font-medium text-[#64748B]">Nenhum fluxo salvo</p>
+                <p className="text-xs text-[#94A3B8] mt-1">
+                  Configure um fluxo na aba &quot;Fluxo&quot; e clique em &quot;Salvar fluxo&quot;.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {pipelines.map((p: { id: string; name: string; status?: string; config?: Record<string, unknown>; queue_item_ids?: string[]; created_at?: string; updated_at?: string }) => {
+                  const horario = (p.config?.horario ?? {}) as Record<string, string>;
+                  const count = Array.isArray(p.queue_item_ids) ? p.queue_item_ids.length : 0;
+                  const canRun = ["draft", "scheduled", "failed"].includes(p.status ?? "draft") && count > 0;
+                  const canEdit = ["draft", "scheduled", "failed"].includes(p.status ?? "draft");
+                  const isRunning = runningPipelineId === p.id;
+                  const isScheduled = p.status === "scheduled";
+                  const canToggle = !["running", "completed"].includes(p.status ?? "");
+                  return (
+                    <div
+                      key={p.id}
+                      className={`rounded-xl border overflow-hidden shadow-sm transition-all ${
+                        isRunning ? "border-clicvend-orange bg-orange-50/30" : "border-[#E2E8F0] bg-white"
+                      }`}
+                    >
+                      {/* Header: título + botões */}
+                      <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-[#E2E8F0] bg-[#F8FAFC]">
+                        <h3 className="font-semibold text-[#1E293B] truncate">{p.name}</h3>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {canManageBroadcast && canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleEditFlow({ id: p.id, name: p.name, config: p.config })}
+                              title="Editar fluxo"
+                              className="flex items-center justify-center rounded-lg p-2 text-[#64748B] hover:bg-white hover:text-clicvend-orange transition-colors"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canManageBroadcast && canToggle && (
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePipeline(p.id, p.status ?? "draft")}
+                              title={isScheduled ? "Desativar agendamento" : "Ativar agendamento"}
+                              className={`flex items-center justify-center rounded-lg p-2 transition-colors ${
+                                isScheduled
+                                  ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                                  : "text-[#64748B] hover:bg-white hover:text-[#1E293B]"
+                              }`}
+                            >
+                              {isScheduled ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleRunPipeline(p.id)}
+                            disabled={!canRun || isRunning}
+                            title="Executar"
+                            className="flex items-center justify-center rounded-lg p-2 bg-clicvend-orange text-white hover:bg-clicvend-orange-dark disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
+                          >
+                            {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+                          </button>
+                          {canManageBroadcast && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePipeline(p.id, p.name)}
+                              title="Excluir fluxo"
+                              className="flex items-center justify-center rounded-lg p-2 text-[#94A3B8] hover:bg-white hover:text-red-600 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {/* Conteúdo: stepper + resumo */}
+                      <div className="p-4">
+                        <PipelineFlowMini status={p.status} isRunning={isRunning} />
+                        <p className="text-xs text-[#64748B] mt-4">
+                          {count} contato(s) · {horario.inicio && horario.fim ? `${horario.inicio}–${horario.fim}` : "Sem horário"}
+                          {p.status === "scheduled" && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-amber-600">
+                              <Clock className="h-3 w-3" />
+                              Agendado
+                            </span>
+                          )}
+                          {p.status === "completed" && (
+                            <span
+                              className="ml-2 text-emerald-600"
+                              title="As mensagens foram enviadas para a fila do WhatsApp. A entrega pode levar alguns minutos e pode falhar em alguns casos (ex.: número não está no WhatsApp)."
+                            >
+                              Enviado para fila
+                            </span>
+                          )}
+                          {p.status === "running" && (
+                            <span className="ml-2 text-blue-600 font-medium">Em execução</span>
+                          )}
+                          {p.status === "failed" && (
+                            <span className="ml-2 text-red-600">Falhou</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {selectedItems.length === 0 && viewTab !== "fluxos" && (
           <div className="flex flex-col items-center justify-center p-12 text-center">
             <Users className="h-16 w-16 text-[#E2E8F0]" />
             <p className="mt-4 text-lg font-medium text-[#64748B]">Nenhum contato selecionado</p>
@@ -590,22 +1104,10 @@ export default function BroadcastPage() {
             </p>
           </div>
         )}
-
-        {sendProgress.error && (
-          <div className="mx-4 mt-2 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
-            {sendProgress.error}
-          </div>
-        )}
-
-        {sending && (
-          <div className="mx-4 mt-2 flex items-center gap-2 rounded-lg bg-blue-50 px-4 py-2 text-sm text-blue-800">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Enviando {sendProgress.current} de {sendProgress.total}…
-          </div>
-        )}
       </div>
 
-      {/* Input area — idêntico ao chat normal */}
+      {/* Input area — apenas na aba Envio rápido */}
+      {selectedItems.length > 0 && viewTab === "envio" && (
       <div className="shrink-0 border-t border-[#E2E8F0] p-0 bg-white">
         {recording ? (
           <RecordingInProgressBar seconds={recordingSeconds} onStop={stopRecording} />
@@ -854,6 +1356,7 @@ export default function BroadcastPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

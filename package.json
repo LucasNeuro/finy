@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "next lint",
     "test:redis": "node scripts/test-redis.mjs",
+    "test:mistral": "node scripts/test-mistral.mjs",
     "backfill:media": "node scripts/backfill-media.mjs",
+    "run-broadcast-cron": "node scripts/run-broadcast-cron.mjs",
     "clean": "node -e \"const fs=require('fs');['.next','node_modules/.cache'].forEach(p=>{if(fs.existsSync(p)){fs.rmSync(p,{recursive:true});console.log('Removed '+p)}})\"",
     "dev:clean": "npm run clean && next dev"
   },

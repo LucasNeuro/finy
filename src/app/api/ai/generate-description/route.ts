@@ -185,24 +185,11 @@ export async function POST(request: Request) {
 
     if (!res.ok) {
       const errText = await res.text();
-      const errJson = await (async () => {
-        try {
-          return JSON.parse(errText);
-        } catch {
-          return null;
-        }
-      })();
-      const detail = errJson?.detail ?? errJson?.message ?? errJson?.error ?? errJson?.msg;
-      const detailStr = typeof detail === "string" ? detail : JSON.stringify(detail ?? errText);
-      const isUnauthorized = res.status === 401 || (typeof detailStr === "string" && /unauthorized|invalid.*key|invalid.*token/i.test(detailStr));
-      const hint = isUnauthorized
-        ? " Verifique se a chave está correta no .env."
-        : "";
-      const message = isUnauthorized
-        ? `Chave da API AI recusada (${res.status}). ${detailStr || "Verifique AI_API_KEY no .env."}${hint}`
-        : (detailStr || errText || `AI API ${res.status}`).slice(0, 300);
+      if (process.env.NODE_ENV === "development") {
+        console.error("[generate-description] Mistral API error:", res.status, errText?.slice(0, 200));
+      }
       return NextResponse.json(
-        { error: `Falha ao gerar: ${message}` },
+        { error: "Geração temporariamente indisponível. Digite a descrição manualmente." },
         { status: res.status >= 500 ? 502 : 400 }
       );
     }
@@ -214,9 +201,11 @@ export async function POST(request: Request) {
     const text = raw.slice(0, maxLength);
     return NextResponse.json({ text });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Erro ao chamar Mistral";
+    if (process.env.NODE_ENV === "development") {
+      console.error("[generate-description] Fetch error:", e instanceof Error ? e.message : e);
+    }
     return NextResponse.json(
-      { error: `Erro ao gerar: ${message}` },
+      { error: "Geração temporariamente indisponível. Digite a descrição manualmente." },
       { status: 502 }
     );
   }
