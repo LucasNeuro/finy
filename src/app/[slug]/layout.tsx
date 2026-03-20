@@ -8,38 +8,45 @@ import { QueryProvider } from "@/components/QueryProvider";
 import { RealtimeConversations } from "@/components/RealtimeConversations";
 
 async function getPrefetchData(slug: string) {
-  const headersList = await headers();
-  const host = headersList.get("host") ?? "localhost:3000";
-  const proto = headersList.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  const base = `${proto}://${host}`;
-  const cookie = headersList.get("cookie") ?? "";
-  const apiHeaders: Record<string, string> = {
-    "X-Company-Slug": slug,
-    ...(cookie ? { cookie } : {}),
-  };
+  try {
+    const headersList = await headers();
+    const host = headersList.get("host") ?? "localhost:3000";
+    const proto = headersList.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+    const base = `${proto}://${host}`;
+    const cookie = headersList.get("cookie") ?? "";
+    const apiHeaders: Record<string, string> = {
+      "X-Company-Slug": slug,
+      ...(cookie ? { cookie } : {}),
+    };
 
-  const [permissionsRes, countsRes, queuesRes] = await Promise.all([
-    fetch(`${base}/api/auth/permissions`, { headers: apiHeaders, cache: "no-store" }),
-    fetch(`${base}/api/conversations/counts`, { headers: apiHeaders, cache: "no-store" }),
-    fetch(`${base}/api/queues?for_inbox=1`, { headers: apiHeaders, cache: "no-store" }),
-  ]);
+    const [permissionsRes, countsRes, queuesRes] = await Promise.all([
+      fetch(`${base}/api/auth/permissions`, { headers: apiHeaders, cache: "no-store" }),
+      fetch(`${base}/api/conversations/counts`, { headers: apiHeaders, cache: "no-store" }),
+      fetch(`${base}/api/queues?for_inbox=1`, { headers: apiHeaders, cache: "no-store" }),
+    ]);
 
-  const permissionsData = permissionsRes.ok ? await permissionsRes.json().catch(() => ({})) : {};
-  const countsData = countsRes.ok ? await countsRes.json().catch(() => ({})) : {};
-  const queuesData = queuesRes.ok ? await queuesRes.json().catch(() => []) : [];
+    const permissionsData = permissionsRes.ok ? await permissionsRes.json().catch(() => ({})) : {};
+    const countsData = countsRes.ok ? await countsRes.json().catch(() => ({})) : {};
+    const queuesData = queuesRes.ok ? await queuesRes.json().catch(() => []) : [];
 
-  return {
-    swrFallback: {
-      [unstable_serialize(["/api/auth/permissions", slug])]: permissionsData,
-      [unstable_serialize(["/api/conversations/counts", slug])]: countsData,
-    },
-    queryInitialData: {
-      slug,
-      permissions: permissionsData,
-      counts: countsData,
-      queues: Array.isArray(queuesData) ? queuesData.map((q: { id: string; name: string }) => ({ id: q.id, name: q.name ?? "(sem nome)" })) : [],
-    },
-  };
+    return {
+      swrFallback: {
+        [unstable_serialize(["/api/auth/permissions", slug])]: permissionsData,
+        [unstable_serialize(["/api/conversations/counts", slug])]: countsData,
+      },
+      queryInitialData: {
+        slug,
+        permissions: permissionsData,
+        counts: countsData,
+        queues: Array.isArray(queuesData) ? queuesData.map((q: { id: string; name: string }) => ({ id: q.id, name: q.name ?? "(sem nome)" })) : [],
+      },
+    };
+  } catch {
+    return {
+      swrFallback: {},
+      queryInitialData: { slug, permissions: {}, counts: {}, queues: [] },
+    };
+  }
 }
 
 export default async function AppLayout({

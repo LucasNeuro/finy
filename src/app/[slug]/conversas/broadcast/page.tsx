@@ -344,6 +344,7 @@ export default function BroadcastPage() {
   }, [slug, base, permissionsData, canAccessBroadcast, router]);
 
   const selectAllQueueItems = useBroadcastStore((s) => s.selectAllQueueItems);
+  const [runningPipelineId, setRunningPipelineId] = useState<string | null>(null);
 
   const { data: queueData } = useQuery({
     queryKey: queryKeys.broadcastQueue(slug ?? ""),
@@ -351,9 +352,11 @@ export default function BroadcastPage() {
       fetch("/api/broadcast-queue?status=pending", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
     enabled: !!slug,
     staleTime: 10 * 1000,
+    refetchInterval: (query) => {
+      if (runningPipelineId) return 2000;
+      return false;
+    },
   });
-
-  const [runningPipelineId, setRunningPipelineId] = useState<string | null>(null);
 
   const { data: pipelinesData, error: pipelinesErrDetail } = useQuery({
     queryKey: queryKeys.broadcastPipelines(slug ?? ""),
@@ -376,6 +379,23 @@ export default function BroadcastPage() {
 
   const pipelines = Array.isArray(pipelinesData?.pipelines) ? pipelinesData.pipelines : [];
   const pipelinesLoadError = pipelinesErrDetail?.message;
+
+  // Quando um pipeline conclui (Executar ou cron), invalida a fila para os contatos saírem da lista
+  const prevPipelineStatusRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const byId = new Map<string, string>();
+    for (const p of pipelines as Array<{ id: string; status?: string }>) {
+      byId.set(p.id, p.status ?? "draft");
+    }
+    for (const [id, status] of byId) {
+      const prev = prevPipelineStatusRef.current.get(id);
+      if (prev === "running" && status !== "running") {
+        queryClient.invalidateQueries({ queryKey: queryKeys.broadcastQueue(slug ?? "") });
+        break;
+      }
+    }
+    prevPipelineStatusRef.current = byId;
+  }, [pipelines, queryClient, slug]);
 
   const { data: quickReplies } = useQuery({
     queryKey: ["quick-replies", slug],

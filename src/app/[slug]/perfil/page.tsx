@@ -3,9 +3,24 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { Building2, MapPin, Pencil, Link2, Copy, Share2 } from "lucide-react";
+import { 
+  Building2, 
+  MapPin, 
+  Link2, 
+  Copy, 
+  Share2, 
+  User, 
+  Briefcase,
+  Check,
+  Camera
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+
+// Função utilitária para classes condicionais
+function classNames(...classes: (string | undefined | null | false)[]) {
+  return classes.filter(Boolean).join(' ');
+}
 
 type Company = {
   id: string;
@@ -32,17 +47,23 @@ export default function PerfilPage() {
   const router = useRouter();
   const slug = typeof params?.slug === "string" ? params.slug : "";
   const base = slug ? `/${slug}` : "";
+  
+  // Estados de dados
   const [company, setCompany] = useState<Company | null>(null);
   const [canView, setCanView] = useState<boolean | null>(null);
   const [userEmail, setUserEmail] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
   const [userAvatarUrl, setUserAvatarUrl] = useState<string>("");
+  const [linkData, setLinkData] = useState<{ slug: string } | null>(null);
+  
+  // Estados de UI
+  const [activeTab, setActiveTab] = useState<"geral" | "empresa">("geral");
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarError, setAvatarError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [linkData, setLinkData] = useState<{ slug: string } | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
 
+  // Efeitos de carga (mantidos do original)
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -101,6 +122,17 @@ export default function PerfilPage() {
       });
   }, [company, userId]);
 
+  useEffect(() => {
+    fetch("/api/company/links")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.slug) setLinkData({ slug: data.slug });
+        else setLinkData(null);
+      })
+      .catch(() => setLinkData(null));
+  }, []);
+
+  // Handlers
   const handleAvatarChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -115,14 +147,14 @@ export default function PerfilPage() {
           .from("user-avatars")
           .upload(path, file, { upsert: true });
         if (uploadError) {
-          setAvatarError("Falha ao enviar a foto. Tente novamente.");
+          setAvatarError("Falha ao enviar a foto.");
           setAvatarUploading(false);
           return;
         }
         const { data } = supabase.storage.from("user-avatars").getPublicUrl(path);
         const publicUrl = data?.publicUrl;
         if (!publicUrl) {
-          setAvatarError("Foto enviada, mas não foi possível gerar o link público.");
+          setAvatarError("Erro ao gerar link da foto.");
           setAvatarUploading(false);
           return;
         }
@@ -132,29 +164,19 @@ export default function PerfilPage() {
           .eq("user_id", userId)
           .eq("company_id", company.id);
         if (updateError) {
-          setAvatarError("Foto enviada, mas não foi possível salvar no perfil.");
+          setAvatarError("Erro ao salvar no perfil.");
           setAvatarUploading(false);
           return;
         }
         setUserAvatarUrl(publicUrl);
       } catch {
-        setAvatarError("Erro de rede ao enviar a foto.");
+        setAvatarError("Erro de rede.");
       } finally {
         setAvatarUploading(false);
       }
     },
     [company, userId]
   );
-
-  useEffect(() => {
-    fetch("/api/company/links")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.slug) setLinkData({ slug: data.slug });
-        else setLinkData(null);
-      })
-      .catch(() => setLinkData(null));
-  }, []);
 
   const accessLink = linkData && typeof window !== "undefined" ? `${window.location.origin}/${linkData.slug}` : linkData ? `/${linkData.slug}` : "";
 
@@ -183,23 +205,13 @@ export default function PerfilPage() {
     }
   };
 
-  if (canView === false || (canView === null && slug)) {
+  // Renderização
+  if (canView === false || (canView === null && slug) || loading) {
     return (
-      <div className="flex min-h-[200px] items-center justify-center">
+      <div className="flex min-h-[400px] items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-clicvend-orange border-t-transparent" />
-          <span className="text-sm text-[#64748B]">{canView === false ? "Redirecionando…" : "Carregando…"}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[200px] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-clicvend-orange border-t-transparent" />
-          <span className="text-sm text-[#64748B]">Carregando…</span>
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-900 border-t-transparent" />
+          <span className="text-sm text-slate-500">Carregando...</span>
         </div>
       </div>
     );
@@ -207,9 +219,9 @@ export default function PerfilPage() {
 
   if (!company) {
     return (
-      <div className="flex min-h-[200px] flex-col items-center justify-center gap-4">
-        <p className="text-[#64748B]">Não foi possível carregar os dados da empresa.</p>
-        <Link href={base} className="text-sm font-medium text-clicvend-blue hover:underline">
+      <div className="flex min-h-[400px] flex-col items-center justify-center gap-4">
+        <p className="text-slate-500">Empresa não encontrada.</p>
+        <Link href={base} className="text-sm font-medium text-slate-900 hover:underline">
           Voltar ao painel
         </Link>
       </div>
@@ -224,194 +236,247 @@ export default function PerfilPage() {
   const cidadeUf = [company.municipio, company.uf].filter(Boolean).join(" - ");
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Banner laranja - resumo do perfil */}
-      <div className="rounded-2xl bg-gradient-to-br from-clicvend-orange to-clicvend-orange-dark p-6 text-white shadow-lg shadow-clicvend-orange/25">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-white/20 text-2xl font-bold">
-              {company.name?.[0] ?? "E"}
+    // Alteração 1: Removido items-center e justify-center, adicionado flex-col para ocupar altura natural
+    <div className="flex flex-col h-[calc(100vh-6rem)] p-4 md:p-8">
+      {/* Alteração 2: Aumentado max-w para 95% ou full com margem, removido max-w-7xl fixo */}
+      <div className="flex h-full w-full max-w-[98%] mx-auto flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-slate-900/5">
+        
+        {/* Header do Card */}
+        <div className="relative shrink-0 bg-slate-50 px-8 pt-8 pb-4 border-b border-slate-100">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+            <div className="flex items-center gap-5">
+              {/* Alteração 3: Cor do avatar mudada para tons de cinza/preto */}
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-700 to-slate-900 text-3xl font-bold text-white shadow-lg shadow-slate-900/10">
+                {company.name?.[0]?.toUpperCase() ?? "E"}
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                  {company.nome_fantasia || company.name || company.razao_social}
+                </h1>
+                {company.cnpj && (
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/10">
+                      CNPJ: {cnpjFormatted}
+                    </span>
+                    {company.situacao_cadastral && (
+                      <span className={classNames(
+                        "inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset",
+                        company.situacao_cadastral === "ATIVA" 
+                          ? "bg-green-50 text-green-700 ring-green-600/20" 
+                          : "bg-red-50 text-red-700 ring-red-600/20"
+                      )}>
+                        {company.situacao_cadastral}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold">{company.razao_social || company.name}</h1>
-              <p className="text-sm opacity-90">{userEmail || company.email || "—"}</p>
-              {company.nome_fantasia && (
-                <p className="text-sm opacity-90">Nome Fantasia: {company.nome_fantasia}</p>
+          </div>
+
+          {/* Abas de Navegação */}
+          <div className="mt-8 flex gap-6 border-b border-slate-200">
+            <button
+              onClick={() => setActiveTab("geral")}
+              className={classNames(
+                "group relative pb-3 text-sm font-medium transition-colors",
+                activeTab === "geral" 
+                  ? "text-slate-900" // Alteração 4: Cor ativa cinza escuro
+                  : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <User className="h-4 w-4" />
+                Visão Geral
+              </span>
+              {activeTab === "geral" && (
+                <span className="absolute bottom-0 left-0 h-0.5 w-full bg-slate-900" /> // Alteração 5: Barra ativa cinza escuro
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab("empresa")}
+              className={classNames(
+                "group relative pb-3 text-sm font-medium transition-colors",
+                activeTab === "empresa" 
+                  ? "text-slate-900" // Alteração 6: Cor ativa cinza escuro
+                  : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <Briefcase className="h-4 w-4" />
+                Detalhes da Empresa
+              </span>
+              {activeTab === "empresa" && (
+                <span className="absolute bottom-0 left-0 h-0.5 w-full bg-slate-900" /> // Alteração 7: Barra ativa cinza escuro
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Conteúdo Scrollável */}
+        <div className="flex-1 overflow-y-auto bg-slate-50/50 p-8">
+          
+          {/* Aba Geral */}
+          {activeTab === "geral" && (
+            <div className="grid gap-6 md:grid-cols-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              
+              {/* Card Usuário */}
+              <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 transition-all hover:border-slate-300 hover:shadow-md"> {/* Alteração 8: hover border neutro */}
+                <div className="absolute top-0 right-0 p-4 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="rounded-full bg-slate-100 p-2 text-slate-400">
+                    <User className="h-4 w-4" />
+                  </div>
+                </div>
+                
+                <h3 className="text-base font-semibold text-slate-900">Seu Perfil</h3>
+                <p className="text-sm text-slate-500 mb-6">Suas informações de acesso nesta empresa.</p>
+                
+                <div className="flex items-center gap-4">
+                  <div className="relative h-16 w-16 shrink-0">
+                    {userAvatarUrl ? (
+                      <img
+                        src={userAvatarUrl}
+                        alt="Foto"
+                        className="h-full w-full rounded-full object-cover ring-4 ring-slate-50"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center rounded-full bg-slate-100 text-xl font-bold text-slate-400 ring-4 ring-slate-50">
+                        {(userEmail || "U").charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <label className="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-slate-200 transition-transform hover:scale-110 active:scale-95">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleAvatarChange}
+                        disabled={avatarUploading}
+                      />
+                      {avatarUploading ? (
+                        <div className="h-3 w-3 animate-spin rounded-full border-2 border-slate-900 border-t-transparent" /> // Alteração 9: Spinner neutro
+                      ) : (
+                        <Camera className="h-3.5 w-3.5 text-slate-600" />
+                      )}
+                    </label>
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900" title={userEmail}>
+                      {userEmail}
+                    </p>
+                    <p className="text-xs text-slate-500">Usuário do sistema</p>
+                    {avatarError && <p className="mt-1 text-xs text-red-500">{avatarError}</p>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Card Link de Acesso */}
+              {linkData && (
+                <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 transition-all hover:border-slate-300 hover:shadow-md"> {/* Alteração 10: hover border neutro */}
+                  <div className="absolute top-0 right-0 p-4 opacity-0 transition-opacity group-hover:opacity-100">
+                    <div className="rounded-full bg-slate-100 p-2 text-slate-400">
+                      <Link2 className="h-4 w-4" />
+                    </div>
+                  </div>
+
+                  <h3 className="text-base font-semibold text-slate-900">Link de Acesso</h3>
+                  <p className="text-sm text-slate-500 mb-6">Compartilhe o acesso ao painel.</p>
+
+                  <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200">
+                    <p className="truncate font-mono text-sm text-clicvend-blue">{accessLink}</p>
+                  </div>
+
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      onClick={copyLink}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 shadow-sm" // Alteração 11: Botão preto
+                    >
+                      {linkCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      {linkCopied ? "Copiado" : "Copiar"}
+                    </button>
+                    <button
+                      onClick={shareLink}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50" // Alteração 12: Botão secundário neutro
+                    >
+                      <Share2 className="h-4 w-4" />
+                      Compartilhar
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-          <Link
-            href={`${base}/perfil/editar`}
-            className="inline-flex items-center gap-2 rounded-xl border-2 border-white/50 bg-white/10 px-4 py-2.5 font-semibold transition-colors hover:bg-white/20"
-          >
-            <Pencil className="h-4 w-4" />
-            Editar Perfil
-          </Link>
-        </div>
-      </div>
+          )}
 
-      {/* Seu usuário */}
-      <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-bold text-[#1E293B]">Seu usuário</h2>
-        <p className="mt-1 text-sm text-[#64748B]">
-          Foto e e-mail usados para identificar você no atendimento.
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-3">
-            {userAvatarUrl ? (
-              <img
-                src={userAvatarUrl}
-                alt="Foto do usuário"
-                className="h-12 w-12 rounded-full object-cover ring-2 ring-[#E2E8F0]"
-              />
-            ) : (
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-semibold text-[#475569]">
-                {(userEmail || company.email || "U").charAt(0).toUpperCase()}
+          {/* Aba Empresa */}
+          {activeTab === "empresa" && (
+            <div className="grid gap-6 md:grid-cols-2 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {/* Detalhes Fiscais */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="rounded-lg bg-slate-100 p-2 text-slate-600"> {/* Alteração 13: Ícone neutro */}
+                    <Building2 className="h-5 w-5" />
+                  </div>
+                  <h3 className="font-semibold text-slate-900">Dados Cadastrais</h3>
+                </div>
+                
+                <dl className="space-y-4">
+                  <div>
+                    <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">Razão Social</dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">{company.razao_social || "—"}</dd>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">CNPJ</dt>
+                      <dd className="mt-1 text-sm font-medium text-slate-900">{cnpjFormatted || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">Porte</dt>
+                      <dd className="mt-1 text-sm font-medium text-slate-900">{company.porte_empresa || "—"}</dd>
+                    </div>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">Natureza Jurídica</dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">{company.natureza_juridica || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">Email Corporativo</dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">{company.email || "—"}</dd>
+                  </div>
+                </dl>
               </div>
-            )}
-            <div className="text-sm">
-              <div className="font-medium text-[#1E293B]">
-                {company.nome_fantasia || company.name}
+
+              {/* Endereço */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="rounded-lg bg-slate-100 p-2 text-slate-600"> {/* Alteração 14: Ícone neutro */}
+                    <MapPin className="h-5 w-5" />
+                  </div>
+                  <h3 className="font-semibold text-slate-900">Endereço</h3>
+                </div>
+
+                <dl className="space-y-4">
+                  <div>
+                    <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">Logradouro</dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">{enderecoCompleto || "—"}</dd>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">Bairro</dt>
+                      <dd className="mt-1 text-sm font-medium text-slate-900">{company.bairro || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">CEP</dt>
+                      <dd className="mt-1 text-sm font-medium text-slate-900">{cepFormatted || "—"}</dd>
+                    </div>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-medium text-slate-500 uppercase tracking-wider">Cidade / UF</dt>
+                    <dd className="mt-1 text-sm font-medium text-slate-900">{cidadeUf || "—"}</dd>
+                  </div>
+                </dl>
               </div>
-              <div className="text-[#64748B]">{userEmail || company.email || "—"}</div>
             </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleAvatarChange}
-                disabled={avatarUploading}
-              />
-              {avatarUploading ? "Enviando foto…" : "Alterar foto"}
-            </label>
-            {avatarError && <p className="text-xs text-red-600">{avatarError}</p>}
-          </div>
-        </div>
-      </div>
-
-      {/* Link de acesso */}
-      {linkData && (
-        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-[#1E293B]">
-            <Link2 className="h-5 w-5 text-clicvend-orange" />
-            Link de acesso
-          </h2>
-          <p className="mt-1 text-sm text-[#64748B]">URL da sua empresa</p>
-          <p className="mt-1 font-mono text-sm font-medium text-clicvend-blue break-all">{accessLink}</p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={copyLink}
-              className="inline-flex items-center gap-2 rounded-xl border border-[#E2E8F0] px-4 py-2.5 text-sm font-medium text-[#64748B] transition-colors hover:border-[#CBD5E1] hover:bg-[#F8FAFC]"
-            >
-              <Copy className="h-4 w-4" />
-              {linkCopied ? "Copiado!" : "Copiar"}
-            </button>
-            <button
-              type="button"
-              onClick={shareLink}
-              className="inline-flex items-center gap-2 rounded-xl bg-clicvend-orange px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-clicvend-orange-dark"
-            >
-              <Share2 className="h-4 w-4" />
-              Compartilhar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Cards de dados */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Dados da Empresa */}
-        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm transition-shadow hover:shadow-md">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-[#1E293B]">
-            <Building2 className="h-5 w-5 text-clicvend-orange" />
-            Dados da Empresa
-          </h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            {company.cnpj && (
-              <div>
-                <dt className="text-[#64748B]">CNPJ</dt>
-                <dd className="font-medium">{cnpjFormatted}</dd>
-              </div>
-            )}
-            {company.razao_social && (
-              <div>
-                <dt className="text-[#64748B]">Razão Social</dt>
-                <dd className="font-medium">{company.razao_social}</dd>
-              </div>
-            )}
-            {company.nome_fantasia && (
-              <div>
-                <dt className="text-[#64748B]">Nome Fantasia</dt>
-                <dd className="font-medium">{company.nome_fantasia}</dd>
-              </div>
-            )}
-            {company.situacao_cadastral && (
-              <div>
-                <dt className="text-[#64748B]">Situação Cadastral</dt>
-                <dd>
-                  <span className="inline-flex rounded-full bg-[#FEE2E2] px-2.5 py-0.5 text-xs font-medium text-[#B91C1C]">
-                    {company.situacao_cadastral}
-                  </span>
-                </dd>
-              </div>
-            )}
-            {company.porte_empresa && (
-              <div>
-                <dt className="text-[#64748B]">Porte da Empresa</dt>
-                <dd className="font-medium">{company.porte_empresa}</dd>
-              </div>
-            )}
-            {company.natureza_juridica && (
-              <div>
-                <dt className="text-[#64748B]">Natureza Jurídica</dt>
-                <dd className="font-medium">{company.natureza_juridica}</dd>
-              </div>
-            )}
-            {!company.cnpj && !company.razao_social && !company.nome_fantasia && (
-              <p className="text-[#94A3B8]">Nenhum dado cadastral preenchido.</p>
-            )}
-          </dl>
-        </div>
-
-        {/* Endereço */}
-        <div className="rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-sm transition-shadow hover:shadow-md">
-          <h2 className="flex items-center gap-2 text-lg font-bold text-[#1E293B]">
-            <MapPin className="h-5 w-5 text-clicvend-orange" />
-            Endereço
-          </h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            {company.cep && (
-              <div>
-                <dt className="text-[#64748B]">CEP</dt>
-                <dd className="font-medium">{cepFormatted}</dd>
-              </div>
-            )}
-            {enderecoCompleto && (
-              <div>
-                <dt className="text-[#64748B]">Logradouro</dt>
-                <dd className="font-medium">{enderecoCompleto}</dd>
-              </div>
-            )}
-            {company.bairro && (
-              <div>
-                <dt className="text-[#64748B]">Bairro</dt>
-                <dd className="font-medium">{company.bairro}</dd>
-              </div>
-            )}
-            {cidadeUf && (
-              <div>
-                <dt className="text-[#64748B]">Cidade/UF</dt>
-                <dd className="font-medium">{cidadeUf}</dd>
-              </div>
-            )}
-            {!company.cep && !enderecoCompleto && !company.bairro && !cidadeUf && (
-              <p className="text-[#94A3B8]">Nenhum endereço cadastrado.</p>
-            )}
-          </dl>
+          )}
         </div>
       </div>
     </div>

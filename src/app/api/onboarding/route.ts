@@ -104,6 +104,7 @@ export async function POST(request: Request) {
     }
   }
 
+  // is_platform_owner NUNCA no cadastro — só pode ser setado manualmente no Supabase
   const companyInsert: Record<string, unknown> = {
     name,
     slug: finalSlug,

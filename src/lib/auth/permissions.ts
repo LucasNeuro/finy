@@ -41,6 +41,11 @@ export const PERMISSIONS = {
   crm: { view: "crm.view", manage: "crm.manage" },
   // Envio em massa (fila de envio / broadcast)
   broadcast: { view: "broadcast.view", manage: "broadcast.manage" },
+  // Multicálculo de Seguros
+  insurance_multicalculo: {
+    view: "insurance_multicalculo.view",
+    manage: "insurance_multicalculo.manage",
+  },
   // Perfil (próprio perfil / link de acesso / foto)
   profile: { view: "profile.view" },
 } as const;
@@ -57,6 +62,7 @@ export type PermissionKey =
   | (typeof PERMISSIONS)["tags"][keyof (typeof PERMISSIONS)["tags"]]
   | (typeof PERMISSIONS)["crm"][keyof (typeof PERMISSIONS)["crm"]]
   | (typeof PERMISSIONS)["broadcast"][keyof (typeof PERMISSIONS)["broadcast"]]
+  | (typeof PERMISSIONS)["insurance_multicalculo"][keyof (typeof PERMISSIONS)["insurance_multicalculo"]]
   | (typeof PERMISSIONS)["profile"][keyof (typeof PERMISSIONS)["profile"]];
 
 const ALL_PERMISSION_KEYS: PermissionKey[] = [
@@ -91,6 +97,8 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.crm.manage,
   PERMISSIONS.broadcast.view,
   PERMISSIONS.broadcast.manage,
+  PERMISSIONS.insurance_multicalculo.view,
+  PERMISSIONS.insurance_multicalculo.manage,
   PERMISSIONS.profile.view,
 ];
 
@@ -157,6 +165,10 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
     keys: [PERMISSIONS.broadcast.view, PERMISSIONS.broadcast.manage],
   },
   {
+    label: "Módulo Multicálculo de Seguros",
+    keys: [PERMISSIONS.insurance_multicalculo.view, PERMISSIONS.insurance_multicalculo.manage],
+  },
+  {
     label: "Perfil (próprio perfil da empresa)",
     keys: [PERMISSIONS.profile.view],
   },
@@ -194,6 +206,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.crm.manage]: "Ação: gerenciar CRM Comercial (carteiras, distribuição e painel)",
   [PERMISSIONS.broadcast.view]: "Acesso: ver Envio em massa (fila de envio)",
   [PERMISSIONS.broadcast.manage]: "Ação: gerenciar Envio em massa (adicionar/remover e disparar)",
+  [PERMISSIONS.insurance_multicalculo.view]: "Acesso: ver módulo Multicálculo de Seguros",
+  [PERMISSIONS.insurance_multicalculo.manage]: "Ação: gerenciar módulo Multicálculo de Seguros",
   [PERMISSIONS.profile.view]: "Acesso: ver Perfil (próprio perfil, link de acesso, foto)",
 };
 

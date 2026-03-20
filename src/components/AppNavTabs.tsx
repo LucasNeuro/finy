@@ -15,12 +15,19 @@ import {
   UserCog,
   Ticket,
   ChartLine,
+  Shield,
+  ShieldCheck,
 } from "lucide-react";
 
 const fetcher = (url: string, slug: string) =>
   fetch(url, { credentials: "include", headers: { "X-Company-Slug": slug } }).then((r) => r.json());
 
 const PERMISSIONS_KEY = "/api/auth/permissions";
+const PLATFORM_OWNER_KEY = "/api/auth/platform-owner";
+const platformOwnerFetcher = (url: string) =>
+  fetch(url, { credentials: "include" })
+    .then((r) => r.json())
+    .catch(() => ({ isPlatformOwner: false }));
 /** Cache de permissões para a barra de abas carregar rápido (evita “demora”) */
 const swrOpts = { revalidateOnFocus: false, dedupingInterval: 60_000 };
 
@@ -41,7 +48,15 @@ const ALL_TABS = [
   // Tags
   { href: "/tags", label: "Tags", icon: Tag, requires: "tags.view" as const },
   { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.view" as const },
+  {
+    href: "/multicalculo",
+    label: "Multicálculo",
+    icon: ShieldCheck,
+    requires: "insurance_multicalculo.view" as const,
+    featureFlag: "multicalculo_seguros_enabled" as const,
+  },
   { href: "/perfil", label: "Perfil", icon: Settings, requires: "profile.view" as const },
+  { href: "/super-admin", label: "Super Admin", icon: Shield, requires: "platformOwner" as const },
 ];
 
 export function AppNavTabs() {
@@ -50,22 +65,39 @@ export function AppNavTabs() {
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
 
-  const { data } = useSWR<{ permissions?: string[] }>(
+  const { data } = useSWR<{ permissions?: string[]; multicalculo_seguros_enabled?: boolean }>(
     base ? [PERMISSIONS_KEY, slug] : null,
     ([url]) => fetcher(url, slug),
     swrOpts
   );
+  const { data: platformOwnerData } = useSWR<{ isPlatformOwner?: boolean }>(
+    base ? PLATFORM_OWNER_KEY : null,
+    platformOwnerFetcher,
+    swrOpts
+  );
   const permissions = Array.isArray(data?.permissions) ? data.permissions : [];
+  const multicalculoEnabled = data?.multicalculo_seguros_enabled === true;
+  const isPlatformOwner = platformOwnerData?.isPlatformOwner === true;
 
   const tabs = useMemo(() => {
     return ALL_TABS.filter((t) => {
       if (!("requires" in t) || !t.requires) return true;
+      if (t.requires === "platformOwner") return isPlatformOwner;
+      if ("featureFlag" in t && t.featureFlag === "multicalculo_seguros_enabled" && !multicalculoEnabled) {
+        return false;
+      }
       if (t.href === "/cargos-usuarios") {
         return permissions.includes("users.view") || permissions.includes("users.manage");
       }
+      if (t.href === "/multicalculo") {
+        return (
+          permissions.includes("insurance_multicalculo.view") ||
+          permissions.includes("insurance_multicalculo.manage")
+        );
+      }
       return permissions.includes(t.requires);
     });
-  }, [permissions]);
+  }, [permissions, isPlatformOwner, multicalculoEnabled]);
 
   if (!base) return null;
 
@@ -74,14 +106,19 @@ export function AppNavTabs() {
       {tabs.map(({ href, label, icon: Icon }) => {
         const fullHref = `${base}${href}`;
         const isActive = pathname === fullHref || (href !== "/" && pathname?.startsWith(fullHref));
+        const isMulticalculo = href === "/multicalculo";
+        const activeClass = isMulticalculo
+          ? "bg-violet-400/35 text-violet-100 ring-1 ring-violet-300/60 shadow-sm shadow-violet-900/20"
+          : "bg-emerald-600/30 text-emerald-300 ring-1 ring-emerald-500/50";
+        const inactiveHover = isMulticalculo
+          ? "hover:bg-violet-500/15 hover:text-violet-100/95"
+          : "hover:bg-white/5 hover:text-white";
         return (
           <Link
             key={href}
             href={fullHref}
             className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 ${
-              isActive
-                ? "bg-emerald-600/30 text-emerald-300 ring-1 ring-emerald-500/50"
-                : "text-white/70 hover:bg-white/5 hover:text-white"
+              isActive ? activeClass : `text-white/70 ${inactiveHover}`
             }`}
           >
             <Icon className="h-4 w-4 shrink-0" />

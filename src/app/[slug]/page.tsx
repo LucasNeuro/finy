@@ -1,10 +1,12 @@
 import { redirect } from "next/navigation";
 
-export default function SlugHomePage({
+export default async function SlugHomePage({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }> | { slug: string };
 }) {
-  const { slug } = params;
+  const resolved = await Promise.resolve(params);
+  const slug = resolved?.slug ?? "";
+  if (!slug) redirect("/login");
   redirect(`/${slug}/conversas`);
 }

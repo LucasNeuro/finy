@@ -24,44 +24,68 @@ function loadEnv() {
 
 loadEnv();
 
-const host = process.env.REDIS_HOST || "redis-15295.c98.us-east-1-4.ec2.cloud.redislabs.com";
-const port = Number(process.env.REDIS_PORT || "15295");
-const username = process.env.REDIS_USERNAME || "default";
-const password = process.env.REDIS_PASSWORD || "";
+function parseRedisHost(hostStr) {
+  const trimmed = String(hostStr || "").trim();
+  const idx = trimmed.lastIndexOf(":");
+  if (idx > 0) {
+    const host = trimmed.slice(0, idx);
+    const port = parseInt(trimmed.slice(idx + 1), 10);
+    if (!Number.isNaN(port)) return { host, port };
+  }
+  return {
+    host: trimmed,
+    port: Number(process.env.REDIS_PORT || "6379"),
+  };
+}
+
+const hostRaw =
+  process.env.REDIS_HOST || "redis-15295.c98.us-east-1-4.ec2.cloud.redislabs.com:15295";
+const { host, port } = parseRedisHost(hostRaw);
+const username = String(process.env.REDIS_USERNAME || "default").trim();
+const password = (process.env.REDIS_PASSWORD || "").trim();
 
 if (!password) {
   console.error("REDIS_PASSWORD não definido no .env");
   process.exit(1);
 }
 
-const client = createClient({
-  username,
-  password,
-  socket: { host, port },
-});
+async function tryConnect(label, clientOptions) {
+  const client = createClient(clientOptions);
+  client.on("error", (err) => console.error(`[${label}] Redis Client Error`, err));
 
-client.on("error", (err) => console.error("Redis Client Error", err));
-
-async function main() {
   try {
     await client.connect();
-    console.log("Conectado ao Redis:", `${host}:${port}`);
+    console.log(`[${label}] Conectado ao Redis: ${host}:${port}`);
 
     await client.set("foo", "bar");
     const result = await client.get("foo");
-    console.log("get('foo') =>", result);
-
-    if (result === "bar") {
-      console.log("OK — Conexão com Redis funcionando.");
-    } else {
-      console.log("ERRO — Valor inesperado.");
-    }
+    console.log(`[${label}] get('foo') =>`, result);
   } catch (err) {
-    console.error("Falha:", err.message);
-    process.exit(1);
+    console.error(`[${label}] Falha:`, err && err.message ? err.message : err);
+    throw err;
   } finally {
-    await client.quit();
+    try {
+      await client.quit();
+    } catch (_) {}
   }
 }
 
-main();
+async function main() {
+  // 1) Com username explícito (como a app faz)
+  try {
+    await tryConnect("username+password", {
+      username,
+      password,
+      socket: { host, port },
+    });
+    return;
+  } catch {}
+
+  // 2) Sem username (alguns setups aceitam AUTH só com senha)
+  await tryConnect("password_only", {
+    password,
+    socket: { host, port },
+  });
+}
+
+main().catch(() => process.exit(1));
