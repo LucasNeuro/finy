@@ -101,7 +101,7 @@ export async function POST(request: Request) {
 
   for (const dueDate of dueDates) {
     const code = expectedCoraCode(companyId, dueDate);
-    const match = items.find((it) => it.code === code);
+    let match: { id?: string; code?: string } | undefined = items.find((it) => it.code === code);
 
     // Se a lista não trouxer code/id, tentamos listar só aquele vencimento.
     if (!match?.id) {
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
       const singleItems = (singleList.items ?? []).filter(Boolean) as { id?: string; code?: string }[];
       const match2 = singleItems.find((it) => it.code === code);
       if (!match2?.id) continue;
-      match = match2 as typeof match;
+      match = match2;
     }
 
     if (!match?.id) continue;
