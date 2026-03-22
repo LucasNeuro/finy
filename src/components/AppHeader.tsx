@@ -82,8 +82,9 @@ export function AppHeader() {
         .catch(() => {});
     const fetchNotifications = () =>
       fetch("/api/notifications?limit=30", { credentials: "include", headers: apiHeaders, cache: "no-store" })
-        .then((r) => r.json())
-        .then((data) => {
+        .then(async (r) => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) return;
           if (Array.isArray(data?.items)) {
             const items = data.items as NotificationItem[];
             setNotifications(items);
@@ -97,7 +98,7 @@ export function AppHeader() {
     const interval = setInterval(() => {
       fetchCounts();
       fetchNotifications();
-    }, 30_000);
+    }, 12_000);
     const onVis = () => {
       if (document.visibilityState === "visible") {
         fetchCounts();
@@ -120,8 +121,9 @@ export function AppHeader() {
     if (!slug || !canShowNewNotifications) return;
     const apiHeaders = { "X-Company-Slug": slug };
     fetch("/api/notifications?limit=30", { credentials: "include", headers: apiHeaders, cache: "no-store" })
-      .then((r) => r.json())
-      .then((data) => {
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return;
         if (Array.isArray(data?.items)) {
           const items = data.items as NotificationItem[];
           setNotifications(items);
@@ -201,7 +203,10 @@ export function AppHeader() {
             >
               <Bell className="h-5 w-5 shrink-0" />
               {notificationsUnread > 0 && (
-                <span className="absolute right-1 top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-clicvend-orange px-1 text-[10px] font-bold leading-none text-white">
+                <span
+                  className="absolute -right-1 -top-1 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-[#EA580C] px-1 text-[11px] font-bold leading-none text-white shadow-md ring-2 ring-white"
+                  aria-hidden
+                >
                   {notificationsUnread > 99 ? "99+" : notificationsUnread}
                 </span>
               )}

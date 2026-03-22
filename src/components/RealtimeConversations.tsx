@@ -181,6 +181,9 @@ export function RealtimeConversations() {
                 body: bodyHint,
               });
             }
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("clicvend:notifications-refresh"));
+            }
             if (mineDebounceRef.current) clearTimeout(mineDebounceRef.current);
             mineDebounceRef.current = setTimeout(() => {
               mineDebounceRef.current = null;
