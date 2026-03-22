@@ -1,11 +1,34 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { addContactToAgenda, getChatDetails, extractContactNameFromDetails } from "@/lib/uazapi/client";
+import {
+  addContactToAgendaWithRetries,
+  getChatDetails,
+  extractContactNameFromDetails,
+  isTransientContactAddError,
+} from "@/lib/uazapi/client";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { upsertChannelContactNoDuplicate } from "@/lib/channel-contacts";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+
+const PLATFORM_ONLY_FALLBACK =
+  process.env.BULK_ADD_PLATFORM_ONLY_FALLBACK === "true" ||
+  process.env.BULK_ADD_PLATFORM_ONLY_FALLBACK === "1";
+
+function humanizeContactAddError(raw: string): string {
+  if (raw.includes("critical_unblock") || raw.includes("internal-server-error")) {
+    return (
+      "WhatsApp retornou erro interno ao sincronizar o contato na agenda do aparelho. " +
+      "Tente de novo em alguns minutos. " +
+      "(Detalhe técnico: " +
+      raw.slice(0, 200) +
+      (raw.length > 200 ? "…" : "") +
+      ")"
+    );
+  }
+  return raw;
+}
 
 /**
  * POST /api/contacts/add-to-agenda
@@ -42,10 +65,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Canal não encontrado" }, { status: 404 });
   }
 
-  const result = await addContactToAgenda(resolved.token, number, name || number);
-  if (!result.ok) {
+  const result = await addContactToAgendaWithRetries(resolved.token, number, name || number);
+  let waOk = result.ok;
+  let platformOnly = false;
+  if (!waOk && PLATFORM_ONLY_FALLBACK && isTransientContactAddError(result.error)) {
+    waOk = true;
+    platformOnly = true;
+  }
+  if (!waOk) {
     return NextResponse.json(
-      { error: result.error ?? "Falha ao adicionar à agenda" },
+      {
+        error: humanizeContactAddError(result.error ?? "Falha ao adicionar à agenda"),
+      },
       { status: 502 }
     );
   }
@@ -96,5 +127,16 @@ export async function POST(request: Request) {
     await invalidateConversationList(companyId);
   }
 
-  return NextResponse.json(result.data ?? { ok: true });
+  const waPayload =
+    typeof result.data === "object" && result.data !== null && !Array.isArray(result.data)
+      ? (result.data as Record<string, unknown>)
+      : {};
+  return NextResponse.json({
+    ...waPayload,
+    ok: true,
+    platform_only: platformOnly ? true : undefined,
+    hint: platformOnly
+      ? "Contato salvo só na plataforma; sincronize na agenda do WhatsApp depois se precisar."
+      : undefined,
+  });
 }

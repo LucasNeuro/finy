@@ -1298,6 +1298,27 @@ export default function ConversaThreadPage({
   const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
+  /** Ao abrir o chat, marca notificações desta conversa como lidas (sino no header). */
+  useEffect(() => {
+    const id = resolved?.id;
+    if (!id || !slug) return;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Company-Slug": slug,
+    };
+    fetch("/api/notifications/mark-conversation-read", {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify({ conversation_id: id }),
+    })
+      .then(() => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("clicvend:notifications-refresh"));
+        }
+      })
+      .catch(() => {});
+  }, [resolved?.id, slug]);
 
   const focusMode = useInboxStore((s) => s.focusMode);
   const setFocusMode = useInboxStore((s) => s.setFocusMode);

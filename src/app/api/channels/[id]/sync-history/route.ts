@@ -11,7 +11,8 @@ import { NextResponse } from "next/server";
 
 /**
  * POST /api/channels/[id]/sync-history
- * Sincroniza histórico de mensagens apenas para conversas que já existem (criadas pelo webhook).
+ * Sincroniza até SYNC_HISTORY_MAX_MESSAGES_PER_CHAT mensagens por conversa (default 250), apenas
+ * para conversas que já existem (criadas pelo webhook).
  * Não cria conversas novas: assim Novos/Filas só recebem chamados de mensagens novas.
  * Atualiza channel_groups com nome de grupos; mensagens antigas são inseridas só em conversas existentes.
  * Pode ser chamado pelo usuário (auth + permission) ou internamente (X-Internal-Sync-Secret).
@@ -78,6 +79,11 @@ export async function POST(
 
   const MAX_MESSAGES_PER_INSTANCE = 15_000;
   const MESSAGES_PAGE_SIZE = 100;
+  const parsedPerChat = Number(process.env.SYNC_HISTORY_MAX_MESSAGES_PER_CHAT);
+  const MAX_MESSAGES_PER_CHAT =
+    Number.isFinite(parsedPerChat) && parsedPerChat > 0
+      ? Math.min(5000, Math.floor(parsedPerChat))
+      : 250;
 
   const chats = chatsData.chats as UazapiChat[];
   let conversationsCreated = 0;
@@ -177,8 +183,12 @@ export async function POST(
     };
     let msgOffset = 0;
     let latestSentAt = 0;
+    let chatMessagesInserted = 0;
 
-    while (messagesInserted < MAX_MESSAGES_PER_INSTANCE) {
+    while (
+      messagesInserted < MAX_MESSAGES_PER_INSTANCE &&
+      chatMessagesInserted < MAX_MESSAGES_PER_CHAT
+    ) {
       const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, {
         limit: MESSAGES_PAGE_SIZE,
         offset: msgOffset,
@@ -187,6 +197,7 @@ export async function POST(
       if (messages.length === 0) break;
 
       for (const msg of messages) {
+        if (chatMessagesInserted >= MAX_MESSAGES_PER_CHAT) break;
         const fromMe = msg.fromMe === true;
         const body = (msg.body ?? msg.text ?? "").toString().trim();
         const rawType = (msg.type ?? msg.mediaType ?? "") as string;
@@ -237,9 +248,13 @@ export async function POST(
         if (msgFileName && typeof msgFileName === "string") insertPayload.file_name = msgFileName.slice(0, 255);
 
         const { error: msgInsErr } = await supabase.from("messages").insert(insertPayload);
-        if (!msgInsErr) messagesInserted++;
+        if (!msgInsErr) {
+          messagesInserted++;
+          chatMessagesInserted++;
+        }
       }
 
+      if (chatMessagesInserted >= MAX_MESSAGES_PER_CHAT) break;
       if (messages.length < MESSAGES_PAGE_SIZE) break;
       msgOffset += MESSAGES_PAGE_SIZE;
     }

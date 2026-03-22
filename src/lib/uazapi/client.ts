@@ -691,6 +691,57 @@ export async function blockChat(
  * phone: formato internacional (ex: 5511999999999) ou JID.
  * name: nome completo (usado como primeiro nome e nome completo).
  */
+/** Erros comuns do motor WhatsApp (UAZAPI) ao adicionar contato — costumam ser transitórios. */
+export function isTransientContactAddError(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("internal-server-error") ||
+    m.includes("critical_unblock") ||
+    /\b500\b/.test(m) ||
+    m.includes("timeout") ||
+    m.includes("econnreset") ||
+    m.includes("etimedout") ||
+    m.includes("rate") ||
+    m.includes("too many")
+  );
+}
+
+/**
+ * Adiciona contato à agenda do WhatsApp com retentativas (erros transitórios do WhatsApp).
+ */
+export async function addContactToAgendaWithRetries(
+  token: string,
+  phone: string,
+  name: string,
+  opts?: { maxAttempts?: number; delaysMs?: number[] }
+): Promise<{ ok: boolean; data?: unknown; error?: string; attempts: number }> {
+  const maxAttempts = Math.max(1, Math.min(5, opts?.maxAttempts ?? 3));
+  const delays = opts?.delaysMs ?? [0, 1200, 2800];
+  const number = phone.trim().replace(/@s\.whatsapp\.net$/, "");
+  const displayName = (name || number).trim();
+  let lastError: string | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const wait = delays[Math.min(attempt, delays.length - 1)] ?? 0;
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    const { data, ok, error, status } = await uazapiFetch("/contact/add", {
+      method: "POST",
+      token,
+      body: { phone: number, name: displayName },
+    });
+    if (ok) {
+      return { ok: true, data, attempts: attempt + 1 };
+    }
+    lastError = error ?? `HTTP ${status}`;
+    if (!isTransientContactAddError(lastError)) {
+      return { ok: false, error: lastError, attempts: attempt + 1 };
+    }
+  }
+  return { ok: false, error: lastError, attempts: maxAttempts };
+}
+
 export async function addContactToAgenda(
   token: string,
   phone: string,

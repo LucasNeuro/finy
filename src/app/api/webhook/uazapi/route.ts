@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { upsertInboxNotificationsForIncomingMessage } from "@/lib/notifications/inbox-incoming";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 import {
   normalizeWhatsAppJid,
@@ -669,6 +670,14 @@ async function processOneMessage(
         const gPrev = Array.isArray((gConv as { messages_snapshot?: unknown } | null)?.messages_snapshot) ? (gConv as { messages_snapshot: unknown[] }).messages_snapshot : [];
         const gNew = [...gPrev, insertedGroupMsg].slice(-1000);
         await supabase.from("conversations").update({ messages_snapshot: gNew, updated_at: new Date().toISOString() }).eq("id", conversationId);
+        if (!fromMe && !isHistoryEvent) {
+          await upsertInboxNotificationsForIncomingMessage(supabase, {
+            companyId,
+            conversationId,
+            messagePreview: finalContent || `[${finalMessageType}]`,
+            isGroup: true,
+          }).catch((e) => console.error("[WEBHOOK] inbox notifications (grupo)", e));
+        }
       }
       await Promise.all([
         invalidateConversationList(companyId),
@@ -935,6 +944,15 @@ async function processOneMessage(
       .eq("id", conversationId);
 
     console.log("[WEBHOOK] Mensagem inserida com sucesso:", { conversationId, direction: fromMe ? "out" : "in" });
+
+    if (!fromMe && !isHistoryEvent) {
+      await upsertInboxNotificationsForIncomingMessage(supabase, {
+        companyId,
+        conversationId,
+        messagePreview: finalContent || `[${finalMessageType}]`,
+        isGroup: false,
+      }).catch((e) => console.error("[WEBHOOK] inbox notifications (ticket)", e));
+    }
 
     await Promise.all([
       invalidateConversationList(companyId),

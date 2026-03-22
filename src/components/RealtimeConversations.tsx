@@ -5,6 +5,11 @@ import { usePathname } from "next/navigation";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { queryKeys } from "@/lib/query-keys";
+import {
+  getDesktopNotifyEnabled,
+  requestNotificationPermission,
+  showIncomingChatDesktopNotification,
+} from "@/lib/browser-desktop-notification";
 
 /** Debounce (ms): evita enxurrada de invalidações quando muitas mensagens entram. */
 const INVALIDATE_DEBOUNCE_MS = 1200;
@@ -84,7 +89,7 @@ export function RealtimeConversations() {
   const currentUserId = (permissionsData as { user_id?: string } | undefined)?.user_id ?? null;
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
 
-  // Desbloqueia áudio no primeiro clique (política de autoplay do navegador)
+  // Desbloqueia áudio no primeiro clique + pede permissão de notificação uma vez (sem UI no sino).
   useEffect(() => {
     const unlock = () => {
       if (typeof window === "undefined") return;
@@ -92,6 +97,9 @@ export function RealtimeConversations() {
       if (!Ctx) return;
       const ctx = new Ctx();
       if (ctx.state === "suspended") ctx.resume();
+      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        void requestNotificationPermission();
+      }
     };
     window.addEventListener("click", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
@@ -127,8 +135,25 @@ export function RealtimeConversations() {
           table: "conversations",
           filter: `company_id=eq.${companyId}`,
         },
-        (payload: { new?: { id?: string; last_message_at?: string; assigned_to?: string | null }; old?: { last_message_at?: string } }) => {
-          const newRow = payload?.new as { id?: string; last_message_at?: string; assigned_to?: string | null } | undefined;
+        (payload: {
+          new?: {
+            id?: string;
+            last_message_at?: string;
+            assigned_to?: string | null;
+            customer_name?: string | null;
+            customer_phone?: string | null;
+          };
+          old?: { last_message_at?: string };
+        }) => {
+          const newRow = payload?.new as
+            | {
+                id?: string;
+                last_message_at?: string;
+                assigned_to?: string | null;
+                customer_name?: string | null;
+                customer_phone?: string | null;
+              }
+            | undefined;
           const id = newRow?.id;
           const lastMsgAt = newRow?.last_message_at;
           const assignedTo = newRow?.assigned_to ?? null;
@@ -141,6 +166,21 @@ export function RealtimeConversations() {
 
           if (isRecentMessage && isOtherConversation && (isMyConversation || isUnassignedNew)) {
             playNewMessageSound();
+            if (id && slug && getDesktopNotifyEnabled()) {
+              const displayName =
+                (newRow?.customer_name && String(newRow.customer_name).trim()) ||
+                (newRow?.customer_phone && String(newRow.customer_phone).trim()) ||
+                "Nova mensagem";
+              const bodyHint = isUnassignedNew
+                ? "Novo na fila — abra o chat no ClicVend."
+                : "Nova mensagem — abra o chat no ClicVend.";
+              showIncomingChatDesktopNotification({
+                slug,
+                conversationId: id,
+                title: displayName,
+                body: bodyHint,
+              });
+            }
             if (mineDebounceRef.current) clearTimeout(mineDebounceRef.current);
             mineDebounceRef.current = setTimeout(() => {
               mineDebounceRef.current = null;

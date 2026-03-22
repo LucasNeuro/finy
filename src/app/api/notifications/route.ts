@@ -13,6 +13,7 @@ type NotificationRow = {
   data: unknown;
   is_read: boolean;
   created_at: string;
+  conversation_id?: string | null;
 };
 
 /**
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
   let query = supabase
     .from("notifications")
     .select(
-      "id, company_id, user_id, kind, title, body, link, data, is_read, created_at",
+      "id, company_id, user_id, kind, title, body, link, data, is_read, created_at, conversation_id",
       { count: "exact" }
     )
     .eq("company_id", companyId)
@@ -65,8 +66,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Erro ao carregar notificações" }, { status: 500 });
   }
 
-  const rows = (data ?? []) as NotificationRow[];
-  const unread = rows.filter((n) => !n.is_read).length;
+  const rows = (data ?? []) as (NotificationRow & { conversation_id?: string | null })[];
+
+  const { count: unreadTotal, error: unreadErr } = await supabase
+    .from("notifications")
+    .select("*", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("user_id", user.id)
+    .eq("is_read", false);
+
+  if (unreadErr) {
+    console.error("[notifications] GET unread count error", unreadErr);
+  }
+
+  const unread = typeof unreadTotal === "number" ? unreadTotal : rows.filter((n) => !n.is_read).length;
 
   return NextResponse.json({
     items: rows,

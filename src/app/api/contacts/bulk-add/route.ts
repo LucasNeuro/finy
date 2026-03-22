@@ -1,6 +1,11 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { addContactToAgenda, getChatDetails, extractContactNameFromDetails } from "@/lib/uazapi/client";
+import {
+  addContactToAgendaWithRetries,
+  getChatDetails,
+  extractContactNameFromDetails,
+  isTransientContactAddError,
+} from "@/lib/uazapi/client";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { upsertChannelContactNoDuplicate } from "@/lib/channel-contacts";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
@@ -9,6 +14,25 @@ import { NextResponse } from "next/server";
 
 const MAX_PER_REQUEST = 90;
 const ENRICH_DELAY_MS = 120; // delay entre chamadas getChatDetails para evitar rate limit
+
+/** Se true, quando /contact/add falhar após retentativas, grava só em channel_contacts (lista na plataforma). */
+const PLATFORM_ONLY_FALLBACK =
+  process.env.BULK_ADD_PLATFORM_ONLY_FALLBACK === "true" ||
+  process.env.BULK_ADD_PLATFORM_ONLY_FALLBACK === "1";
+
+function humanizeContactAddError(raw: string): string {
+  if (raw.includes("critical_unblock") || raw.includes("internal-server-error")) {
+    return (
+      "WhatsApp retornou erro interno ao sincronizar o contato na agenda do aparelho. " +
+      "Tente de novo em alguns minutos ou importe em lotes menores. " +
+      "(Detalhe técnico: " +
+      raw.slice(0, 200) +
+      (raw.length > 200 ? "…" : "") +
+      ")"
+    );
+  }
+  return raw;
+}
 
 /**
  * POST /api/contacts/bulk-add
@@ -60,6 +84,7 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   let ok = 0;
   let fail = 0;
+  let platformOnly = 0;
   let firstError: string | null = null;
   const addedJids: string[] = [];
 
@@ -75,10 +100,17 @@ export async function POST(request: Request) {
     }
 
     try {
-      const result = await addContactToAgenda(resolved.token, number, name);
-      if (!result.ok) {
+      const result = await addContactToAgendaWithRetries(resolved.token, number, name);
+      let waOk = result.ok;
+      if (!waOk && PLATFORM_ONLY_FALLBACK && isTransientContactAddError(result.error)) {
+        waOk = true;
+        platformOnly++;
+      }
+      if (!waOk) {
         fail++;
-        if (!firstError) firstError = result.error ?? "Falha ao adicionar um dos contatos.";
+        if (!firstError) {
+          firstError = humanizeContactAddError(result.error ?? "Falha ao adicionar um dos contatos.");
+        }
         continue;
       }
 
@@ -158,6 +190,11 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok,
     fail,
+    platform_only: platformOnly > 0 ? platformOnly : undefined,
     error: firstError ?? undefined,
+    hint:
+      platformOnly > 0
+        ? "Alguns contatos foram salvos só na plataforma (BULK_ADD_PLATFORM_ONLY_FALLBACK). Sincronize a agenda no WhatsApp depois, se precisar."
+        : undefined,
   });
 }
