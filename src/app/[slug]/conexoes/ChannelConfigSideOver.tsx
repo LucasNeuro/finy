@@ -107,6 +107,7 @@ export function ChannelConfigSideOver({
   const [connectPhone, setConnectPhone] = useState("");
   const [connectedNumber, setConnectedNumber] = useState<string | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(false);
+  const [syncingHistory, setSyncingHistory] = useState(false);
 
   const [queueId, setQueueId] = useState<string>(channelQueueId ?? "");
   const [queueSaving, setQueueSaving] = useState(false);
@@ -774,6 +775,45 @@ export function ChannelConfigSideOver({
                   )}
                   <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens. Novas mensagens e grupos entram automaticamente nas filas.</p>
                 </div>
+                <button
+                  type="button"
+                  disabled={syncingHistory}
+                  onClick={async () => {
+                    setSyncingHistory(true);
+                    setError("");
+                    try {
+                      const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/sync-history`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", ...apiHeaders },
+                        credentials: "include",
+                        body: JSON.stringify({
+                          create_missing: true,
+                          messages_per_chat: 200,
+                        }),
+                      });
+                      const data = await r.json().catch(() => ({}));
+                      if (!r.ok) {
+                        setError(data?.error ?? "Falha ao sincronizar histórico");
+                      } else {
+                        onSaved?.();
+                      }
+                    } catch {
+                      setError("Erro de rede ao sincronizar histórico");
+                    } finally {
+                      setSyncingHistory(false);
+                    }
+                  }}
+                  className="w-full rounded-lg border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
+                >
+                  {syncingHistory ? (
+                    <>
+                      <Loader2 className="inline h-4 w-4 animate-spin" />{" "}
+                      Sincronizando histórico...
+                    </>
+                  ) : (
+                    "Sincronizar histórico antigo (até 200 msgs/conversa)"
+                  )}
+                </button>
               </div>
             ) : connectStatus === "connecting" || qrcode || paircode ? (
               <>

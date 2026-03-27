@@ -4,6 +4,20 @@ import { createClient } from "@/lib/supabase/server";
 
 /** Máximo de respostas rápidas por fila (uso no chat pelos agentes). Independente da UAZAPI (WhatsApp permite só 1 por instância). */
 const MAX_QUICK_REPLIES_PER_QUEUE = 40;
+const QUICK_REPLIES_SELECT_BASE =
+  "id, uazapi_id, short_cut, type, text, file, doc_name, on_whatsapp, enabled, created_at, updated_at";
+const QUICK_REPLIES_SELECT_WITH_TEMPLATE =
+  `${QUICK_REPLIES_SELECT_BASE}, template_category, template_config`;
+
+function isMissingTemplateColumnsError(error: unknown): boolean {
+  const msg = String((error as { message?: string } | null)?.message ?? "").toLowerCase();
+  return msg.includes("template_category") || msg.includes("template_config");
+}
+
+function isMissingQuickReplyChannelsTableError(error: unknown): boolean {
+  const msg = String((error as { message?: string } | null)?.message ?? "").toLowerCase();
+  return msg.includes("quick_reply_channels");
+}
 
 /**
  * GET /api/quick-replies
@@ -24,21 +38,39 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from("quick_replies")
-    .select("id, uazapi_id, short_cut, type, text, file, doc_name, on_whatsapp, enabled, created_at, updated_at, quick_reply_queues(queue_id)")
+    .select(`${QUICK_REPLIES_SELECT_WITH_TEMPLATE}, quick_reply_queues(queue_id)`)
     .eq("company_id", companyId);
 
   if (queueId) {
     query = query.eq("quick_reply_queues.queue_id", queueId);
   }
 
-  const { data: quickReplies, error } = await query;
+  let quickReplies: any[] | null = null;
+  let error: { message?: string } | null = null;
+  {
+    const first = await query;
+    quickReplies = (first.data ?? null) as any[] | null;
+    error = first.error as { message?: string } | null;
+  }
+  if (error && isMissingTemplateColumnsError(error)) {
+    let fallbackQuery = supabase
+      .from("quick_replies")
+      .select(`${QUICK_REPLIES_SELECT_BASE}, quick_reply_queues(queue_id)`)
+      .eq("company_id", companyId);
+    if (queueId) fallbackQuery = fallbackQuery.eq("quick_reply_queues.queue_id", queueId);
+    const fallback = await fallbackQuery;
+    quickReplies = (fallback.data ?? null) as any[] | null;
+    error = fallback.error as { message?: string } | null;
+  }
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   // Buscar canais vinculados às filas para exibir na listagem
   const allQueueIds = new Set<string>();
+  const allQuickReplyIds = new Set<string>();
   quickReplies?.forEach((qr: any) => {
+    if (qr?.id) allQuickReplyIds.add(String(qr.id));
     if (Array.isArray(qr.quick_reply_queues)) {
       qr.quick_reply_queues.forEach((q: any) => {
         if (q.queue_id) allQueueIds.add(q.queue_id);
@@ -68,6 +100,27 @@ export async function GET(request: Request) {
     });
   }
 
+  // Canais vinculados diretamente à resposta (necessário para consentimento por instância)
+  const directChannelsByReply = new Map<string, Array<{ id: string; name: string }>>();
+  if (allQuickReplyIds.size > 0) {
+    const { data: directRows, error: directErr } = await supabase
+      .from("quick_reply_channels")
+      .select("quick_reply_id, channels(id, name)")
+      .eq("company_id", companyId)
+      .in("quick_reply_id", Array.from(allQuickReplyIds));
+    if (!directErr || !isMissingQuickReplyChannelsTableError(directErr)) {
+      for (const row of (directRows ?? []) as Array<{ quick_reply_id: string; channels: { id?: string; name?: string } | { id?: string; name?: string }[] | null }>) {
+        const channelObj = Array.isArray(row.channels) ? row.channels[0] : row.channels;
+        if (!row.quick_reply_id || !channelObj?.id) continue;
+        const list = directChannelsByReply.get(row.quick_reply_id) ?? [];
+        if (!list.find((c) => c.id === channelObj.id)) {
+          list.push({ id: channelObj.id, name: channelObj.name ?? channelObj.id });
+        }
+        directChannelsByReply.set(row.quick_reply_id, list);
+      }
+    }
+  }
+
   const items = (quickReplies ?? []).map((row: any) => {
     const queueIds = Array.isArray(row.quick_reply_queues)
       ? row.quick_reply_queues.map((q: any) => q.queue_id as string)
@@ -75,7 +128,9 @@ export async function GET(request: Request) {
 
     // Resolver canais únicos
     const channelsMap = new Map<string, string>();
-    queueIds.forEach((qid) => {
+    const direct = directChannelsByReply.get(String(row.id)) ?? [];
+    direct.forEach((c) => channelsMap.set(c.id, c.name));
+    queueIds.forEach((qid: string) => {
       const chans = queueChannelsMap[qid];
       if (chans) {
         chans.forEach((c) => channelsMap.set(c.id, c.name));
@@ -93,6 +148,8 @@ export async function GET(request: Request) {
       docName: row.doc_name as string | null,
       onWhatsApp: Boolean(row.on_whatsapp),
       enabled: row.enabled !== false,
+      templateCategory: (row.template_category as string | null) ?? "general",
+      templateConfig: (row.template_config as Record<string, unknown> | null) ?? {},
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
       queueIds,
@@ -136,13 +193,24 @@ export async function POST(request: Request) {
 
   // Apenas toggle enabled (atualização local).
   if (quickReplyId && enabledPayload !== undefined && !del) {
-    const { data: updated, error: updateError } = await supabase
+    let toggleRes = await supabase
       .from("quick_replies")
       .update({ enabled: enabledPayload, updated_at: new Date().toISOString() })
       .eq("id", quickReplyId)
       .eq("company_id", companyId)
-      .select("id, uazapi_id, short_cut, type, text, file, doc_name, on_whatsapp, enabled, created_at, updated_at")
+      .select(QUICK_REPLIES_SELECT_WITH_TEMPLATE)
       .single();
+    if (toggleRes.error && isMissingTemplateColumnsError(toggleRes.error)) {
+      toggleRes = await supabase
+        .from("quick_replies")
+        .update({ enabled: enabledPayload, updated_at: new Date().toISOString() })
+        .eq("id", quickReplyId)
+        .eq("company_id", companyId)
+        .select(QUICK_REPLIES_SELECT_BASE)
+        .single();
+    }
+    const updated = toggleRes.data as Record<string, unknown> | null;
+    const updateError = toggleRes.error;
 
     if (updateError || !updated) {
       return NextResponse.json(
@@ -167,6 +235,8 @@ export async function POST(request: Request) {
       docName: updated.doc_name,
       onWhatsApp: Boolean(updated.on_whatsapp),
       enabled: updated.enabled !== false,
+      templateCategory: (updated.template_category as string | null) ?? "general",
+      templateConfig: (updated.template_config as Record<string, unknown> | null) ?? {},
       createdAt: updated.created_at,
       updatedAt: updated.updated_at,
       queueIds,
@@ -208,9 +278,17 @@ export async function POST(request: Request) {
   const text = typeof body.text === "string" ? body.text : undefined;
   const file = typeof body.file === "string" ? body.file : undefined;
   const docName = typeof body.docName === "string" ? body.docName : undefined;
+  const templateCategoryRaw = typeof body.templateCategory === "string" ? body.templateCategory.trim().toLowerCase() : "general";
+  const templateCategory =
+    templateCategoryRaw === "consent" || templateCategoryRaw === "campaign" ? templateCategoryRaw : "general";
+  const templateConfig =
+    body.templateConfig && typeof body.templateConfig === "object" && !Array.isArray(body.templateConfig)
+      ? (body.templateConfig as Record<string, unknown>)
+      : {};
   const queueIds = Array.isArray(body.queueIds)
     ? (body.queueIds as string[]).map((q) => q.trim()).filter(Boolean)
     : [];
+  const channelId = typeof body.channel_id === "string" ? body.channel_id.trim() : "";
   const enabled = typeof body.enabled === "boolean" ? body.enabled : true;
 
   if (!shortCut || !type) {
@@ -274,7 +352,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Resposta rápida não encontrada" }, { status: 404 });
     }
 
-    const { error: updateError } = await supabase
+    const updateAttempt = await supabase
       .from("quick_replies")
       .update({
         short_cut: shortCut,
@@ -283,10 +361,29 @@ export async function POST(request: Request) {
         file: file ?? null,
         doc_name: docName ?? null,
         enabled,
+        template_category: templateCategory,
+        template_config: templateConfig,
         updated_at: now,
       })
       .eq("id", quickReplyId)
       .eq("company_id", companyId);
+    let updateError = updateAttempt.error;
+    if (updateError && isMissingTemplateColumnsError(updateError)) {
+      const fallback = await supabase
+        .from("quick_replies")
+        .update({
+          short_cut: shortCut,
+          type,
+          text: text ?? null,
+          file: file ?? null,
+          doc_name: docName ?? null,
+          enabled,
+          updated_at: now,
+        })
+        .eq("id", quickReplyId)
+        .eq("company_id", companyId);
+      updateError = fallback.error;
+    }
 
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
@@ -315,11 +412,42 @@ export async function POST(request: Request) {
       }
     }
 
-    const { data: updated, error: selectError } = await supabase
+    // Atualiza vínculo direto com canal (instância), usado especialmente para consentimento
+    const { error: delChannelBindingError } = await supabase
+      .from("quick_reply_channels")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("quick_reply_id", quickReplyId);
+    if (delChannelBindingError && !isMissingQuickReplyChannelsTableError(delChannelBindingError)) {
+      return NextResponse.json({ error: delChannelBindingError.message }, { status: 500 });
+    }
+    if (channelId) {
+      const { error: insChannelBindingError } = await supabase
+        .from("quick_reply_channels")
+        .insert({
+          company_id: companyId,
+          quick_reply_id: quickReplyId,
+          channel_id: channelId,
+        });
+      if (insChannelBindingError && !isMissingQuickReplyChannelsTableError(insChannelBindingError)) {
+        return NextResponse.json({ error: insChannelBindingError.message }, { status: 500 });
+      }
+    }
+
+    let updatedResult = await supabase
       .from("quick_replies")
-      .select("id, uazapi_id, short_cut, type, text, file, doc_name, on_whatsapp, enabled, created_at, updated_at")
+      .select(QUICK_REPLIES_SELECT_WITH_TEMPLATE)
       .eq("id", quickReplyId)
       .single();
+    if (updatedResult.error && isMissingTemplateColumnsError(updatedResult.error)) {
+      updatedResult = await supabase
+        .from("quick_replies")
+        .select(QUICK_REPLIES_SELECT_BASE)
+        .eq("id", quickReplyId)
+        .single();
+    }
+    const updated = updatedResult.data as Record<string, unknown> | null;
+    const selectError = updatedResult.error;
 
     if (selectError || !updated) {
       return NextResponse.json({ error: "Erro ao ler resposta atualizada" }, { status: 500 });
@@ -335,6 +463,8 @@ export async function POST(request: Request) {
       docName: updated.doc_name,
       onWhatsApp: Boolean(updated.on_whatsapp),
       enabled: updated.enabled !== false,
+      templateCategory: (updated.template_category as string | null) ?? "general",
+      templateConfig: (updated.template_config as Record<string, unknown> | null) ?? {},
       createdAt: updated.created_at,
       updatedAt: updated.updated_at,
       queueIds,
@@ -342,7 +472,7 @@ export async function POST(request: Request) {
   }
 
   // Criar nova (apenas na aplicação; uazapi_id null).
-  const { data: inserted, error: insertError } = await supabase
+  let insertResult = await supabase
     .from("quick_replies")
     .insert({
       company_id: companyId,
@@ -354,9 +484,30 @@ export async function POST(request: Request) {
       doc_name: docName ?? null,
       on_whatsapp: false,
       enabled,
+      template_category: templateCategory,
+      template_config: templateConfig,
     })
-    .select("id, uazapi_id, short_cut, type, text, file, doc_name, on_whatsapp, enabled, created_at, updated_at")
+    .select(QUICK_REPLIES_SELECT_WITH_TEMPLATE)
     .single();
+  if (insertResult.error && isMissingTemplateColumnsError(insertResult.error)) {
+    insertResult = await supabase
+      .from("quick_replies")
+      .insert({
+        company_id: companyId,
+        uazapi_id: null,
+        short_cut: shortCut,
+        type,
+        text: text ?? null,
+        file: file ?? null,
+        doc_name: docName ?? null,
+        on_whatsapp: false,
+        enabled,
+      })
+      .select(QUICK_REPLIES_SELECT_BASE)
+      .single();
+  }
+  const inserted = insertResult.data as Record<string, unknown> | null;
+  const insertError = insertResult.error;
 
   if (insertError || !inserted) {
     return NextResponse.json(
@@ -381,6 +532,19 @@ export async function POST(request: Request) {
     }
   }
 
+  if (channelId) {
+    const { error: insertChannelBindingError } = await supabase
+      .from("quick_reply_channels")
+      .insert({
+        company_id: companyId,
+        quick_reply_id: insertedId,
+        channel_id: channelId,
+      });
+    if (insertChannelBindingError && !isMissingQuickReplyChannelsTableError(insertChannelBindingError)) {
+      return NextResponse.json({ error: insertChannelBindingError.message }, { status: 500 });
+    }
+  }
+
   return NextResponse.json({
     id: inserted.id,
     uazapiId: inserted.uazapi_id,
@@ -391,6 +555,8 @@ export async function POST(request: Request) {
     docName: inserted.doc_name,
     onWhatsApp: Boolean(inserted.on_whatsapp),
     enabled: inserted.enabled !== false,
+    templateCategory: (inserted.template_category as string | null) ?? "general",
+    templateConfig: (inserted.template_config as Record<string, unknown> | null) ?? {},
     createdAt: inserted.created_at,
     updatedAt: inserted.updated_at,
     queueIds,

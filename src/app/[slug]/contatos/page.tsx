@@ -10,7 +10,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Download, Upload } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Download, Upload, Megaphone, ShieldCheck, History } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SideOver } from "@/components/SideOver";
@@ -70,6 +70,14 @@ function canonicalContactDigits(phone: string | null | undefined, jid: string | 
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) return digits;
   return digits;
+}
+
+type PipelineBlockedReason = "missing_opt_in" | "opted_out" | "invalid_number";
+
+function blockedReasonLabel(reason: PipelineBlockedReason): string {
+  if (reason === "missing_opt_in") return "Sem opt-in";
+  if (reason === "opted_out") return "Opt-out ativo";
+  return "Numero invalido";
 }
 
 /** URL de avatar: se for externa (http/https), usa proxy para evitar CORS/referrer e permitir cache. */
@@ -690,6 +698,9 @@ export default function ContatosPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState<number>(0);
+  /** Importação de chats + mensagens antigas (sync-history), por canal. */
+  const [syncingHistoryChannelId, setSyncingHistoryChannelId] = useState<string | null>(null);
+  const [clearingAgenda, setClearingAgenda] = useState<string | null>(null);
   const [filterChannelId, setFilterChannelId] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"contacts" | "groups" | "blocked" | "communities">("contacts");
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
@@ -734,6 +745,18 @@ export default function ContatosPage() {
     { id: string; name: string; color_hex: string | null; category_name: string; active: boolean }[]
   >([]);
   const [selectedNewContactTagIds, setSelectedNewContactTagIds] = useState<Set<string>>(new Set());
+  const [pipelineSideOverOpen, setPipelineSideOverOpen] = useState(false);
+  const [pipelineDraftName, setPipelineDraftName] = useState("");
+  const [pipelineBatchPlan, setPipelineBatchPlan] = useState("500,300,150");
+  const [pipelineIntervalMinutes, setPipelineIntervalMinutes] = useState(10);
+  const [pipelineWindowStart, setPipelineWindowStart] = useState("08:00");
+  const [pipelineWindowEnd, setPipelineWindowEnd] = useState("20:00");
+  const [pipelineSaving, setPipelineSaving] = useState(false);
+  const [pipelineSaveResult, setPipelineSaveResult] = useState<{
+    selected: number;
+    eligible: number;
+    blocked: number;
+  } | null>(null);
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -783,6 +806,23 @@ export default function ContatosPage() {
       return next;
     });
   };
+
+  const permissionsKey = useMemo(() => (slug ? (["auth-permissions", slug] as const) : null), [slug]);
+  const { data: permissionsPayload } = useSWR(
+    permissionsKey,
+    async ([, s]: readonly [string, string]) => {
+      const r = await fetch("/api/auth/permissions", {
+        credentials: "include",
+        headers: { "X-Company-Slug": s },
+      });
+      return r.json() as Promise<{ permissions?: string[] }>;
+    },
+    { revalidateOnFocus: false, dedupingInterval: 60_000 }
+  );
+  /** Botão destrutivo "Apagar agenda do telefone" — API exige channels.manage e ENABLE_PHONE_AGENDA_WIPE no servidor. */
+  const allowPhoneAgendaWipe =
+    Array.isArray(permissionsPayload?.permissions) &&
+    permissionsPayload.permissions.includes("channels.manage");
 
   const contactsKey = useMemo(() => ["contacts", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
   const groupsKey = useMemo(() => ["groups", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
@@ -845,11 +885,15 @@ export default function ContatosPage() {
         continue;
       }
       const prevScore =
+        (prev.opt_out_at ? 32 : 0) +
+        (prev.opt_in_at ? 16 : 0) +
         (prev.contact_name?.trim() ? 4 : 0) +
         (prev.first_name?.trim() ? 2 : 0) +
         (prev.avatar_url?.trim() ? 2 : 0) +
         (prev.phone?.trim() ? 1 : 0);
       const nextScore =
+        (c.opt_out_at ? 32 : 0) +
+        (c.opt_in_at ? 16 : 0) +
         (c.contact_name?.trim() ? 4 : 0) +
         (c.first_name?.trim() ? 2 : 0) +
         (c.avatar_url?.trim() ? 2 : 0) +
@@ -1034,6 +1078,125 @@ export default function ContatosPage() {
     } finally {
       setSyncing(null);
       setSyncProgress(0);
+    }
+  };
+
+  /** Conversas + mensagens antigas na uazapi; cria contatos 1:1 e conversas que ainda não existem (create_missing). */
+  const handleSyncHistory = async (channelId: string) => {
+    if (syncingHistoryChannelId !== null || syncing !== null || clearingAgenda !== null) return;
+    const label = channels.find((c) => c.id === channelId)?.name ?? channelId.slice(0, 8);
+    if (
+      !window.confirm(
+        `Importar conversas antigas da conexão "${label}"?\n\n` +
+          "• Lista todos os chats que a uazapi retornar (várias páginas).\n" +
+          "• Até 200 mensagens por conversa no chat.\n" +
+          "• Contatos individuais entram na lista de contatos junto com a conversa.\n\n" +
+          "Pode levar alguns minutos. Depois confira em Conversas."
+      )
+    ) {
+      return;
+    }
+    setSyncingHistoryChannelId(channelId);
+    try {
+      const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/sync-history`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
+        body: JSON.stringify({ create_missing: true, messages_per_chat: 200 }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setAlertMessage((data as { error?: string })?.error ?? "Falha ao importar histórico de conversas");
+        return;
+      }
+      const d = data as {
+        chats_processed?: number;
+        conversations_created?: number;
+        messages_processed?: number;
+      };
+      setAlertMessage(
+        `Histórico importado (${label}): ${d.chats_processed ?? 0} chat(s), ${d.conversations_created ?? 0} conversa(s) nova(s), ${d.messages_processed ?? 0} mensagem(ns). Abra Conversas para ver.`
+      );
+      await Promise.all([mutateContacts(), mutateGroups(), mutateCommunities()]);
+      fetchChannels();
+    } catch {
+      setAlertMessage("Erro de rede ao importar histórico");
+    } finally {
+      setSyncingHistoryChannelId(null);
+    }
+  };
+
+  const handleClearLocalContacts = async (channelId: string) => {
+    if (syncing !== null || clearingAgenda !== null) return;
+    const channelLabel = channelName(channelId);
+    if (!window.confirm(`Limpar apenas os contatos locais da conexão "${channelLabel}"? A agenda do telefone não será alterada.`)) {
+      return;
+    }
+    setClearingAgenda(channelId);
+    try {
+      const res = await fetch("/api/contacts/clear-agenda", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ channel_id: channelId, clear_local_cache: true, remove_phone_contacts: false }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAlertMessage(data?.error ?? "Falha ao limpar contatos locais da conexão.");
+        return;
+      }
+      const localDeleted = Number(data?.local_deleted ?? 0);
+      setAlertMessage(
+        `Conexão limpa (${channelLabel}): ${localDeleted} contato(s) local(is) removido(s). A agenda do telefone não foi alterada.`
+      );
+      await Promise.all([mutateContacts(), mutateGroups(), mutateCommunities()]);
+    } catch {
+      setAlertMessage("Erro de rede ao limpar contatos locais da conexão.");
+    } finally {
+      setClearingAgenda(null);
+    }
+  };
+
+  const handleClearPhoneAgenda = async (channelId: string) => {
+    if (syncing !== null || clearingAgenda !== null) return;
+    const channelLabel = channelName(channelId);
+    if (!window.confirm(`ATENÇÃO: limpar agenda do TELEFONE na conexão "${channelLabel}"?`)) {
+      return;
+    }
+    const confirmation = window.prompt(`Para confirmar ação destrutiva, digite LIMPAR TELEFONE`);
+    if ((confirmation || "").trim().toUpperCase() !== "LIMPAR TELEFONE") {
+      setAlertMessage("Confirmação inválida. Limpeza do telefone cancelada.");
+      return;
+    }
+    setClearingAgenda(channelId);
+    try {
+      const res = await fetch("/api/contacts/clear-agenda", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          channel_id: channelId,
+          clear_local_cache: true,
+          remove_phone_contacts: true,
+          confirm_text: "LIMPAR TELEFONE",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAlertMessage(data?.error ?? "Falha ao limpar agenda do telefone.");
+        return;
+      }
+      const removed = Number(data?.removed ?? 0);
+      const failed = Number(data?.failed ?? 0);
+      const localDeleted = Number(data?.local_deleted ?? 0);
+      setAlertMessage(
+        `Agenda do telefone limpa (${channelLabel}): ${removed} removido(s), ${failed} falha(s), ${localDeleted} local(is) removido(s).`
+      );
+      await Promise.all([mutateContacts(), mutateGroups(), mutateCommunities()]);
+    } catch {
+      setAlertMessage("Erro de rede ao limpar agenda do telefone.");
+    } finally {
+      setClearingAgenda(null);
     }
   };
 
@@ -1470,6 +1633,57 @@ export default function ContatosPage() {
       return nameA.localeCompare(nameB);
     });
   }, [filteredContacts, channels]);
+  const selectedContactsForPipeline = useMemo(
+    () => dedupedContacts.filter((c) => selectedContactIds.has(c.id)),
+    [dedupedContacts, selectedContactIds]
+  );
+  const pipelineChannelIds = useMemo(
+    () => Array.from(new Set(selectedContactsForPipeline.map((c) => c.channel_id))),
+    [selectedContactsForPipeline]
+  );
+  const pipelinePreview = useMemo(() => {
+    const blocked: Array<{ id: string; name: string; reason: PipelineBlockedReason; phone: string | null }> = [];
+    let eligible = 0;
+    for (const c of selectedContactsForPipeline) {
+      const digits = canonicalContactDigits(c.phone, c.jid);
+      const hasOptIn = Boolean(c.opt_in_at);
+      const hasOptOut = Boolean(c.opt_out_at);
+      if (!digits) {
+        blocked.push({
+          id: c.id,
+          name: (c.contact_name || c.first_name || c.phone || c.jid || c.id).trim(),
+          reason: "invalid_number",
+          phone: null,
+        });
+        continue;
+      }
+      if (hasOptOut) {
+        blocked.push({
+          id: c.id,
+          name: (c.contact_name || c.first_name || c.phone || c.jid || c.id).trim(),
+          reason: "opted_out",
+          phone: digits,
+        });
+        continue;
+      }
+      if (!hasOptIn) {
+        blocked.push({
+          id: c.id,
+          name: (c.contact_name || c.first_name || c.phone || c.jid || c.id).trim(),
+          reason: "missing_opt_in",
+          phone: digits,
+        });
+        continue;
+      }
+      eligible += 1;
+    }
+    return {
+      selected: selectedContactsForPipeline.length,
+      eligible,
+      blocked,
+    };
+  }, [selectedContactsForPipeline]);
+
   const filteredGroups = useMemo(() => {
     if (!searchLower) return groups;
     return groups.filter(
@@ -1653,6 +1867,65 @@ export default function ContatosPage() {
     return () => window.clearTimeout(id);
   }, [alertMessage]);
 
+  const openPipelineFromSelection = () => {
+    if (selectedContactIds.size === 0) return;
+    const now = new Date();
+    const dateLabel = now.toLocaleDateString("pt-BR");
+    setPipelineDraftName(`Pipeline ${dateLabel}`);
+    setPipelineBatchPlan("500,300,150");
+    setPipelineIntervalMinutes(10);
+    setPipelineWindowStart("08:00");
+    setPipelineWindowEnd("20:00");
+    setPipelineSaveResult(null);
+    setPipelineSideOverOpen(true);
+  };
+
+  const savePipelineDraft = async () => {
+    if (pipelineChannelIds.length !== 1) {
+      setAlertMessage("Selecione contatos de uma unica conexao para criar o pipeline.");
+      return;
+    }
+    if (!pipelineDraftName.trim()) {
+      setAlertMessage("Informe um nome para o pipeline.");
+      return;
+    }
+    setPipelineSaving(true);
+    setPipelineSaveResult(null);
+    try {
+      const res = await fetch("/api/campaigns/pipeline", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          name: pipelineDraftName.trim(),
+          channel_id: pipelineChannelIds[0],
+          contact_ids: selectedContactsForPipeline.map((c) => c.id),
+          batch_plan: pipelineBatchPlan,
+          interval_minutes: pipelineIntervalMinutes,
+          window_start: pipelineWindowStart,
+          window_end: pipelineWindowEnd,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setAlertMessage(data?.error ?? "Falha ao salvar pipeline.");
+        return;
+      }
+      setPipelineSaveResult({
+        selected: Number(data?.totals?.selected ?? pipelinePreview.selected),
+        eligible: Number(data?.totals?.eligible ?? pipelinePreview.eligible),
+        blocked: Number(data?.totals?.blocked ?? pipelinePreview.blocked.length),
+      });
+      setAlertMessage("Pipeline salvo como rascunho. Nenhum envio foi iniciado.");
+      setPipelineSideOverOpen(false);
+      setSelectedContactIds(new Set());
+    } catch {
+      setAlertMessage("Erro de rede ao salvar pipeline.");
+    } finally {
+      setPipelineSaving(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4 px-4 py-6 sm:px-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -1661,6 +1934,9 @@ export default function ContatosPage() {
           <p className="mt-0.5 text-sm text-[#64748B]">
             Total: <span className="font-medium tabular-nums text-[#1E293B]">{dedupedContacts.length}</span> contato{dedupedContacts.length !== 1 ? "s" : ""} · <span className="font-medium tabular-nums text-[#1E293B]">{groups.length}</span> grupo{groups.length !== 1 ? "s" : ""}
             {filterChannelId ? ` (${channelName(filterChannelId)})` : " (todas as instâncias)"}
+          </p>
+          <p className="mt-1 text-xs text-[#94A3B8]">
+            Laranja: sincroniza agenda. Relógio: importa conversas antigas (até 200 mensagens por chat) e cria contatos que faltarem.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1698,12 +1974,12 @@ export default function ContatosPage() {
                 key={ch.id}
                 type="button"
                 onClick={() => handleSync(ch.id)}
-                disabled={syncing !== null}
+                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
                 className="relative shrink-0 max-w-[120px] overflow-hidden rounded-md bg-clicvend-orange px-2 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
                 title={
                   syncing === ch.id
                     ? "Sincronizando contatos, grupos e comunidades…"
-                    : `Sincronizar contatos, grupos e comunidades: ${ch.name}`
+                    : `Sincronizar agenda (contatos, grupos e comunidades) — não importa histórico de mensagens: ${ch.name}`
                 }
               >
                 <span className="relative z-10 flex items-center justify-center gap-1 truncate">
@@ -1724,6 +2000,25 @@ export default function ContatosPage() {
                 )}
               </button>
             ))}
+            {channels.map((ch) => (
+              <button
+                key={`hist-${ch.id}`}
+                type="button"
+                onClick={() => handleSyncHistory(ch.id)}
+                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
+                className="relative shrink-0 max-w-[128px] overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                title={`Importar conversas antigas (até 200 mensagens por chat) e atualizar contatos 1:1: ${ch.name}`}
+              >
+                <span className="relative z-10 flex items-center justify-center gap-1 truncate">
+                  {syncingHistoryChannelId === ch.id ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                  ) : (
+                    <History className="h-3.5 w-3.5 shrink-0 text-slate-600" />
+                  )}
+                  <span className="truncate">{ch.name}</span>
+                </span>
+              </button>
+            ))}
             {filterChannelId && (
               <button
                 type="button"
@@ -1731,11 +2026,33 @@ export default function ContatosPage() {
                   if (!window.confirm("Limpar contatos, grupos e comunidades desta conexão e sincronizar de novo com o WhatsApp? Isso remove duplicatas e atualiza a lista.")) return;
                   handleSync(filterChannelId, true);
                 }}
-                disabled={syncing !== null}
+                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
                 className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60"
                 title="Limpar lista desta conexão e sincronizar de novo (remove duplicatas)"
               >
                 Limpar e sincronizar
+              </button>
+            )}
+            {filterChannelId && (
+              <button
+                type="button"
+                onClick={() => handleClearLocalContacts(filterChannelId)}
+                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
+                className="shrink-0 rounded-md border border-red-300 bg-red-50 px-2 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
+                title="Limpa apenas os contatos locais desta conexão (não apaga agenda do telefone)."
+              >
+                {clearingAgenda === filterChannelId ? "Limpando locais..." : "Limpar contatos locais"}
+              </button>
+            )}
+            {filterChannelId && allowPhoneAgendaWipe && (
+              <button
+                type="button"
+                onClick={() => handleClearPhoneAgenda(filterChannelId)}
+                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
+                className="shrink-0 rounded-md border border-[#7F1D1D] bg-[#FEE2E2] px-2 py-1.5 text-xs font-medium text-[#7F1D1D] hover:bg-[#FECACA] disabled:opacity-60"
+                title="Ação destrutiva: apaga contatos da agenda no telefone conectado."
+              >
+                {clearingAgenda === filterChannelId ? "Limpando telefone..." : "Apagar agenda do telefone"}
               </button>
             )}
             <button
@@ -1750,7 +2067,7 @@ export default function ContatosPage() {
                 setAddContactTab("single");
                 setAddContactSideOverOpen(true);
               }}
-              disabled={channels.length === 0}
+              disabled={channels.length === 0 || clearingAgenda !== null}
               className="inline-flex items-center gap-1.5 rounded-md bg-white px-3 py-1.5 text-xs font-medium text-clicvend-orange hover:bg-[#E2E8F0] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -1862,6 +2179,52 @@ export default function ContatosPage() {
                       title="Baixar os contatos selecionados em um arquivo CSV (nome, número e conexão) para uso em planilhas ou backup."
                     >
                       Exportar CSV
+                    </button>
+                    <button
+                      type="button"
+                      disabled={contactsActionLoading}
+                      onClick={openPipelineFromSelection}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 last:border-r-0"
+                      title="Classificar os contatos selecionados para campanha, validando opt-in/opt-out e salvando como rascunho (sem envio)."
+                    >
+                      <Megaphone className="h-4 w-4" />
+                      Classificar campanha
+                    </button>
+                    <button
+                      type="button"
+                      disabled={contactsActionLoading}
+                      onClick={async () => {
+                        setContactsActionLoading(true);
+                        try {
+                          const ids = Array.from(selectedContactIds);
+                          const res = await fetch("/api/contacts/consent/send", {
+                            method: "POST",
+                            credentials: "include",
+                            headers: { "Content-Type": "application/json", ...apiHeaders },
+                            body: JSON.stringify({ contact_ids: ids }),
+                          });
+                          const data = await res.json().catch(() => ({}));
+                          if (!res.ok) {
+                            setAlertMessage(data?.error ?? "Falha ao enviar consentimento.");
+                            return;
+                          }
+                          const sent = Number(data?.sent ?? 0);
+                          const skipped = Number(data?.skipped ?? 0);
+                          const failed = Number(data?.failed ?? 0);
+                          setAlertMessage(
+                            `Consentimento processado: ${sent} enviado(s), ${skipped} pulado(s), ${failed} com erro.`
+                          );
+                          setSelectedContactIds(new Set());
+                          mutateContacts();
+                        } finally {
+                          setContactsActionLoading(false);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60 last:border-r-0"
+                      title="Enviar solicitação de consentimento para os contatos selecionados. Não reenvia para quem já aceitou, recusou ou já recebeu solicitação."
+                    >
+                      {contactsActionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                      Enviar consentimento
                     </button>
                     <button
                       type="button"
@@ -2655,6 +3018,142 @@ export default function ContatosPage() {
         onSuccess={() => { mutateGroups(); setSelectedContactIds(new Set()); }}
         onError={(msg) => setAlertMessage(msg)}
       />
+
+      <SideOver
+        open={pipelineSideOverOpen}
+        onClose={() => setPipelineSideOverOpen(false)}
+        title="Classificar campanha (pipeline)"
+        width={560}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+            <p className="text-xs text-[#64748B]">
+              Esta etapa apenas classifica e salva o rascunho. <strong>Nenhuma mensagem sera enviada.</strong>
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-lg border border-[#E2E8F0] bg-white p-3">
+              <p className="text-[11px] uppercase tracking-wide text-[#64748B]">Selecionados</p>
+              <p className="text-lg font-semibold text-[#0F172A]">{pipelinePreview.selected}</p>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-emerald-700">Elegiveis</p>
+              <p className="text-lg font-semibold text-emerald-800">{pipelinePreview.eligible}</p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-amber-700">Bloqueados</p>
+              <p className="text-lg font-semibold text-amber-800">{pipelinePreview.blocked.length}</p>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-[#334155]">Nome do pipeline</label>
+            <input
+              type="text"
+              value={pipelineDraftName}
+              onChange={(e) => setPipelineDraftName(e.target.value)}
+              placeholder="Ex.: Campanha Black Friday - Segmento A"
+              className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-[#334155]">Plano de lotes</label>
+              <input
+                type="text"
+                value={pipelineBatchPlan}
+                onChange={(e) => setPipelineBatchPlan(e.target.value)}
+                placeholder="500,300,150"
+                className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-[#334155]">Intervalo (min)</label>
+              <input
+                type="number"
+                min={1}
+                value={pipelineIntervalMinutes}
+                onChange={(e) => setPipelineIntervalMinutes(Math.max(1, Number(e.target.value) || 1))}
+                className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-[#334155]">Janela inicio</label>
+              <input
+                type="time"
+                value={pipelineWindowStart}
+                onChange={(e) => setPipelineWindowStart(e.target.value)}
+                className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-[#334155]">Janela fim</label>
+              <input
+                type="time"
+                value={pipelineWindowEnd}
+                onChange={(e) => setPipelineWindowEnd(e.target.value)}
+                className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+              />
+            </div>
+          </div>
+
+          {pipelineChannelIds.length !== 1 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              Selecione contatos de uma unica conexao para salvar o pipeline.
+            </div>
+          )}
+
+          {pipelinePreview.blocked.length > 0 && (
+            <div className="rounded-lg border border-[#E2E8F0]">
+              <div className="flex items-center justify-between border-b border-[#E2E8F0] px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Bloqueados (preview)</p>
+                <span className="text-xs text-[#64748B]">Mostrando ate 20</span>
+              </div>
+              <div className="max-h-44 overflow-auto divide-y divide-[#F1F5F9]">
+                {pipelinePreview.blocked.slice(0, 20).map((item) => (
+                  <div key={item.id} className="flex items-center justify-between px-3 py-2 text-xs">
+                    <span className="truncate pr-3 text-[#334155]">{item.name}</span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                      <ShieldCheck className="h-3 w-3" />
+                      {blockedReasonLabel(item.reason)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {pipelineSaveResult && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+              Rascunho salvo: {pipelineSaveResult.eligible} elegiveis e {pipelineSaveResult.blocked} bloqueados.
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 border-t border-[#E2E8F0] pt-4">
+            <button
+              type="button"
+              onClick={() => setPipelineSideOverOpen(false)}
+              className="rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#475569] hover:bg-[#F8FAFC]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={savePipelineDraft}
+              disabled={pipelineSaving || pipelinePreview.selected === 0 || pipelineChannelIds.length !== 1}
+              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-3 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+            >
+              {pipelineSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Megaphone className="h-4 w-4" />}
+              Salvar rascunho
+            </button>
+          </div>
+        </div>
+      </SideOver>
 
       <SideOver
         open={addContactSideOverOpen}

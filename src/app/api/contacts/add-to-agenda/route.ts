@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
-import { getChannelToken } from "@/lib/uazapi/channel-token";
+import { sendAutoConsentIfNeeded } from "@/lib/consent/auto-consent";
 import { addContactToAgenda } from "@/lib/uazapi/client";
+import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -52,15 +53,24 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     await supabase
       .from("channel_contacts")
-      .update({
+      .upsert({
+        company_id: companyId,
+        channel_id: channelId,
+        jid,
+        phone: digits || null,
         contact_name: name || null,
         first_name: name || null,
         synced_at: new Date().toISOString(),
-      })
-      .eq("channel_id", channelId)
-      .eq("company_id", companyId)
-      .eq("jid", jid);
+      }, { onConflict: "channel_id,jid", ignoreDuplicates: false });
   }
+
+  await sendAutoConsentIfNeeded({
+    companyId,
+    channelId,
+    phoneOrJid: number,
+    name: name || null,
+    reason: "contact_created",
+  });
 
   return NextResponse.json(result.data ?? { ok: true });
 }

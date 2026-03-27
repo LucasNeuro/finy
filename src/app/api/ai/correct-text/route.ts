@@ -14,7 +14,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = process.env.AI_API_KEY?.trim() || process.env.MISTRAL_API_KEY?.trim();
+  const apiKey =
+    process.env.AI_API_KEY?.trim() ||
+    process.env.MISTRAL_API_KEY?.trim() ||
+    process.env.MISTARL_API_KEY?.trim();
   const isLocal = AI_BASE_URL.includes("localhost") || AI_BASE_URL.includes("127.0.0.1");
   
   if (!apiKey && !isLocal) {

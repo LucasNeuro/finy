@@ -2,6 +2,7 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { withMetricsHeaders } from "@/lib/api/metrics";
+import { sendAutoConsentIfNeeded } from "@/lib/consent/auto-consent";
 import {
   getCachedConversationDetail,
   invalidateConversationList,
@@ -491,6 +492,7 @@ export async function PATCH(
   }
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  let shouldSendConsentOnClose = false;
   const resolveStatusMeta = async (slug: string, queueId: string | null) => {
     const base = supabase
       .from("company_ticket_statuses")
@@ -518,6 +520,7 @@ export async function PATCH(
       const existingStatusMeta = await resolveStatusMeta(String(existing.status || "").toLowerCase(), existing.queue_id ?? null);
       const existingIsClosed = existingStatusMeta ? !!existingStatusMeta.is_closed : String(existing.status || "").toLowerCase() === "closed";
       const newIsClosed = !!newStatusMeta.is_closed;
+      shouldSendConsentOnClose = !existingIsClosed && newIsClosed;
       if (newIsClosed) {
         const err = await requirePermission(companyId, PERMISSIONS.inbox.close);
         if (err) return NextResponse.json({ error: err.error }, { status: err.status });
@@ -586,6 +589,19 @@ export async function PATCH(
       to_status: updates.status,
       changed_by: user?.id ?? null,
     });
+  }
+
+  if (shouldSendConsentOnClose) {
+    const targetPhoneOrJid = String(updated.wa_chat_jid || updated.customer_phone || "").trim();
+    if (targetPhoneOrJid) {
+      await sendAutoConsentIfNeeded({
+        companyId,
+        channelId: String(updated.channel_id),
+        phoneOrJid: targetPhoneOrJid,
+        name: typeof updated.customer_name === "string" ? updated.customer_name : null,
+        reason: "conversation_closed",
+      });
+    }
   }
 
   await Promise.all([invalidateConversationList(companyId), invalidateConversationDetail(id, companyId)]);

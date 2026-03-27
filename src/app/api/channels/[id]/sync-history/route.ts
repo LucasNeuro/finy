@@ -11,10 +11,11 @@ import { NextResponse } from "next/server";
 
 /**
  * POST /api/channels/[id]/sync-history
- * Sincroniza histórico de mensagens apenas para conversas que já existem (criadas pelo webhook).
- * Não cria conversas novas: assim Novos/Filas só recebem chamados de mensagens novas.
- * Atualiza channel_groups com nome de grupos; mensagens antigas são inseridas só em conversas existentes.
- * Pode ser chamado pelo usuário (auth + permission) ou internamente (X-Internal-Sync-Secret).
+ * Sincroniza histórico de mensagens via UAZAPI (lista de chats e mensagens por chat).
+ * Por padrão só preenche conversas que já existem. Com body { create_missing: true } ou
+ * ?create_missing=1, cria conversa/contato faltante e importa até messages_per_chat (default 200, max 1000).
+ * Atualiza channel_groups para grupos mesmo quando não cria conversa.
+ * Auth: usuário com channels.manage, ou chamada interna com X-Internal-Sync-Secret.
  */
 export async function POST(
   request: Request,
@@ -60,14 +61,46 @@ export async function POST(
 
   const token = resolved.token;
   const supabase = createServiceRoleClient();
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    body = {};
+  }
+  const url = new URL(request.url);
+  const createMissingConversations =
+    String(body.create_missing ?? url.searchParams.get("create_missing") ?? "").toLowerCase() === "true" ||
+    String(body.create_missing ?? url.searchParams.get("create_missing") ?? "") === "1";
+  const targetMessagesPerChatRaw = Number(
+    body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? 200
+  );
+  const targetMessagesPerChat =
+    Number.isFinite(targetMessagesPerChatRaw) && targetMessagesPerChatRaw > 0
+      ? Math.min(Math.max(Math.floor(targetMessagesPerChatRaw), 1), 1000)
+      : 200;
 
-  const { data: chatsData, ok: chatsOk, error: chatsError } = await findChats(token, {
-    limit: 100,
-    offset: 0,
-    sort: "-wa_lastMsgTimestamp",
-  });
+  /** uazapi devolve chats paginados; antes só lia 1 página (100), cortando o restante (ex.: 150 conversas). */
+  const CHAT_PAGE_SIZE = 100;
+  const MAX_CHAT_PAGES = 50;
+  const chats: UazapiChat[] = [];
+  let chatsError: string | undefined;
+  for (let page = 0; page < MAX_CHAT_PAGES; page++) {
+    const { data: chatsData, ok: chatsOk, error: pageErr } = await findChats(token, {
+      limit: CHAT_PAGE_SIZE,
+      offset: page * CHAT_PAGE_SIZE,
+      sort: "-wa_lastMsgTimestamp",
+    });
+    if (!chatsOk) {
+      chatsError = pageErr;
+      break;
+    }
+    const batch = (chatsData?.chats ?? []) as UazapiChat[];
+    if (batch.length === 0) break;
+    chats.push(...batch);
+    if (batch.length < CHAT_PAGE_SIZE) break;
+  }
 
-  if (!chatsOk || !chatsData?.chats?.length) {
+  if (chats.length === 0) {
     return NextResponse.json({
       ok: true,
       chats_processed: 0,
@@ -78,8 +111,6 @@ export async function POST(
 
   const MAX_MESSAGES_PER_INSTANCE = 15_000;
   const MESSAGES_PAGE_SIZE = 100;
-
-  const chats = chatsData.chats as UazapiChat[];
   let conversationsCreated = 0;
   let messagesInserted = 0;
 
@@ -152,8 +183,8 @@ export async function POST(
     if (existing) {
       conversationId = existing.id;
     } else {
-      // Não criar conversas novas no sync: só preencher histórico em conversas já existentes
-      // (criadas pelo webhook quando chega mensagem nova). Assim Novos/Filas só recebem chamados novos.
+      // Por padrão não cria conversa no sync (mantém fluxo "Novos" só com mensagem nova).
+      // Quando create_missing=true, cria conversa e permite importar histórico antigo do contato/grupo.
       if (isGroup) {
         await supabase.from("channel_groups").upsert(
           {
@@ -166,7 +197,72 @@ export async function POST(
           { onConflict: "channel_id,jid" }
         );
       }
-      continue; // pula este chat: não criar conversa nem buscar mensagens
+
+      if (!createMissingConversations) {
+        continue; // pula este chat: não criar conversa nem buscar mensagens
+      }
+
+      if (isGroup) {
+        if (!queueId) continue;
+        const { data: insertedConv } = await supabase
+          .from("conversations")
+          .insert({
+            company_id: companyId,
+            channel_id: channelId,
+            external_id: canonicalChatId,
+            wa_chat_jid: canonicalChatId,
+            kind: "group",
+            is_group: true,
+            customer_phone: canonicalChatId,
+            customer_name: (chat.wa_name ?? chat.wa_contactName ?? "Grupo") as string,
+            queue_id: queueId,
+            status: "open",
+            assigned_to: null,
+            last_message_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+        if (!insertedConv?.id) continue;
+        conversationId = insertedConv.id;
+        conversationsCreated++;
+      } else {
+        const digits = waChatid.replace(/@.*$/, "").replace(/\D/g, "");
+        const displayPhone = digits || null;
+        await supabase.from("channel_contacts").upsert(
+          {
+            channel_id: channelId,
+            company_id: companyId,
+            jid: canonicalChatId,
+            phone: displayPhone,
+            contact_name: ((chat.wa_name ?? chat.wa_contactName ?? null) as string | null) ?? null,
+            first_name: ((chat.wa_contactName ?? chat.wa_name ?? null) as string | null) ?? null,
+            synced_at: new Date().toISOString(),
+          },
+          { onConflict: "channel_id,jid", ignoreDuplicates: false }
+        );
+        if (!queueId) continue;
+        const { data: insertedConv } = await supabase
+          .from("conversations")
+          .insert({
+            company_id: companyId,
+            channel_id: channelId,
+            external_id: canonicalChatId,
+            wa_chat_jid: canonicalChatId,
+            kind: "ticket",
+            is_group: false,
+            customer_phone: displayPhone,
+            customer_name: (chat.wa_name ?? chat.wa_contactName ?? null) as string | null,
+            queue_id: queueId,
+            assigned_to: null,
+            status: "open",
+            last_message_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+        if (!insertedConv?.id) continue;
+        conversationId = insertedConv.id;
+        conversationsCreated++;
+      }
     }
 
     if (!conversationId) continue;
@@ -178,7 +274,9 @@ export async function POST(
     let msgOffset = 0;
     let latestSentAt = 0;
 
+    let insertedForThisChat = 0;
     while (messagesInserted < MAX_MESSAGES_PER_INSTANCE) {
+      if (insertedForThisChat >= targetMessagesPerChat) break;
       const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, {
         limit: MESSAGES_PAGE_SIZE,
         offset: msgOffset,
@@ -237,7 +335,11 @@ export async function POST(
         if (msgFileName && typeof msgFileName === "string") insertPayload.file_name = msgFileName.slice(0, 255);
 
         const { error: msgInsErr } = await supabase.from("messages").insert(insertPayload);
-        if (!msgInsErr) messagesInserted++;
+        if (!msgInsErr) {
+          messagesInserted++;
+          insertedForThisChat++;
+        }
+        if (insertedForThisChat >= targetMessagesPerChat) break;
       }
 
       if (messages.length < MESSAGES_PAGE_SIZE) break;

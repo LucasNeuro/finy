@@ -60,6 +60,9 @@ export async function GET(request: Request) {
       contact_name: string | null;
       first_name: string | null;
       avatar_url: string | null;
+      opt_in_at?: string | null;
+      opt_out_at?: string | null;
+      opt_in_source?: string | null;
       synced_at: string;
       queue_names?: string[];
       tag_names?: string[];
@@ -71,7 +74,7 @@ export async function GET(request: Request) {
     while (hasMore) {
       let q = supabase
         .from("channel_contacts")
-        .select("id, channel_id, jid, phone, contact_name, first_name, avatar_url, synced_at")
+        .select("id, channel_id, jid, phone, contact_name, first_name, avatar_url, opt_in_at, opt_out_at, opt_in_source, synced_at")
         .eq("company_id", companyId)
         .order("contact_name")
         .order("phone")
@@ -95,6 +98,9 @@ export async function GET(request: Request) {
           contact_name: string | null;
           first_name: string | null;
           avatar_url: string | null;
+          opt_in_at: string | null;
+          opt_out_at: string | null;
+          opt_in_source: string | null;
           synced_at: string;
         };
         const normalizedPhone = normalizePhoneForDisplay(r.phone) ?? r.phone;
@@ -118,11 +124,15 @@ export async function GET(request: Request) {
         continue;
       }
       const prevScore =
+        (prev.opt_out_at ? 32 : 0) +
+        (prev.opt_in_at ? 16 : 0) +
         (prev.contact_name?.trim() ? 4 : 0) +
         (prev.first_name?.trim() ? 2 : 0) +
         (prev.avatar_url?.trim() ? 2 : 0) +
         (prev.phone?.trim() ? 1 : 0);
       const nextScore =
+        (row.opt_out_at ? 32 : 0) +
+        (row.opt_in_at ? 16 : 0) +
         (row.contact_name?.trim() ? 4 : 0) +
         (row.first_name?.trim() ? 2 : 0) +
         (row.avatar_url?.trim() ? 2 : 0) +

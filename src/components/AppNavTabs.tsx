@@ -14,6 +14,7 @@ import {
   Inbox,
   UserCog,
   Ticket,
+  Megaphone,
 } from "lucide-react";
 
 const fetcher = (url: string, slug: string) =>
@@ -37,6 +38,8 @@ const ALL_TABS = [
   { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap, requires: "quickreplies.view" as const },
   // Tags
   { href: "/tags", label: "Tags", icon: Tag, requires: "tags.view" as const },
+  // Campanhas
+  { href: "/campanhas", label: "Campanhas", icon: Megaphone, requires: "campaigns.view" as const },
   { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.view" as const },
   { href: "/perfil", label: "Perfil", icon: Settings, requires: "profile.view" as const },
 ];

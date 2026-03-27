@@ -12,6 +12,9 @@ export type Contact = {
   contact_name: string | null;
   first_name: string | null;
   avatar_url?: string | null;
+  opt_in_at?: string | null;
+  opt_out_at?: string | null;
+  opt_in_source?: string | null;
   queue_names?: string[];
   tag_names?: string[];
   synced_at: string;

@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { sendAutoConsentIfNeeded } from "@/lib/consent/auto-consent";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 import {
   normalizeWhatsAppJid,
@@ -72,6 +73,52 @@ type ChannelQueueRow = { queue_id: string; is_default: boolean; kind?: string };
 /** Evita disparar sync de histórico várias vezes seguidas para o mesmo canal (várias empresas/conexões). */
 const lastSyncTriggerByInstance = new Map<string, number>();
 const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutos
+
+type ConsentKeywordSet = {
+  accept: Set<string>;
+  optOut: Set<string>;
+};
+
+function normalizeConsentKeyword(value: string): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function getConsentKeywordsForChannel(
+  _supabase: ReturnType<typeof createServiceRoleClient>,
+  _companyId: string,
+  _channelId: string
+): Promise<ConsentKeywordSet> {
+  const accept = new Set<string>(["sim", "aceito", "ok", "topo", "topa", "claro", "pode"]);
+  const optOut = new Set<string>(["sair", "parar", "stop", "nao", "não", "cancelar"]);
+  return { accept, optOut };
+}
+
+function detectConsentActionFromText(
+  text: string,
+  keywordSet: ConsentKeywordSet
+): { action: "opt_in" | "opt_out"; matched: string } | null {
+  const normalized = normalizeConsentKeyword(text);
+  if (!normalized) return null;
+
+  if (keywordSet.optOut.has(normalized)) return { action: "opt_out", matched: normalized };
+  if (keywordSet.accept.has(normalized)) return { action: "opt_in", matched: normalized };
+
+  const tokens = normalized.split(" ").filter(Boolean);
+  for (const token of tokens) {
+    if (keywordSet.optOut.has(token)) return { action: "opt_out", matched: token };
+  }
+  for (const token of tokens) {
+    if (keywordSet.accept.has(token)) return { action: "opt_in", matched: token };
+  }
+
+  return null;
+}
 
 /**
  * Dispara sincronização de histórico em background quando o WhatsApp conecta.
@@ -314,7 +361,10 @@ export async function POST(request: Request) {
     console.log("[WEBHOOK] Itens para processar:", toProcess.length);
 
     for (const item of toProcess) {
-      const ok = await processOneMessage(instanceId, item ?? {}, isHistory, isHistory);
+      const itemObj = (item ?? {}) as Record<string, unknown>;
+      const wasSentByApi = itemObj.wasSentByApi === true || itemObj.fromApi === true;
+      const allowFromMe = isHistory || !wasSentByApi;
+      const ok = await processOneMessage(instanceId, item ?? {}, allowFromMe, isHistory);
       if (!ok) {
         console.warn("[WEBHOOK] processOneMessage retornou false, parando processamento");
         break;
@@ -765,6 +815,115 @@ async function processOneMessage(
         (data as { chatImage?: string }).chatImage?.trim() ||
         null) || null;
 
+    // Captura consentimento por interação de botão (/send/menu).
+    // IDs esperados enviados pelo teste e pelo fluxo de consentimento:
+    // - optin_yes  => marca opt_in
+    // - optout_yes => marca opt_out
+    const interactionId = String(
+      (data as { buttonOrListid?: string; buttonOrListId?: string }).buttonOrListid ??
+        (data as { buttonOrListId?: string }).buttonOrListId ??
+        ""
+    )
+      .trim()
+      .toLowerCase();
+    const isInteractiveOptIn = !fromMe && interactionId === "optin_yes";
+    const isInteractiveOptOut = !fromMe && interactionId === "optout_yes";
+    let isKeywordOptIn = false;
+    let isKeywordOptOut = false;
+    let matchedKeyword: string | null = null;
+
+    if (!fromMe && !isGroup && !isInteractiveOptIn && !isInteractiveOptOut) {
+      const keywordSet = await getConsentKeywordsForChannel(supabase, companyId, channelId);
+      const detected = detectConsentActionFromText(textContent || "", keywordSet);
+      if (detected?.action === "opt_in") {
+        isKeywordOptIn = true;
+        matchedKeyword = detected.matched;
+      } else if (detected?.action === "opt_out") {
+        isKeywordOptOut = true;
+        matchedKeyword = detected.matched;
+      }
+    }
+
+    const isAnyOptIn = isInteractiveOptIn || isKeywordOptIn;
+    const isAnyOptOut = isInteractiveOptOut || isKeywordOptOut;
+    if ((isAnyOptIn || isAnyOptOut) && !isGroup) {
+      const consentAt = new Date().toISOString();
+      const evidence = {
+        source: isInteractiveOptIn || isInteractiveOptOut ? "uazapi_interactive_button" : "uazapi_keyword_message",
+        action: isAnyOptIn ? "opt_in" : "opt_out",
+        button_id: interactionId || null,
+        keyword: matchedKeyword,
+        text: textContent || null,
+        message_id: messageExternalId,
+        track_source: (data as { track_source?: string }).track_source ?? null,
+        track_id: (data as { track_id?: string }).track_id ?? null,
+        instance_id: instanceId,
+        at: consentAt,
+      };
+      await supabase.from("channel_contacts").upsert(
+        {
+          channel_id: channelId,
+          company_id: companyId,
+          jid: canonicalExternalId,
+          phone: displayPhone || null,
+          contact_name: customerName || null,
+          first_name: (customerName || (data as { pushName?: string }).pushName) || null,
+          synced_at: consentAt,
+          ...(contactAvatarUrl && { avatar_url: contactAvatarUrl }),
+          ...(isAnyOptIn
+            ? {
+                opt_in_at: consentAt,
+                opt_in_source: isInteractiveOptIn ? "interactive_button" : "keyword_message",
+                opt_in_evidence: evidence,
+                opt_out_at: null,
+                opt_out_reason: null,
+              }
+            : {
+                opt_out_at: consentAt,
+                opt_out_reason: isInteractiveOptOut ? "interactive_button_opt_out" : "keyword_message_opt_out",
+                opt_in_evidence: evidence,
+              }),
+        },
+        { onConflict: "channel_id,jid", ignoreDuplicates: false }
+      );
+
+      // Garante reflexo na tabela mesmo se houver variação de formato do telefone (com/sem 55) em registros antigos.
+      const canonicalPhoneDigits = (displayPhone ?? "").replace(/\D/g, "");
+      if (canonicalPhoneDigits) {
+        const variants = new Set<string>([canonicalPhoneDigits]);
+        if (canonicalPhoneDigits.startsWith("55") && canonicalPhoneDigits.length > 10) {
+          variants.add(canonicalPhoneDigits.slice(2));
+        } else {
+          variants.add(`55${canonicalPhoneDigits}`);
+        }
+
+        for (const phoneVariant of variants) {
+          await supabase
+            .from("channel_contacts")
+            .update(
+              isAnyOptIn
+                ? {
+                    opt_in_at: consentAt,
+                    opt_in_source: isInteractiveOptIn ? "interactive_button" : "keyword_message",
+                    opt_in_evidence: evidence,
+                    opt_out_at: null,
+                    opt_out_reason: null,
+                    synced_at: consentAt,
+                  }
+                : {
+                    opt_out_at: consentAt,
+                    opt_out_reason: isInteractiveOptOut ? "interactive_button_opt_out" : "keyword_message_opt_out",
+                    opt_in_evidence: evidence,
+                    synced_at: consentAt,
+                  }
+            )
+            .eq("company_id", companyId)
+            .eq("channel_id", channelId)
+            .eq("phone", phoneVariant);
+        }
+      }
+    }
+
     let conversationId: string;
     if (existingTicket) {
       conversationId = existingTicket.id;
@@ -854,6 +1013,15 @@ async function processOneMessage(
         { onConflict: "channel_id,jid", ignoreDuplicates: false }
       );
       console.log("[WEBHOOK] Contato criado/atualizado:", { jid: canonicalExternalId, phone: displayPhone, name: customerName });
+      if (!fromMe) {
+        await sendAutoConsentIfNeeded({
+          companyId,
+          channelId,
+          phoneOrJid: canonicalExternalId || displayPhone || "",
+          name: customerName || null,
+          reason: "conversation_created",
+        });
+      }
     }
 
     const { data: insertedMsg, error: msgError } = await supabase

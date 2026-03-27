@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
-import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { toCanonicalDigits, toCanonicalJid } from "@/lib/phone-canonical";
 import { createClient } from "@/lib/supabase/server";
 
 type ContactTagsPostBody =
@@ -164,9 +164,10 @@ export async function POST(request: Request) {
 
     const canonicalDigits = toCanonicalDigits(number) ?? number.replace(/\D/g, "");
     const rawDigits = number.replace(/\D/g, "");
+    const canonicalJid = toCanonicalJid(number, false).toLowerCase();
     const jidCandidates = Array.from(
       new Set(
-        [number.trim(), rawDigits ? `${rawDigits}@s.whatsapp.net` : "", canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : ""]
+        [canonicalJid, number.trim(), rawDigits ? `${rawDigits}@s.whatsapp.net` : "", canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : ""]
           .map((s) => s.trim())
           .filter(Boolean)
       )
@@ -221,15 +222,18 @@ export async function POST(request: Request) {
       const now = new Date().toISOString();
       const { data: inserted, error: insertErr } = await supabase
         .from("channel_contacts")
-        .insert({
-          company_id: companyId,
-          channel_id: channelId,
-          jid: jidToInsert,
-          phone: canonicalDigits || rawDigits || null,
-          contact_name: null,
-          first_name: null,
-          synced_at: now,
-        })
+        .upsert(
+          {
+            company_id: companyId,
+            channel_id: channelId,
+            jid: toCanonicalJid(jidToInsert, false).toLowerCase(),
+            phone: canonicalDigits || rawDigits || null,
+            contact_name: null,
+            first_name: null,
+            synced_at: now,
+          },
+          { onConflict: "channel_id,jid", ignoreDuplicates: false }
+        )
         .select("id")
         .single();
 

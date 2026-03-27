@@ -21,7 +21,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = process.env.AI_API_KEY?.trim() || process.env.MISTRAL_API_KEY?.trim();
+  const apiKey =
+    process.env.AI_API_KEY?.trim() ||
+    process.env.MISTRAL_API_KEY?.trim() ||
+    process.env.MISTARL_API_KEY?.trim();
   // Se for OpenAI-compatible local (ex: Ollama), pode não precisar de chave, mas vamos avisar se não tiver nenhuma configurada e não for localhost
   const isLocal = AI_BASE_URL.includes("localhost") || AI_BASE_URL.includes("127.0.0.1");
   

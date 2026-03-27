@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { sendAutoConsentIfNeeded } from "@/lib/consent/auto-consent";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { deleteChat } from "@/lib/uazapi/client";
@@ -35,7 +36,7 @@ export async function POST(
   const supabase = await createClient();
   const { data: conversation, error: convError } = await supabase
     .from("conversations")
-    .select("id, channel_id, wa_chat_jid, customer_phone, is_group")
+    .select("id, channel_id, wa_chat_jid, customer_phone, customer_name, is_group")
     .eq("id", id)
     .eq("company_id", companyId)
     .single();
@@ -97,6 +98,19 @@ export async function POST(
         })
         .eq("id", id)
         .eq("company_id", companyId);
+
+      if (!conversation.is_group) {
+        const targetPhoneOrJid = String(conversation.wa_chat_jid || conversation.customer_phone || "").trim();
+        if (targetPhoneOrJid) {
+          await sendAutoConsentIfNeeded({
+            companyId,
+            channelId: String(conversation.channel_id),
+            phoneOrJid: targetPhoneOrJid,
+            name: typeof conversation.customer_name === "string" ? conversation.customer_name : null,
+            reason: "conversation_closed",
+          });
+        }
+      }
     }
     await invalidateConversationList(companyId);
   }

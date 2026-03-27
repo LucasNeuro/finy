@@ -37,6 +37,8 @@ export const PERMISSIONS = {
   quickreplies: { view: "quickreplies.view", manage: "quickreplies.manage" },
   // Tags
   tags: { view: "tags.view", manage: "tags.manage" },
+  // Campanhas
+  campaigns: { view: "campaigns.view", manage: "campaigns.manage" },
   // Perfil (próprio perfil / link de acesso / foto)
   profile: { view: "profile.view" },
 } as const;
@@ -51,6 +53,7 @@ export type PermissionKey =
   | (typeof PERMISSIONS)["contacts"][keyof (typeof PERMISSIONS)["contacts"]]
   | (typeof PERMISSIONS)["quickreplies"][keyof (typeof PERMISSIONS)["quickreplies"]]
   | (typeof PERMISSIONS)["tags"][keyof (typeof PERMISSIONS)["tags"]]
+  | (typeof PERMISSIONS)["campaigns"][keyof (typeof PERMISSIONS)["campaigns"]]
   | (typeof PERMISSIONS)["profile"][keyof (typeof PERMISSIONS)["profile"]];
 
 const ALL_PERMISSION_KEYS: PermissionKey[] = [
@@ -81,6 +84,8 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.quickreplies.manage,
   PERMISSIONS.tags.view,
   PERMISSIONS.tags.manage,
+  PERMISSIONS.campaigns.view,
+  PERMISSIONS.campaigns.manage,
   PERMISSIONS.profile.view,
 ];
 
@@ -139,6 +144,10 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
     keys: [PERMISSIONS.tags.view, PERMISSIONS.tags.manage],
   },
   {
+    label: "Módulo Campanhas",
+    keys: [PERMISSIONS.campaigns.view, PERMISSIONS.campaigns.manage],
+  },
+  {
     label: "Perfil (próprio perfil da empresa)",
     keys: [PERMISSIONS.profile.view],
   },
@@ -172,6 +181,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.quickreplies.manage]: "Ação: gerenciar Respostas rápidas",
   [PERMISSIONS.tags.view]: "Acesso: ver Tags",
   [PERMISSIONS.tags.manage]: "Ação: gerenciar Tags",
+  [PERMISSIONS.campaigns.view]: "Acesso: ver Campanhas",
+  [PERMISSIONS.campaigns.manage]: "Ação: gerenciar Campanhas",
   [PERMISSIONS.profile.view]: "Acesso: ver Perfil (próprio perfil, link de acesso, foto)",
 };
 

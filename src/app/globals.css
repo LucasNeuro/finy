@@ -2,47 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
-
-  /* Cores Primárias (verde) - Mais vibrantes */
-  --clicvend-green-lightest: #5EF0C2;  /* Verde água vibrante */
-  --clicvend-green-lighter: #00E6B8;   /* Verde menta intenso */
-  --clicvend-green-light: #00C896;    /* Verde claro vibrante */
-  --clicvend-green: #00A854;          /* Verde principal forte */
-  --clicvend-green-dark: #008A45;     /* Verde escuro vibrante */
-  --clicvend-green-darker: #006B35;   /* Verde profundo */
-
-  /* Cores Secundárias (azuis) - Mais saturados */
-  --clicvend-teal: #00C4C4;           /* Azul-esverdeado vibrante */
-  --clicvend-teal-dark: #00A0A0;      /* Azul-esverdeado escuro */
-  --clicvend-blue-light: #00A2FF;     /* Azul claro elétrico */
-  --clicvend-blue: #0066CC;           /* Azul médio intenso */
-  --clicvend-blue-dark: #004099;      /* Azul escuro profundo */
-  --clicvend-blue-darker: #002266;    /* Azul muito escuro */
-
-  /* Cores de Destaque (para CTAs, links, etc.) - Chamativas */
-  --clicvend-highlight: #00FFCC;      /* Verde neon brilhante */
-  --clicvend-highlight-blue: #00CCFF; /* Azul vibrante para ações */
-
-  /* Cores de Fundo (para seções, cards, etc.) - Mais contrastantes */
-  --clicvend-bg-light: #D4FFEC;       /* Fundo verde claro vibrante */
-  --clicvend-bg-blue: #E6F2FF;        /* Fundo azul claro suave */
-}
-
-
-
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: var(--font-sans), system-ui, sans-serif;
-}
-
 @layer base {
+  :root {
+    /* Base */
+    --background: 0 0% 100%;       /* Branco puro */
+    --foreground: 222.2 84% 4.9%;  /* Preto quase puro para texto */
+
+    /* Primary (Rosa React Flow - #FF0071) */
+    --primary: 333 100% 50%;       /* HSL para #FF0071 (Magenta Vibrante) */
+    --primary-foreground: 0 0% 100%; /* Branco */
+
+    /* Secondary (Azul Forte - #3b82f6) */
+    --secondary: 221.2 83.2% 53.3%; /* HSL para Azul Forte/Vibrante */
+    --secondary-foreground: 0 0% 100%;
+
+    /* Accent (Roxo/Violeta Sutil) */
+    --accent: 262.1 83.3% 57.8%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Muted (Cinzas Neutros) */
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    /* Borders & Inputs */
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 333 100% 50%; /* Ring uses Primary color */
+
+    /* Surfaces */
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    /* Feedback */
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Radius Global */
+    --radius: 0.5rem; /* 8px - Levemente arredondado */
+
+    /* Legacy Variables (Coexistence) */
+    /* Cores Primárias (verde) - Mais vibrantes */
+    --clicvend-green-lightest: #5EF0C2;  /* Verde água vibrante */
+    --clicvend-green-lighter: #00E6B8;   /* Verde menta intenso */
+    --clicvend-green-light: #00C896;    /* Verde claro vibrante */
+    --clicvend-green: #00A854;          /* Verde principal forte */
+    --clicvend-green-dark: #008A45;     /* Verde escuro vibrante */
+    --clicvend-green-darker: #006B35;   /* Verde profundo */
+  
+    /* Cores Secundárias (azuis) - Mais saturados */
+    --clicvend-teal: #00C4C4;           /* Azul-esverdeado vibrante */
+    --clicvend-teal-dark: #00A0A0;      /* Azul-esverdeado escuro */
+    --clicvend-blue-light: #00A2FF;     /* Azul claro elétrico */
+    --clicvend-blue: #0066CC;           /* Azul médio intenso */
+    --clicvend-blue-dark: #004099;      /* Azul escuro profundo */
+    --clicvend-blue-darker: #002266;    /* Azul muito escuro */
+  
+    /* Cores de Destaque (para CTAs, links, etc.) - Chamativas */
+    --clicvend-highlight: #00FFCC;      /* Verde neon brilhante */
+    --clicvend-highlight-blue: #00CCFF; /* Azul vibrante para ações */
+  
+    /* Cores de Fundo (para seções, cards, etc.) - Mais contrastantes */
+    --clicvend-bg-light: #D4FFEC;       /* Fundo verde claro vibrante */
+    --clicvend-bg-blue: #E6F2FF;        /* Fundo azul claro suave */
+  }
+
+  /* Dot Pattern Background */
+  .bg-dot-pattern {
+    background-image: radial-gradient(hsl(var(--muted-foreground)) 1px, transparent 1px);
+    background-size: 24px 24px;
+    mask-image: linear-gradient(to bottom, transparent, black, transparent);
+  }
+ 
   * {
-    @apply border-[#E2E8F0];
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1;
+    font-family: var(--font-sans), system-ui, sans-serif;
   }
 }
 
@@ -97,28 +138,4 @@ body {
 }
 .scroll-tabs::-webkit-scrollbar {
   height: 2px; /* Mais fina que os botões */
-}
-.scroll-tabs::-webkit-scrollbar-track {
-  background: transparent;
-}
-.scroll-tabs::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 1px;
-  transition: background-color 0.2s;
-}
-.scroll-tabs:hover::-webkit-scrollbar-thumb {
-  background: rgba(203, 213, 225, 0.3);
-}
-.scroll-tabs:active::-webkit-scrollbar-thumb,
-.scroll-tabs:focus::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.5);
-}
-
-/* Barra de progresso indeterminada (sync) dentro do botão */
-@keyframes sync-progress-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
-}
-.animate-sync-progress {
-  animation: sync-progress-slide 1.5s ease-in-out infinite;
 }
