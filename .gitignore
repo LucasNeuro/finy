@@ -18,6 +18,7 @@
 # misc
 .DS_Store
 *.pem
+.cora-temp/
 
 # debug
 npm-debug.log*
@@ -37,3 +38,9 @@ next-env.d.ts
 
 # docs
 /docs
+
+# cora
+.cora-temp/
+
+
+.scripts/

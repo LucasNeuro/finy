@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Smartphone, Plus, Loader2, Settings, Wifi, WifiOff, Link2, Trash2, MessageSquare, Users } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ChannelTableSkeleton } from "@/components/Skeleton";
@@ -28,7 +30,25 @@ const MAX_CHANNELS_PER_COMPANY = 3;
 
 export default function ConexoesPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = pathname?.split("/").filter(Boolean)[0] ?? "";
+  const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessChannels = permissions.includes("channels.view") || permissions.includes("channels.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessChannels) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessChannels, router]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [queues, setQueues] = useState<Queue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +70,8 @@ export default function ConexoesPage() {
   const [deleteConfirmChannel, setDeleteConfirmChannel] = useState<Channel | null>(null);
   const [selectedChannelIds, setSelectedChannelIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [bulkConfirm, setBulkConfirm] = useState<{ type: "disconnect" | "delete"; ids: string[] } | null>(null);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const canAddChannel = channels.length < MAX_CHANNELS_PER_COMPANY;
 
   const fetchChannels = useCallback(() => {
@@ -196,6 +218,7 @@ export default function ConexoesPage() {
         fetchStats();
         fetchStatus(createData.channel.id);
         setSideOverOpen(false);
+        setFeedback({ type: "success", message: "Conexão criada com sucesso." });
       });
     } catch {
       setCreateError("Erro de rede. Tente novamente.");
@@ -273,9 +296,12 @@ export default function ConexoesPage() {
           delete next[ch.id];
           return next;
         });
+        setFeedback({ type: "success", message: `Conexão "${ch.name}" excluída com sucesso.` });
+      } else {
+        setFeedback({ type: "error", message: "Não foi possível excluir a conexão." });
       }
     } catch {
-      // ignore
+      setFeedback({ type: "error", message: "Erro de rede ao excluir conexão." });
     } finally {
       setActionLoading(null);
     }
@@ -312,6 +338,79 @@ export default function ConexoesPage() {
     return raw;
   };
 
+  const executeBulkDisconnect = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setBulkActionLoading(true);
+    try {
+      await Promise.all(
+        ids.map((id) => {
+          const ch = channels.find((c) => c.id === id);
+          if (!ch) return Promise.resolve();
+          return fetch("/api/uazapi/instance/disconnect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
+            body: JSON.stringify({ channel_id: ch.id }),
+            credentials: "include",
+          });
+        })
+      );
+      setSelectedChannelIds(new Set());
+      ids.forEach((id) => setChannelStatuses((prev) => ({ ...prev, [id]: "disconnected" })));
+      ids.forEach((id) =>
+        setChannelConnectedNumbers((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        })
+      );
+      fetchChannels();
+      setFeedback({
+        type: "success",
+        message: ids.length === 1 ? "Conexão desconectada com sucesso." : `${ids.length} conexões desconectadas com sucesso.`,
+      });
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  const executeBulkDelete = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    setBulkActionLoading(true);
+    try {
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/uazapi/instance/delete?channel_id=${encodeURIComponent(id)}`, {
+            method: "DELETE",
+            credentials: "include",
+            headers: slug ? { "X-Company-Slug": slug } : undefined,
+          })
+        )
+      );
+      setChannels((prev) => prev.filter((c) => !ids.includes(c.id)));
+      setChannelStatuses((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id]);
+        return next;
+      });
+      setChannelConnectedNumbers((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id]);
+        return next;
+      });
+      setSelectedChannelIds(new Set());
+      setFeedback({
+        type: "success",
+        message: ids.length === 1 ? "Conexão excluída com sucesso." : `${ids.length} conexões excluídas com sucesso.`,
+      });
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  if (slug && permissionsData !== undefined && !canAccessChannels) {
+    return null;
+  }
+
   return (
     <div className="flex flex-col gap-4 p-6">
       <div className="flex items-center justify-between">
@@ -337,6 +436,18 @@ export default function ConexoesPage() {
           </button>
         </div>
       </div>
+
+      {feedback && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-sm ${
+            feedback.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
 
       {loading ? (
         <ChannelTableSkeleton rows={4} />
@@ -437,38 +548,11 @@ export default function ConexoesPage() {
                   <button
                     type="button"
                     disabled={bulkActionLoading || !channels.some((c) => selectedChannelIds.has(c.id) && channelStatuses[c.id] === "connected")}
-                    onClick={async () => {
+                    onClick={() => {
                       const ids = Array.from(selectedChannelIds);
                       const toDisconnect = ids.filter((id) => channelStatuses[id] === "connected");
                       if (toDisconnect.length === 0) return;
-                      if (!window.confirm(`Desconectar ${toDisconnect.length} conexão(ões) do WhatsApp? Será necessário escanear o QR Code novamente para reconectar.`)) return;
-                      setBulkActionLoading(true);
-                      try {
-                        await Promise.all(
-                          toDisconnect.map((id) => {
-                            const ch = channels.find((c) => c.id === id);
-                            if (!ch) return Promise.resolve();
-                            return fetch("/api/uazapi/instance/disconnect", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
-                              body: JSON.stringify({ channel_id: ch.id }),
-                              credentials: "include",
-                            });
-                          })
-                        );
-                        setSelectedChannelIds(new Set());
-                        toDisconnect.forEach((id) => setChannelStatuses((prev) => ({ ...prev, [id]: "disconnected" })));
-                        toDisconnect.forEach((id) =>
-                          setChannelConnectedNumbers((prev) => {
-                            const next = { ...prev };
-                            delete next[id];
-                            return next;
-                          })
-                        );
-                        fetchChannels();
-                      } finally {
-                        setBulkActionLoading(false);
-                      }
+                      setBulkConfirm({ type: "disconnect", ids: toDisconnect });
                     }}
                     className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60 last:border-r-0"
                     title="Desconectar do WhatsApp as conexões selecionadas (apenas as conectadas)."
@@ -479,36 +563,10 @@ export default function ConexoesPage() {
                   <button
                     type="button"
                     disabled={bulkActionLoading}
-                    onClick={async () => {
+                    onClick={() => {
                       const ids = Array.from(selectedChannelIds);
                       if (ids.length === 0) return;
-                      if (!window.confirm(`Excluir ${ids.length} conexão(ões)? Esta ação não pode ser desfeita.`)) return;
-                      setBulkActionLoading(true);
-                      try {
-                        await Promise.all(
-                          ids.map((id) =>
-                            fetch(`/api/uazapi/instance/delete?channel_id=${encodeURIComponent(id)}`, {
-                              method: "DELETE",
-                              credentials: "include",
-                              headers: slug ? { "X-Company-Slug": slug } : undefined,
-                            })
-                          )
-                        );
-                        setChannels((prev) => prev.filter((c) => !ids.includes(c.id)));
-                        setChannelStatuses((prev) => {
-                          const next = { ...prev };
-                          ids.forEach((id) => delete next[id]);
-                          return next;
-                        });
-                        setChannelConnectedNumbers((prev) => {
-                          const next = { ...prev };
-                          ids.forEach((id) => delete next[id]);
-                          return next;
-                        });
-                        setSelectedChannelIds(new Set());
-                      } finally {
-                        setBulkActionLoading(false);
-                      }
+                      setBulkConfirm({ type: "delete", ids });
                     }}
                     className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60 last:border-r-0"
                     title="Excluir permanentemente as conexões selecionadas."
@@ -763,6 +821,30 @@ export default function ConexoesPage() {
         variant="danger"
         onConfirm={doDeleteChannel}
         onCancel={() => setDeleteConfirmChannel(null)}
+      />
+      <ConfirmDialog
+        open={!!bulkConfirm}
+        onClose={() => setBulkConfirm(null)}
+        title={bulkConfirm?.type === "disconnect" ? "Desconectar conexões selecionadas?" : "Excluir conexões selecionadas?"}
+        message={
+          bulkConfirm?.type === "disconnect"
+            ? `Desconectar ${bulkConfirm.ids.length} conexão(ões) do WhatsApp? Será necessário escanear o QR Code novamente para reconectar.`
+            : `Excluir ${bulkConfirm?.ids.length ?? 0} conexão(ões)? Esta ação não pode ser desfeita.`
+        }
+        confirmLabel={bulkConfirm?.type === "disconnect" ? "Desconectar" : "Excluir"}
+        cancelLabel="Cancelar"
+        variant={bulkConfirm?.type === "disconnect" ? "warning" : "danger"}
+        onConfirm={async () => {
+          const pending = bulkConfirm;
+          setBulkConfirm(null);
+          if (!pending) return;
+          if (pending.type === "disconnect") {
+            await executeBulkDisconnect(pending.ids);
+          } else {
+            await executeBulkDelete(pending.ids);
+          }
+        }}
+        onCancel={() => setBulkConfirm(null)}
       />
     </div>
   );

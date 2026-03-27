@@ -12,6 +12,7 @@ const RESERVED_SLUGS = new Set([
   "favicon.ico",
   "static",
   "onboarding",
+  "admin",
 ]);
 
 export async function middleware(request: NextRequest) {

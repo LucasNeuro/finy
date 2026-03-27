@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
+<<<<<<< HEAD
 import { toCanonicalDigits, toCanonicalJid } from "@/lib/phone-canonical";
+=======
+import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { upsertChannelContactNoDuplicate } from "@/lib/channel-contacts";
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 import { createClient } from "@/lib/supabase/server";
 
 type ContactTagsPostBody =
@@ -217,9 +222,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Número inválido" }, { status: 400 });
       }
 
-      // Se ainda não existir em channel_contacts (ex.: recém criado manualmente),
-      // criamos um registro mínimo apenas na nossa base, sem depender da UAZAPI.
       const now = new Date().toISOString();
+<<<<<<< HEAD
       const { data: inserted, error: insertErr } = await supabase
         .from("channel_contacts")
         .upsert(
@@ -236,15 +240,25 @@ export async function POST(request: Request) {
         )
         .select("id")
         .single();
+=======
+      const { id: newId, error: upsertErr } = await upsertChannelContactNoDuplicate(supabase, channelId, companyId, {
+        channel_id: channelId,
+        company_id: companyId,
+        jid: jidToInsert,
+        phone: canonicalDigits || rawDigits || null,
+        contact_name: null,
+        first_name: null,
+        synced_at: now,
+      });
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
-      if (insertErr || !inserted) {
+      if (upsertErr) {
         return NextResponse.json(
-          { error: insertErr?.message ?? "Falha ao criar contato para atribuir tags" },
+          { error: upsertErr.message ?? "Falha ao criar contato para atribuir tags" },
           { status: 500 }
         );
       }
-
-      contactId = inserted.id as string;
+      if (newId) contactId = newId;
     }
   }
 

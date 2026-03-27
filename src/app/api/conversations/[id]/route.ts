@@ -11,10 +11,11 @@ import {
 } from "@/lib/redis/inbox-state";
 import { getCachedMediaUrlsBulk } from "@/lib/redis/media-cache";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { isCommercialQueue } from "@/lib/queue/commercial";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { getChatDetails } from "@/lib/uazapi/client";
+import { getChatDetails, extractContactNameFromDetails } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
 const VIDEO_EXT = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
@@ -194,6 +195,19 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const { data: { user } } = await supabase.auth.getUser();
+  const [seeAllErr, manageErr] = await Promise.all([
+    requirePermission(companyId, PERMISSIONS.inbox.see_all),
+    requirePermission(companyId, PERMISSIONS.inbox.manage_tickets),
+  ]);
+  const canBypassCommercial = seeAllErr === null || manageErr === null;
+  if (user && !canBypassCommercial && conversation.queue_id) {
+    const commercial = await isCommercialQueue(supabase, companyId, conversation.queue_id);
+    if (commercial && conversation.assigned_to !== user.id) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+  }
+
   const [channelRes, queueRes, assigneeRes] = await Promise.all([
     conversation.channel_id
       ? supabase.from("channels").select("name").eq("id", conversation.channel_id).eq("company_id", companyId).single()
@@ -285,9 +299,8 @@ export async function GET(
       if (resolved) {
         const numberForApi = jidNorm || canonicalDigits || conversation.customer_phone || jid;
         const detailRes = await getChatDetails(resolved.token, numberForApi, { preview: true });
-        const data = detailRes.data as { wa_contactName?: string; wa_name?: string; name?: string; imagePreview?: string; image?: string; picture?: string } | undefined;
-        
-        const fetchedName = (data?.wa_contactName ?? data?.wa_name ?? data?.name)?.trim() || null;
+        const data = detailRes.data;
+        const fetchedName = extractContactNameFromDetails(data);
         const fetchedImage = (data?.imagePreview ?? data?.image ?? data?.picture)?.trim() || null;
 
         if (fetchedName || fetchedImage) {
@@ -489,6 +502,18 @@ export async function PATCH(
     .single();
   if (fetchError || !existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const [seeAllErr, manageErr] = await Promise.all([
+    requirePermission(companyId, PERMISSIONS.inbox.see_all),
+    requirePermission(companyId, PERMISSIONS.inbox.manage_tickets),
+  ]);
+  const canBypassCommercial = seeAllErr === null || manageErr === null;
+  if (user && !canBypassCommercial && existing.queue_id) {
+    const commercial = await isCommercialQueue(supabase, companyId, existing.queue_id);
+    if (commercial && existing.assigned_to !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };

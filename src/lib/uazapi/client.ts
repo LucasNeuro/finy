@@ -603,6 +603,10 @@ export type ChatDetails = {
   wa_contactName?: string;
   wa_name?: string;
   name?: string;
+  pushName?: string;
+  contactName?: string;
+  contact_name?: string;
+  shortName?: string;
   image?: string;
   imagePreview?: string;
   phone?: string;
@@ -638,6 +642,15 @@ export type ChatDetails = {
   chatbot_disableUntil?: number;
   [key: string]: unknown;
 };
+
+/** Extrai nome do contato da resposta getChatDetails (UAZAPI pode retornar em vários campos). */
+export function extractContactNameFromDetails(data: ChatDetails | undefined): string | null {
+  if (!data) return null;
+  const raw =
+    data.wa_contactName ?? data.wa_name ?? data.name ?? data.pushName ?? data.contactName
+    ?? data.contact_name ?? data.shortName ?? null;
+  return (typeof raw === "string" && raw.trim()) ? raw.trim() : null;
+}
 
 export async function getChatDetails(
   token: string,
@@ -678,6 +691,57 @@ export async function blockChat(
  * phone: formato internacional (ex: 5511999999999) ou JID.
  * name: nome completo (usado como primeiro nome e nome completo).
  */
+/** Erros comuns do motor WhatsApp (UAZAPI) ao adicionar contato — costumam ser transitórios. */
+export function isTransientContactAddError(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("internal-server-error") ||
+    m.includes("critical_unblock") ||
+    /\b500\b/.test(m) ||
+    m.includes("timeout") ||
+    m.includes("econnreset") ||
+    m.includes("etimedout") ||
+    m.includes("rate") ||
+    m.includes("too many")
+  );
+}
+
+/**
+ * Adiciona contato à agenda do WhatsApp com retentativas (erros transitórios do WhatsApp).
+ */
+export async function addContactToAgendaWithRetries(
+  token: string,
+  phone: string,
+  name: string,
+  opts?: { maxAttempts?: number; delaysMs?: number[] }
+): Promise<{ ok: boolean; data?: unknown; error?: string; attempts: number }> {
+  const maxAttempts = Math.max(1, Math.min(5, opts?.maxAttempts ?? 3));
+  const delays = opts?.delaysMs ?? [0, 1200, 2800];
+  const number = phone.trim().replace(/@s\.whatsapp\.net$/, "");
+  const displayName = (name || number).trim();
+  let lastError: string | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const wait = delays[Math.min(attempt, delays.length - 1)] ?? 0;
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    const { data, ok, error, status } = await uazapiFetch("/contact/add", {
+      method: "POST",
+      token,
+      body: { phone: number, name: displayName },
+    });
+    if (ok) {
+      return { ok: true, data, attempts: attempt + 1 };
+    }
+    lastError = error ?? `HTTP ${status}`;
+    if (!isTransientContactAddError(lastError)) {
+      return { ok: false, error: lastError, attempts: attempt + 1 };
+    }
+  }
+  return { ok: false, error: lastError, attempts: maxAttempts };
+}
+
 export async function addContactToAgenda(
   token: string,
   phone: string,
@@ -1451,6 +1515,60 @@ export async function sendMenu(
 }
 
 /**
+ * Cria campanha simples via UAZAPI POST /sender/simple.
+ * Usa delay aleatório (delayMin–delayMax) para reduzir risco de bloqueio.
+ * numbers: JIDs no formato ["5511999999999@s.whatsapp.net"]
+ * scheduled_for: timestamp em ms ou minutos a partir de agora (0 = imediato).
+ */
+export type SendCampaignSimplePayload = {
+  numbers: string[];
+  type: "text" | "image" | "video" | "audio" | "document" | "sticker";
+  delayMin: number;
+  delayMax: number;
+  scheduled_for: number;
+  folder?: string;
+  info?: string;
+  text?: string;
+  file?: string;
+  docName?: string;
+  linkPreview?: boolean;
+};
+
+export type SendCampaignSimpleResponse = {
+  folder_id?: string;
+  count?: number;
+  status?: string;
+};
+
+export async function sendCampaignSimple(
+  token: string,
+  payload: SendCampaignSimplePayload
+): Promise<{ ok: boolean; data?: SendCampaignSimpleResponse; error?: string }> {
+  const { data, ok, error, status } = await uazapiFetch<SendCampaignSimpleResponse>("/sender/simple", {
+    method: "POST",
+    token,
+    body: {
+      numbers: payload.numbers,
+      type: payload.type,
+      delayMin: Math.max(0, payload.delayMin),
+      delayMax: Math.max(payload.delayMin, payload.delayMax),
+      scheduled_for: payload.scheduled_for,
+      ...(payload.folder && { folder: payload.folder }),
+      ...(payload.info && { info: payload.info }),
+      ...(payload.text != null && payload.text !== "" && { text: payload.text }),
+      ...(payload.file && { file: payload.file }),
+      ...(payload.docName && { docName: payload.docName }),
+      ...(payload.linkPreview != null && { linkPreview: payload.linkPreview }),
+    },
+  });
+  return {
+    ok,
+    data: ok ? data : undefined,
+    error: ok ? undefined : (error ?? `HTTP ${status}`),
+  };
+}
+
+/**
  * Baixa mídia de uma mensagem (UAZAPI POST /message/download).
  * id: ID da mensagem na UAZAPI (pode ser "owner:messageid" ou apenas messageid).
  * Retorna fileURL, mimetype, base64Data (se return_base64), transcription (se transcribe).
@@ -1576,6 +1694,7 @@ export const uazapi = {
   sendText,
   sendMedia,
   sendMenu,
+  sendCampaignSimple,
   messageDownload,
   sendMessagePresence,
   sendReaction,

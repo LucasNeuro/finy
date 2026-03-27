@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { SideOver } from "@/components/SideOver";
-import { Loader2, User, Ban, UserPlus, UserMinus } from "lucide-react";
+import { Loader2, User, Ban, UserPlus, UserMinus, MessageCircle, Save } from "lucide-react";
 
 export type Contact = {
   id: string;
@@ -70,6 +70,7 @@ const DETAIL_LABELS: Record<string, string> = {
   wa_unreadCount: "Não lidas",
   phone: "Telefone",
   common_groups: "Grupos em comum",
+  wa_common_groups: "Grupos em comum",
   lead_name: "Nome (lead)",
   lead_fullName: "Nome completo (lead)",
   lead_email: "E-mail (lead)",
@@ -114,6 +115,7 @@ type ContactDetailSideOverProps = {
   companySlug: string;
   onBlockChange?: () => void;
   onTagsSaved?: (contactId: string, tagNames: string[]) => void;
+  onOpenChat?: (contact: Contact) => void;
 };
 
 function numberForApi(contact: Contact): string {
@@ -169,6 +171,7 @@ export function ContactDetailSideOver({
   companySlug,
   onBlockChange,
   onTagsSaved,
+  onOpenChat,
 }: ContactDetailSideOverProps) {
   const [details, setDetails] = useState<ChatDetails | null>(null);
   const [loading, setLoading] = useState(false);
@@ -183,6 +186,9 @@ export function ContactDetailSideOver({
   >([]);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [savingTags, setSavingTags] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [savingContact, setSavingContact] = useState(false);
 
   const apiHeaders = useMemo(
     () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
@@ -214,12 +220,16 @@ export function ContactDetailSideOver({
     if (open && contact) {
       setImageError(false);
       fetchDetails();
+      setEditName((contact.contact_name || contact.first_name || "").trim());
+      setEditPhone((contact.phone || "").replace(/\D/g, ""));
     } else if (!open) {
       setDetails(null);
       setError(null);
       setImageError(false);
       setAvailableTags([]);
       setSelectedTagIds(new Set());
+      setEditName("");
+      setEditPhone("");
     }
   }, [open, contact, fetchDetails]);
 
@@ -390,6 +400,32 @@ export function ContactDetailSideOver({
     }
   };
 
+  const handleSaveContact = async () => {
+    if (!contact) return;
+    setSavingContact(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/contacts/${encodeURIComponent(contact.id)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          contact_name: editName.trim() || null,
+          first_name: editName.trim() || null,
+          phone: editPhone.trim() || null,
+        }),
+      });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) {
+        setError(data?.error ?? "Falha ao salvar contato");
+        return;
+      }
+      onBlockChange?.();
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   return (
     <SideOver open={open} onClose={onClose} title="Detalhes do contato" width={640}>
       {!contact ? (
@@ -436,6 +472,14 @@ export function ContactDetailSideOver({
                       <div className="inline-flex rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
                         <button
                           type="button"
+                          onClick={() => onOpenChat?.(contact)}
+                          className="inline-flex flex-1 items-center justify-center gap-2 min-w-0 px-4 py-3 text-sm font-medium text-[#334155] bg-[#F8FAFC] hover:bg-[#F1F5F9] border-r border-[#E2E8F0] last:border-r-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clicvend-orange transition-all"
+                        >
+                          <MessageCircle className="h-4 w-4 shrink-0" />
+                          <span className="truncate">Abrir chat</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={handleBlockToggle}
                           disabled={blockLoading}
                           className={`inline-flex flex-1 items-center justify-center gap-2 min-w-0 px-4 py-3 text-sm font-medium transition-all border-r border-[#E2E8F0] last:border-r-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-clicvend-orange ${
@@ -475,6 +519,47 @@ export function ContactDetailSideOver({
                   )}
                 </div>
               </div>
+              {/* Tags do contato */}
+              <div className="border-t border-[#E2E8F0] pt-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-[#334155]">Editar contato salvo</p>
+                    <p className="text-xs text-[#64748B]">Atualize nome e telefone deste contato na lista.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveContact}
+                    disabled={savingContact}
+                    className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-3 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+                  >
+                    {savingContact ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                    Salvar contato
+                  </button>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-[#64748B]">Nome</label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      maxLength={120}
+                      className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-[#64748B]">Telefone</label>
+                    <input
+                      type="text"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value.replace(/\D/g, ""))}
+                      maxLength={20}
+                      className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Tags do contato */}
               <div className="border-t border-[#E2E8F0] pt-4">
                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -605,20 +690,47 @@ export function ContactDetailSideOver({
               )}
               {details && (
                 <div className="space-y-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                    Outras informações <span className="font-normal normal-case">(dados do WhatsApp /chat/details)</span>
-                  </h3>
                   <dl className="space-y-2 text-sm">
                     {(() => {
-                      const skip = new Set(["name", "wa_name", "wa_contactName", "phone", "image", "imagePreview"]);
+                      const skip = new Set([
+                        "name",
+                        "wa_name",
+                        "wa_contactName",
+                        "phone",
+                        "image",
+                        "imagePreview",
+                        "id",
+                        "owner",
+                        "wa_fastid",
+                        "wa_chatid",
+                        "wa_chatlid",
+                        "lead_tags",
+                        "wa_label",
+                      ]);
                       const entries = Object.entries(details).filter(
-                        ([k, v]) => !skip.has(k) && v !== undefined && v !== null && v !== ""
+                        ([k, v]) =>
+                          !skip.has(k) &&
+                          !k.toLowerCase().endsWith("_id") &&
+                          v !== undefined &&
+                          v !== null &&
+                          v !== ""
                       );
+                      if (entries.length === 0) {
+                        return (
+                          <p className="text-xs text-[#94A3B8]">
+                            Sem informações adicionais relevantes para exibir.
+                          </p>
+                        );
+                      }
                       return entries.map(([key, value]) => {
                         const label = DETAIL_LABELS[key] ?? key;
                         let display: string;
+                        let listDisplay: string[] | null = null;
                         if (typeof value === "boolean") display = value ? "Sim" : "Não";
-                        else if (Array.isArray(value)) display = value.join(", ");
+                        else if (Array.isArray(value)) {
+                          listDisplay = value.map((v) => String(v)).filter(Boolean);
+                          display = listDisplay.join(", ");
+                        }
                         else if (typeof value === "number" && (key.includes("Timestamp") || key.includes("At") || key.includes("Time") || key.includes("Expiration"))) {
                           try {
                             display = value > 0 ? new Date(value).toLocaleString("pt-BR") : "—";
@@ -626,11 +738,34 @@ export function ContactDetailSideOver({
                             display = String(value);
                           }
                         } else if (typeof value === "object") display = JSON.stringify(value);
-                        else display = String(value);
+                        else {
+                          display = String(value);
+                          if (key === "common_groups" || key === "wa_common_groups") {
+                            listDisplay = display
+                              .split(/\s*,\s*|\n+/)
+                              .map((item) => item.replace(/\(.*?\)/g, "").trim())
+                              .filter(Boolean);
+                          }
+                        }
                         return (
                           <div key={key}>
                             <dt className="text-[#64748B]">{label}</dt>
-                            <dd className="font-medium text-[#1E293B] break-words whitespace-pre-wrap">{display}</dd>
+                            <dd className="font-medium text-[#1E293B] break-words whitespace-pre-wrap">
+                              {listDisplay && listDisplay.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                  {listDisplay.map((item, idx) => (
+                                    <span
+                                      key={`${key}-${idx}`}
+                                      className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700"
+                                    >
+                                      {item}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                display
+                              )}
+                            </dd>
                           </div>
                         );
                       });

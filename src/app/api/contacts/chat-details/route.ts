@@ -1,7 +1,8 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { toCanonicalDigits, toCanonicalJid } from "@/lib/phone-canonical";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { getChatDetails } from "@/lib/uazapi/client";
+import { getChatDetails, extractContactNameFromDetails, type ChatDetails } from "@/lib/uazapi/client";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -57,17 +58,28 @@ export async function POST(request: Request) {
   const avatarUrl = (data as { imagePreview?: string; image?: string }).imagePreview
     || (data as { image?: string }).image
     || null;
+<<<<<<< HEAD
   const contactName = ((data as { wa_contactName?: string }).wa_contactName
     ?? (data as { wa_name?: string }).wa_name
     ?? (data as { name?: string }).name)?.trim() || null;
   const canonicalDigits = toCanonicalDigits(number);
   const canonicalJid = toCanonicalJid(number, false).toLowerCase();
+=======
+  const contactName = extractContactNameFromDetails(data as ChatDetails);
+  const digits = number.replace(/\D/g, "").replace(/@.*$/, "");
+  const canonicalDigits = toCanonicalDigits(digits) ?? digits;
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   const hasUpdates = (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) || contactName;
   if (hasUpdates) {
     const supabase = await createClient();
+<<<<<<< HEAD
     const isGroup = number.toLowerCase().includes("@g.us");
     if (!isGroup) {
+=======
+    const canonicalJid = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : (number.includes("@") ? number : `${digits}@s.whatsapp.net`);
+    const jids = number.includes("@") && number !== canonicalJid ? [canonicalJid, number] : [canonicalJid];
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
     const contactUpdates: Record<string, unknown> = { synced_at: new Date().toISOString() };
     if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
       contactUpdates.avatar_url = avatarUrl.trim();
@@ -76,6 +88,7 @@ export async function POST(request: Request) {
       contactUpdates.contact_name = contactName;
       contactUpdates.first_name = contactName;
     }
+<<<<<<< HEAD
     await supabase
       .from("channel_contacts")
       .upsert(
@@ -100,6 +113,24 @@ export async function POST(request: Request) {
         .eq("jid", rawDigits);
     }
     }
+=======
+    await Promise.all(
+      jids.map((jid) =>
+        supabase
+          .from("channel_contacts")
+          .upsert(
+            {
+              channel_id: channelId,
+              company_id: companyId,
+              jid,
+              ...(canonicalDigits ? { phone: canonicalDigits } : {}),
+              ...contactUpdates,
+            },
+            { onConflict: "channel_id,jid" }
+          )
+      )
+    );
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
     if (conversationId && contactName) {
       await supabase
         .from("conversations")

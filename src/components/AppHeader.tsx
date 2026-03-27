@@ -81,9 +81,10 @@ export function AppHeader() {
         })
         .catch(() => {});
     const fetchNotifications = () =>
-      fetch("/api/notifications?limit=20", { credentials: "include", headers: apiHeaders, cache: "no-store" })
-        .then((r) => r.json())
-        .then((data) => {
+      fetch("/api/notifications?limit=30", { credentials: "include", headers: apiHeaders, cache: "no-store" })
+        .then(async (r) => {
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) return;
           if (Array.isArray(data?.items)) {
             const items = data.items as NotificationItem[];
             setNotifications(items);
@@ -97,9 +98,40 @@ export function AppHeader() {
     const interval = setInterval(() => {
       fetchCounts();
       fetchNotifications();
-    }, 60_000);
-    return () => clearInterval(interval);
+    }, 12_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        fetchCounts();
+        fetchNotifications();
+      }
+    };
+    const onRefresh = () => {
+      fetchNotifications();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("clicvend:notifications-refresh", onRefresh);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("clicvend:notifications-refresh", onRefresh);
+    };
   }, [slug, canShowNewNotifications]);
+
+  useEffect(() => {
+    if (!slug || !canShowNewNotifications) return;
+    const apiHeaders = { "X-Company-Slug": slug };
+    fetch("/api/notifications?limit=30", { credentials: "include", headers: apiHeaders, cache: "no-store" })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return;
+        if (Array.isArray(data?.items)) {
+          const items = data.items as NotificationItem[];
+          setNotifications(items);
+          setNotificationsUnread(typeof data?.unread === "number" ? data.unread : items.filter((n) => !n.is_read).length);
+        }
+      })
+      .catch(() => {});
+  }, [pathname, slug, canShowNewNotifications]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -165,11 +197,19 @@ export function AppHeader() {
             <button
               type="button"
               onClick={() => setNotificationsOpen((o) => !o)}
-              className="flex items-center justify-center rounded-md p-2.5 text-[#64748B] hover:bg-amber-50 hover:text-amber-700 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-200"
+              className="relative flex items-center justify-center rounded-md p-2.5 text-[#64748B] hover:bg-amber-50 hover:text-amber-700 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-200"
               aria-label="Notificações"
               title="Notificações"
             >
               <Bell className="h-5 w-5 shrink-0" />
+              {notificationsUnread > 0 && (
+                <span
+                  className="absolute -right-1 -top-1 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-[#EA580C] px-1 text-[11px] font-bold leading-none text-white shadow-md ring-2 ring-white"
+                  aria-hidden
+                >
+                  {notificationsUnread > 99 ? "99+" : notificationsUnread}
+                </span>
+              )}
             </button>
             {notificationsOpen && (
               <div className="absolute right-[2.75rem] top-[120%] z-50 w-[360px] max-w-[92vw] rounded-lg border border-[#E2E8F0] bg-white shadow-xl">
@@ -192,19 +232,17 @@ export function AppHeader() {
                     </div>
                   ) : (
                     <ul className="divide-y divide-[#E2E8F0]/70">
-                      {notifications.map((n) => (
-                        <li
-                          key={n.id}
-                          className={`px-4 py-3 text-sm ${n.is_read ? "bg-white" : "bg-[#F8FAFC]"}`}
-                        >
-                          <div className="flex items-start gap-3">
+                      {notifications.map((n) => {
+                        const href = n.link?.startsWith("/") ? n.link : n.link ? `/${n.link}` : null;
+                        const inner = (
+                          <>
                             <span
-                              className={`mt-1 h-2.5 w-2.5 rounded-full ${
+                              className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
                                 n.is_read ? "bg-[#E2E8F0]" : "bg-clicvend-green"
                               }`}
                               aria-hidden
                             />
-                            <div className="min-w-0 flex-1">
+                            <div className="min-w-0 flex-1 text-left">
                               <div className="flex items-center justify-between gap-2">
                                 <p className="truncate text-[13px] font-semibold text-[#0F172A]">
                                   {n.title}
@@ -219,9 +257,27 @@ export function AppHeader() {
                                 </p>
                               )}
                             </div>
-                          </div>
-                        </li>
-                      ))}
+                          </>
+                        );
+                        return (
+                          <li
+                            key={n.id}
+                            className={`text-sm ${n.is_read ? "bg-white" : "bg-[#F8FAFC]"}`}
+                          >
+                            {href ? (
+                              <Link
+                                href={href}
+                                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-amber-50/60"
+                                onClick={() => setNotificationsOpen(false)}
+                              >
+                                {inner}
+                              </Link>
+                            ) : (
+                              <div className="flex items-start gap-3 px-4 py-3">{inner}</div>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>

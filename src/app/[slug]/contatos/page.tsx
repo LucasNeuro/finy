@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { usePathname } from "next/navigation";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import {
   useReactTable,
   getCoreRowModel,
@@ -10,7 +12,11 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
+<<<<<<< HEAD
 import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Download, Upload, Megaphone, ShieldCheck, History } from "lucide-react";
+=======
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload, Send } from "lucide-react";
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SideOver } from "@/components/SideOver";
@@ -19,6 +25,7 @@ import { GroupDetailSideOver, type Group } from "./GroupDetailSideOver";
 import { GroupManageSideOver } from "./GroupManageSideOver";
 import { CreateCommunitySideOver } from "./CreateCommunitySideOver";
 import { CreateGroupSideOver } from "./CreateGroupSideOver";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 
 type Channel = { id: string; name: string };
 
@@ -72,12 +79,26 @@ function canonicalContactDigits(phone: string | null | undefined, jid: string | 
   return digits;
 }
 
+<<<<<<< HEAD
 type PipelineBlockedReason = "missing_opt_in" | "opted_out" | "invalid_number";
 
 function blockedReasonLabel(reason: PipelineBlockedReason): string {
   if (reason === "missing_opt_in") return "Sem opt-in";
   if (reason === "opted_out") return "Opt-out ativo";
   return "Numero invalido";
+=======
+/** Nome para exibição: se contact_name/first_name for o número, mostra "Sem Nome" em vez do número na coluna NOME. */
+function displayContactName(c: { contact_name?: string | null; first_name?: string | null; phone?: string | null; jid?: string | null }): string {
+  const raw = (c.contact_name || c.first_name || "").trim();
+  if (!raw) return "Sem Nome";
+  const nameDigits = raw.replace(/\D/g, "").trim();
+  if (nameDigits.length >= 10) {
+    const canonicalPhone = canonicalContactDigits(c.phone, c.jid);
+    const canonicalName = toCanonicalDigits(nameDigits) ?? nameDigits;
+    if (canonicalPhone && canonicalName === canonicalPhone) return "Sem Nome";
+  }
+  return raw;
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 }
 
 /** URL de avatar: se for externa (http/https), usa proxy para evitar CORS/referrer e permitir cache. */
@@ -541,8 +562,8 @@ function GroupsManageActions({
           </option>
           {availableContacts.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.contact_name || c.first_name || c.phone || c.jid}
-              {c.phone ? ` (${c.phone})` : ""}
+              {displayContactName(c)}
+              {c.phone ? ` (${formatPhoneBrazil(c.phone)})` : ""}
             </option>
           ))}
         </select>
@@ -562,7 +583,7 @@ function GroupsManageActions({
               <tbody>
                 {selectedParticipants.map((c) => (
                   <tr key={c.id} className="border-b border-[#E2E8F0] last:border-0 hover:bg-[#F8FAFC]">
-                    <td className="px-3 py-2 text-[#1E293B]">{c.contact_name || c.first_name || "—"}</td>
+                    <td className="px-3 py-2 text-[#1E293B]">{displayContactName(c)}</td>
                     <td className="px-3 py-2 text-[#64748B]">{c.phone || c.jid}</td>
                     <td className="px-3 py-2 text-right">
                       <button
@@ -691,8 +712,12 @@ function GroupsManageActions({
 
 export default function ContatosPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = pathname?.split("/").filter(Boolean)[0] ?? "";
-  const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+  const apiHeaders = useMemo(
+    () => (slug ? { "X-Company-Slug": slug } : undefined),
+    [slug]
+  );
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -717,6 +742,13 @@ export default function ContatosPage() {
   const [createGroupContext, setCreateGroupContext] = useState<{ contacts: Contact[]; channelId: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Contact | null>(null);
   const [deleteGroupConfirm, setDeleteGroupConfirm] = useState<Group | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant?: "danger";
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deletingGroup, setDeletingGroup] = useState(false);
   const [blockList, setBlockList] = useState<string[]>([]);
@@ -738,13 +770,16 @@ export default function ContatosPage() {
   const [addContactResult, setAddContactResult] = useState<{ ok: number; fail: number } | null>(null);
   const [addContactError, setAddContactError] = useState<string | null>(null);
   const [bulkContactsText, setBulkContactsText] = useState("");
-  const [bulkContactsRows, setBulkContactsRows] = useState<{ number: string; name: string }[]>([]);
+  const [bulkContactsRows, setBulkContactsRows] = useState<
+    { number: string; contact_name: string; first_name?: string }[]
+  >([]);
   const [bulkContactsImporting, setBulkContactsImporting] = useState(false);
   const [contactTagsLoading, setContactTagsLoading] = useState(false);
   const [availableContactTags, setAvailableContactTags] = useState<
     { id: string; name: string; color_hex: string | null; category_name: string; active: boolean }[]
   >([]);
   const [selectedNewContactTagIds, setSelectedNewContactTagIds] = useState<Set<string>>(new Set());
+<<<<<<< HEAD
   const [pipelineSideOverOpen, setPipelineSideOverOpen] = useState(false);
   const [pipelineDraftName, setPipelineDraftName] = useState("");
   const [pipelineBatchPlan, setPipelineBatchPlan] = useState("500,300,150");
@@ -757,6 +792,29 @@ export default function ContatosPage() {
     eligible: number;
     blocked: number;
   } | null>(null);
+=======
+  const [sendToQueueSideOverOpen, setSendToQueueSideOverOpen] = useState(false);
+  const [sendToQueueChannelId, setSendToQueueChannelId] = useState("");
+  const [sendToQueueQueueId, setSendToQueueQueueId] = useState("");
+  const [sendToQueueLoading, setSendToQueueLoading] = useState(false);
+  const [queues, setQueues] = useState<{ id: string; name: string; slug: string }[]>([]);
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessContacts = permissions.includes("contacts.view") || permissions.includes("contacts.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessContacts) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessContacts, router]);
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -807,6 +865,7 @@ export default function ContatosPage() {
     });
   };
 
+<<<<<<< HEAD
   const permissionsKey = useMemo(() => (slug ? (["auth-permissions", slug] as const) : null), [slug]);
   const { data: permissionsPayload } = useSWR(
     permissionsKey,
@@ -823,6 +882,26 @@ export default function ContatosPage() {
   const allowPhoneAgendaWipe =
     Array.isArray(permissionsPayload?.permissions) &&
     permissionsPayload.permissions.includes("channels.manage");
+=======
+  // Ao abrir o modal de adicionar contato, pré-selecionar o canal para evitar salvar no lugar errado
+  useEffect(() => {
+    if (!addContactSideOverOpen || channels.length === 0) return;
+    if (filterChannelId && channels.some((c) => c.id === filterChannelId)) {
+      setAddContactChannelId(filterChannelId);
+    } else if (channels.length === 1) {
+      setAddContactChannelId(channels[0].id);
+    }
+  }, [addContactSideOverOpen, filterChannelId, channels]);
+
+  // Carrega filas ao abrir o SideOver de envio em massa
+  useEffect(() => {
+    if (!sendToQueueSideOverOpen || !slug) return;
+    fetch(`/api/queues?for_management=1`, { credentials: "include", headers: apiHeaders })
+      .then((r) => r.json())
+      .then((data) => setQueues(Array.isArray(data) ? data : []))
+      .catch(() => setQueues([]));
+  }, [sendToQueueSideOverOpen, slug, apiHeaders]);
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   const contactsKey = useMemo(() => ["contacts", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
   const groupsKey = useMemo(() => ["groups", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
@@ -874,6 +953,24 @@ export default function ContatosPage() {
   const groups = groupsData ?? [];
   const communities = communitiesData ?? [];
 
+  // Pré-seleciona canal ao abrir SideOver de envio em massa
+  useEffect(() => {
+    if (!sendToQueueSideOverOpen || channels.length === 0) return;
+    const ids = Array.from(selectedContactIds);
+    const selected = contacts.filter((c) => ids.includes(c.id));
+    const channelIds = [...new Set(selected.map((c) => c.channel_id))];
+    if (channelIds.length === 1) {
+      setSendToQueueChannelId(channelIds[0]);
+      setSendToQueueQueueId("");
+    } else if (filterChannelId && channels.some((c) => c.id === filterChannelId)) {
+      setSendToQueueChannelId(filterChannelId);
+      setSendToQueueQueueId("");
+    } else {
+      setSendToQueueChannelId(channels[0]?.id ?? "");
+      setSendToQueueQueueId("");
+    }
+  }, [sendToQueueSideOverOpen, selectedContactIds, contacts, filterChannelId, channels]);
+
   const dedupedContacts = useMemo(() => {
     const byKey = new Map<string, Contact>();
     for (const c of contacts) {
@@ -908,11 +1005,14 @@ export default function ContatosPage() {
     return Array.from(byKey.values());
   }, [contacts]);
 
+  const blockListFetchingRef = useRef(false);
   const fetchBlockList = useCallback(() => {
     if (!filterChannelId) {
       setBlockList([]);
       return;
     }
+    if (blockListFetchingRef.current) return;
+    blockListFetchingRef.current = true;
     setBlockListLoading(true);
     fetch(`/api/contacts/blocklist?channel_id=${encodeURIComponent(filterChannelId)}`, {
       credentials: "include",
@@ -921,90 +1021,26 @@ export default function ContatosPage() {
       .then((r) => r.json())
       .then((data) => setBlockList(Array.isArray(data?.blockList) ? data.blockList : []))
       .catch(() => setBlockList([]))
-      .finally(() => setBlockListLoading(false));
+      .finally(() => {
+        blockListFetchingRef.current = false;
+        setBlockListLoading(false);
+      });
   }, [filterChannelId, apiHeaders]);
 
-  const parseContactsCSVLine = (line: string, sep: string): string[] => {
-    const parts: string[] = [];
-    let current = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') {
-        inQuotes = !inQuotes;
-      } else if (!inQuotes && c === sep) {
-        parts.push(current.trim());
-        current = "";
-      } else {
-        current += c;
+  /** Extrai números de texto colado (linhas, vírgulas, ponto e vírgula). Mínimo 10 dígitos. */
+  const parsePastedNumbers = (text: string): { number: string; contact_name: string; first_name?: string }[] => {
+    const parts = text.split(/[\n\r,;\t]+/).map((p) => p.trim()).filter(Boolean);
+    const rows: { number: string; contact_name: string; first_name?: string }[] = [];
+    const seen = new Set<string>();
+    for (const part of parts) {
+      const digits = part.replace(/\D/g, "").trim();
+      if (digits.length >= 10 && !seen.has(digits)) {
+        seen.add(digits);
+        rows.push({ number: digits, contact_name: digits, first_name: undefined });
       }
     }
-    parts.push(current.trim());
-    return parts;
+    return rows;
   };
-
-  const handleDownloadContactsTemplate = () => {
-    const bom = "\uFEFF";
-    // Modelo mais próximo da tabela channel_contacts
-    const header = "phone;contact_name;first_name;avatar_url";
-    const example1 =
-      "5511999990000;João Silva;João;https://exemplo.com/avatar-joao.jpg";
-    const example2 =
-      "5548999991111;Maria - Cliente VIP;Maria;https://exemplo.com/avatar-maria.jpg";
-    const example3 = "5511944442222;Sem Nome (usa número);;";
-    const content = [header, example1, example2, example3].join("\n");
-    const blob = new Blob([bom + content], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "modelo-contatos.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const parseContactsCSVFile = (
-    file: File
-  ): Promise<{ number: string; name: string }[]> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const text = String(reader.result ?? "");
-        const lines = text
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean);
-        if (lines.length === 0) {
-          resolve([]);
-          return;
-        }
-        const first = lines[0].toLowerCase();
-        // Aceita cabeçalho antigo (telefone/número) ou novo (phone;contact_name;first_name;avatar_url)
-        const hasHeader =
-          first.includes("telefone") ||
-          first.includes("numero") ||
-          first.includes("phone");
-        const dataLines = hasHeader ? lines.slice(1) : lines;
-        const rows: { number: string; name: string }[] = [];
-        for (const line of dataLines) {
-          const sep = line.includes(";") ? ";" : ",";
-          const parts = parseContactsCSVLine(line, sep).map((p) =>
-            p.replace(/^"|"$/g, "").trim()
-          );
-          // Coluna 0: phone (obrigatório)
-          // Coluna 1: contact_name (opcional)
-          // Coluna 2: first_name (opcional, hoje ignorado)
-          // Coluna 3: avatar_url (opcional, hoje ignorado)
-          const number = (parts[0] ?? "").replace(/\D/g, "");
-          const contactName = (parts[1] ?? "").trim();
-          const name = contactName;
-          if (!number) continue;
-          rows.push({ number, name: name || number });
-        }
-        resolve(rows);
-      };
-      reader.onerror = () => reject(new Error("Erro ao ler arquivo"));
-      reader.readAsText(file, "UTF-8");
-    });
 
   useEffect(() => {
     setLoading(true);
@@ -1207,6 +1243,33 @@ export default function ContatosPage() {
     setDetailOpen(true);
   };
 
+  const openContactChat = useCallback(async (contact: Contact) => {
+    const base = slug ? `/${slug}` : "";
+    const jid = (contact.jid || "").trim();
+    if (!jid) return;
+    try {
+      const params = new URLSearchParams({
+        channel_id: contact.channel_id,
+        jid,
+        customer_phone: contact.phone ?? "",
+        customer_name: (contact.contact_name ?? contact.first_name ?? "").trim(),
+        assign_to_me: "1",
+      });
+      const res = await fetch(`/api/conversations/find-or-create?${params.toString()}`, {
+        credentials: "include",
+        headers: apiHeaders ?? {},
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.id) {
+        router.push(`${base}/conversas/${data.id}`);
+        return;
+      }
+      setAlertMessage(data?.error ?? "Não foi possível abrir o chat.");
+    } catch {
+      setAlertMessage("Erro de rede ao abrir o chat.");
+    }
+  }, [slug, apiHeaders, router]);
+
   const openGroupDetail = (group: Group) => {
     setDetailGroup(group);
     setDetailGroupOpen(true);
@@ -1318,16 +1381,16 @@ export default function ContatosPage() {
               });
             }}
             className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
-            aria-label={`Selecionar ${row.original.contact_name || row.original.first_name || "contato"}`}
+            aria-label={`Selecionar ${displayContactName(row.original)}`}
           />
         ),
       },
       {
         header: "Nome",
-        accessorFn: (c) => c.contact_name || c.first_name || formatPhoneBrazil(c.phone || c.jid || "") || "—",
+        accessorFn: (c) => displayContactName(c),
         cell: ({ row }) => {
           const c = row.original;
-          const name = c.contact_name || c.first_name || formatPhoneBrazil(c.phone || c.jid || "") || "—";
+          const name = displayContactName(c);
           const avatarUrl = c.avatar_url?.trim() || null;
           return (
             <div className="flex items-center gap-3">
@@ -1434,6 +1497,15 @@ export default function ContatosPage() {
           <div className="inline-flex rounded-lg border border-[#E2E8F0] bg-white overflow-hidden">
             <button
               type="button"
+              onClick={() => openContactChat(row.original)}
+              className="rounded-none border-r border-[#E2E8F0] p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange last:border-r-0"
+              title="Abrir chat"
+              aria-label="Abrir chat do contato"
+            >
+              <MessageCircle className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
               onClick={() => openDetail(row.original)}
               className="rounded-none border-r border-[#E2E8F0] p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-orange last:border-r-0"
               title="Ver detalhes"
@@ -1454,7 +1526,7 @@ export default function ContatosPage() {
         ),
       },
     ],
-    [channels, selectedContactIds]
+    [channels, selectedContactIds, openContactChat]
   );
 
   const groupColumns = useMemo<ColumnDef<Group>[]>(
@@ -1615,7 +1687,9 @@ export default function ContatosPage() {
         (c.contact_name?.toLowerCase().includes(searchLower) ||
           c.first_name?.toLowerCase().includes(searchLower) ||
           c.phone?.toLowerCase().includes(searchLower) ||
-          c.jid?.toLowerCase().includes(searchLower))
+          c.jid?.toLowerCase().includes(searchLower) ||
+          (Array.isArray(c.tag_names) &&
+            c.tag_names.some((t) => t?.toLowerCase().includes(searchLower))))
     );
   }, [dedupedContacts, searchLower]);
 
@@ -1867,6 +1941,7 @@ export default function ContatosPage() {
     return () => window.clearTimeout(id);
   }, [alertMessage]);
 
+<<<<<<< HEAD
   const openPipelineFromSelection = () => {
     if (selectedContactIds.size === 0) return;
     const now = new Date();
@@ -1925,6 +2000,11 @@ export default function ContatosPage() {
       setPipelineSaving(false);
     }
   };
+=======
+  if (slug && permissionsData !== undefined && !canAccessContacts) {
+    return null;
+  }
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   return (
     <div className="flex flex-col gap-4 px-4 py-6 sm:px-6">
@@ -1958,7 +2038,7 @@ export default function ContatosPage() {
               onChange={(e) => setListSearch(e.target.value)}
               placeholder={
                 activeTab === "contacts"
-                  ? "Buscar contatos..."
+                  ? "Buscar por nome, número ou tag..."
                   : activeTab === "groups"
                     ? "Buscar grupos..."
                     : activeTab === "blocked"
@@ -1979,7 +2059,11 @@ export default function ContatosPage() {
                 title={
                   syncing === ch.id
                     ? "Sincronizando contatos, grupos e comunidades…"
+<<<<<<< HEAD
                     : `Sincronizar agenda (contatos, grupos e comunidades) — não importa histórico de mensagens: ${ch.name}`
+=======
+                    : `Sincronizar: traz contatos que têm conversa com ${ch.name} (não usa agenda do celular)`
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
                 }
               >
                 <span className="relative z-10 flex items-center justify-center gap-1 truncate">
@@ -2023,8 +2107,15 @@ export default function ContatosPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (!window.confirm("Limpar contatos, grupos e comunidades desta conexão e sincronizar de novo com o WhatsApp? Isso remove duplicatas e atualiza a lista.")) return;
-                  handleSync(filterChannelId, true);
+                  setBulkConfirm({
+                    title: "Limpar e sincronizar?",
+                    message:
+                      "Limpar contatos, grupos e comunidades desta conexão e sincronizar de novo com o WhatsApp? Isso remove duplicatas e atualiza a lista.",
+                    confirmLabel: "Limpar e sincronizar",
+                    onConfirm: async () => {
+                      await handleSync(filterChannelId, true);
+                    },
+                  });
                 }}
                 disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
                 className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60"
@@ -2140,7 +2231,9 @@ export default function ContatosPage() {
             <div className="p-8 text-center text-[#64748B]">
               <Users className="mx-auto h-12 w-12 text-[#94A3B8]" />
               <p className="mt-2">Nenhum contato sincronizado.</p>
-              <p className="mt-1 text-sm">Conecte um número em Conexões e clique em Sincronizar para trazer a agenda.</p>
+              <p className="mt-1 text-sm">
+                Conecte um número em Conexões e clique no botão da instância (ex.: IMBOX_01) para trazer contatos que têm conversa com ela — não usa agenda do celular.
+              </p>
             </div>
           ) : (
             <>
@@ -2161,7 +2254,7 @@ export default function ContatosPage() {
                             .map((id) => {
                               const c = contacts.find((x) => x.id === id);
                               if (!c) return "";
-                              const name = (c.contact_name || c.first_name || "").trim() || "—";
+                              const name = displayContactName(c);
                               const phone = (c.phone || c.jid || "").trim() || "—";
                               const conn = channelName(c.channel_id);
                               return `"${name}";"${phone}";"${conn}"`;
@@ -2250,30 +2343,60 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={contactsActionLoading}
-                      onClick={async () => {
-                        if (!window.confirm(`Bloquear ${selectedContactIds.size} contato(s) no WhatsApp?`)) return;
-                        setContactsActionLoading(true);
-                        try {
-                          const ids = Array.from(selectedContactIds);
-                          await Promise.all(
-                            ids.map((id) => {
-                              const c = contacts.find((x) => x.id === id);
-                              if (!c) return Promise.resolve();
-                              const number = (c.phone ?? c.jid ?? "").replace(/\D/g, "") || c.jid.replace(/@.*$/, "");
-                              return fetch("/api/contacts/block", {
-                                method: "POST",
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json", ...apiHeaders },
-                                body: JSON.stringify({ channel_id: c.channel_id, number, block: true }),
-                              });
-                            })
-                          );
-                          setSelectedContactIds(new Set());
-                          mutateContacts();
-                          if (filterChannelId) fetchBlockList();
-                        } finally {
-                          setContactsActionLoading(false);
+                      onClick={() => {
+                        const ids = Array.from(selectedContactIds);
+                        const selected = contacts.filter((c) => ids.includes(c.id));
+                        const channelIds = [...new Set(selected.map((c) => c.channel_id))];
+                        if (channelIds.length > 1) {
+                          setAlertMessage("Selecione contatos de uma única conexão para enviar em massa.");
+                          return;
                         }
+                        if (channelIds.length === 0) return;
+                        setSendToQueueSideOverOpen(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] hover:text-clicvend-orange last:border-r-0"
+                      title="Adicionar os contatos à fila de envio em massa. Depois, na tela de Conversas, você poderá escrever a mensagem e enviar para todos com delay."
+                    >
+                      <Send className="h-4 w-4" />
+                      Enviar pra todos
+                    </button>
+                    <button
+                      type="button"
+                      disabled={contactsActionLoading}
+                      onClick={() => {
+                        const total = selectedContactIds.size;
+                        if (total === 0) return;
+                        setBulkConfirm({
+                          title: "Bloquear contatos?",
+                          message: `Bloquear ${total} contato(s) no WhatsApp?`,
+                          confirmLabel: "Bloquear",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setContactsActionLoading(true);
+                            try {
+                              const ids = Array.from(selectedContactIds);
+                              await Promise.all(
+                                ids.map((id) => {
+                                  const c = contacts.find((x) => x.id === id);
+                                  if (!c) return Promise.resolve();
+                                  const number = (c.phone ?? c.jid ?? "").replace(/\D/g, "") || c.jid.replace(/@.*$/, "");
+                                  return fetch("/api/contacts/block", {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                                    body: JSON.stringify({ channel_id: c.channel_id, number, block: true }),
+                                  });
+                                })
+                              );
+                              setSelectedContactIds(new Set());
+                              mutateContacts();
+                              if (filterChannelId) fetchBlockList();
+                              setAlertMessage(`✅ ${ids.length} contato(s) bloqueado(s).`);
+                            } finally {
+                              setContactsActionLoading(false);
+                            }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60 last:border-r-0"
                       title="Bloquear os contatos selecionados no WhatsApp. Eles não poderão enviar mensagens para este número."
@@ -2332,25 +2455,35 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={contactsActionLoading}
-                      onClick={async () => {
-                        if (!window.confirm(`Excluir ${selectedContactIds.size} contato(s) da lista? Eles continuarão no WhatsApp; apenas serão removidos desta lista.`)) return;
-                        setContactsActionLoading(true);
-                        try {
-                          const ids = Array.from(selectedContactIds);
-                          await Promise.all(
-                            ids.map((id) =>
-                              fetch(`/api/contacts/${encodeURIComponent(id)}`, {
-                                method: "DELETE",
-                                credentials: "include",
-                                headers: apiHeaders,
-                              })
-                            )
-                          );
-                          setSelectedContactIds(new Set());
-                          mutateContacts();
-                        } finally {
-                          setContactsActionLoading(false);
-                        }
+                      onClick={() => {
+                        const total = selectedContactIds.size;
+                        if (total === 0) return;
+                        setBulkConfirm({
+                          title: "Excluir contatos da lista?",
+                          message: `Excluir ${total} contato(s) da lista? Eles continuarão no WhatsApp; apenas serão removidos desta lista.`,
+                          confirmLabel: "Excluir",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setContactsActionLoading(true);
+                            try {
+                              const ids = Array.from(selectedContactIds);
+                              await Promise.all(
+                                ids.map((id) =>
+                                  fetch(`/api/contacts/${encodeURIComponent(id)}`, {
+                                    method: "DELETE",
+                                    credentials: "include",
+                                    headers: apiHeaders,
+                                  })
+                                )
+                              );
+                              setSelectedContactIds(new Set());
+                              mutateContacts();
+                              setAlertMessage(`✅ ${ids.length} contato(s) removido(s) da lista.`);
+                            } finally {
+                              setContactsActionLoading(false);
+                            }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60 last:border-r-0"
                       title="Remover os contatos selecionados apenas da lista desta aplicação. Eles continuam no WhatsApp e na agenda do celular."
@@ -2370,7 +2503,7 @@ export default function ContatosPage() {
                   </div>
                 </div>
               )}
-              <div className="overflow-auto max-h-[60vh] min-h-[200px]">
+              <div className="max-h-[300px] overflow-auto min-h-[200px]">
                 <table className="w-full min-w-[760px] border-collapse">
                   <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
                     {table.getHeaderGroups().map((hg) => (
@@ -2548,27 +2681,36 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={selectedGroupIds.size === 0 || deletingGroup}
-                      onClick={async () => {
+                      onClick={() => {
                         const ids = Array.from(selectedGroupIds);
-                        if (ids.length === 0 || !window.confirm(`Excluir ${ids.length} grupo(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`)) return;
-                        setDeletingGroup(true);
-                        try {
-                          for (const id of ids) {
-                            const g = groups.find((x) => x.id === id);
-                            if (g?.jid && g?.channel_id) {
-                              await fetch("/api/groups/delete", {
-                                method: "POST",
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json", ...apiHeaders },
-                                body: JSON.stringify({ channel_id: g.channel_id, groupjid: g.jid, leave_first: true }),
-                              });
+                        if (ids.length === 0) return;
+                        setBulkConfirm({
+                          title: "Excluir grupos selecionados?",
+                          message: `Excluir ${ids.length} grupo(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`,
+                          confirmLabel: "Excluir",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setDeletingGroup(true);
+                            try {
+                              for (const id of ids) {
+                                const g = groups.find((x) => x.id === id);
+                                if (g?.jid && g?.channel_id) {
+                                  await fetch("/api/groups/delete", {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                                    body: JSON.stringify({ channel_id: g.channel_id, groupjid: g.jid, leave_first: true }),
+                                  });
+                                }
+                              }
+                              setSelectedGroupIds(new Set());
+                              await Promise.all([mutateGroups(), mutateCommunities()]);
+                              setAlertMessage(`✅ ${ids.length} grupo(s) excluído(s).`);
+                            } finally {
+                              setDeletingGroup(false);
                             }
-                          }
-                          setSelectedGroupIds(new Set());
-                          await Promise.all([mutateGroups(), mutateCommunities()]);
-                        } finally {
-                          setDeletingGroup(false);
-                        }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 last:border-r-0"
                       title="Excluir grupos selecionados da lista e sair no WhatsApp"
@@ -2854,27 +2996,36 @@ export default function ContatosPage() {
                     <button
                       type="button"
                       disabled={selectedCommunityIds.size === 0 || deletingGroup}
-                      onClick={async () => {
+                      onClick={() => {
                         const ids = Array.from(selectedCommunityIds);
-                        if (ids.length === 0 || !window.confirm(`Excluir ${ids.length} comunidade(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`)) return;
-                        setDeletingGroup(true);
-                        try {
-                          for (const id of ids) {
-                            const c = communities.find((x) => x.id === id);
-                            if (c?.jid && c?.channel_id) {
-                              await fetch("/api/groups/delete", {
-                                method: "POST",
-                                credentials: "include",
-                                headers: { "Content-Type": "application/json", ...apiHeaders },
-                                body: JSON.stringify({ channel_id: c.channel_id, groupjid: c.jid, leave_first: true }),
-                              });
+                        if (ids.length === 0) return;
+                        setBulkConfirm({
+                          title: "Excluir comunidades selecionadas?",
+                          message: `Excluir ${ids.length} comunidade(s) da lista e sair no WhatsApp? Esta ação não pode ser desfeita.`,
+                          confirmLabel: "Excluir",
+                          variant: "danger",
+                          onConfirm: async () => {
+                            setDeletingGroup(true);
+                            try {
+                              for (const id of ids) {
+                                const c = communities.find((x) => x.id === id);
+                                if (c?.jid && c?.channel_id) {
+                                  await fetch("/api/groups/delete", {
+                                    method: "POST",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                                    body: JSON.stringify({ channel_id: c.channel_id, groupjid: c.jid, leave_first: true }),
+                                  });
+                                }
+                              }
+                              setSelectedCommunityIds(new Set());
+                              await Promise.all([mutateGroups(), mutateCommunities()]);
+                              setAlertMessage(`✅ ${ids.length} comunidade(s) excluída(s).`);
+                            } finally {
+                              setDeletingGroup(false);
                             }
-                          }
-                          setSelectedCommunityIds(new Set());
-                          await Promise.all([mutateGroups(), mutateCommunities()]);
-                        } finally {
-                          setDeletingGroup(false);
-                        }
+                          },
+                        });
                       }}
                       className="inline-flex items-center gap-1.5 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 last:border-r-0"
                       title="Excluir comunidades selecionadas da lista e sair no WhatsApp"
@@ -2950,6 +3101,7 @@ export default function ContatosPage() {
         channelName={detailContact ? channelName(detailContact.channel_id) : ""}
         companySlug={slug}
         onBlockChange={() => { fetchBlockList(); mutateContacts(); }}
+        onOpenChat={openContactChat}
         onTagsSaved={(contactId, tagNames) => {
           mutateContacts(
             (prev) =>
@@ -2965,6 +3117,105 @@ export default function ContatosPage() {
           mutateContacts();
         }}
       />
+
+      <SideOver
+        open={sendToQueueSideOverOpen}
+        onClose={() => {
+          setSendToQueueSideOverOpen(false);
+          setSendToQueueChannelId("");
+          setSendToQueueQueueId("");
+        }}
+        title="Enviar pra todos (fila de envio)"
+        width={480}
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-[#64748B]">
+            Os <strong>{selectedContactIds.size} contato(s)</strong> selecionado(s) serão adicionados à fila de envio. Depois, na tela de Conversas, você poderá escolher a mensagem e enviar para todos com delay entre cada envio.
+          </p>
+          <div>
+            <label className="block text-sm font-medium text-[#334155] mb-1.5">Conexão (inbox)</label>
+            <select
+              value={sendToQueueChannelId}
+              onChange={(e) => setSendToQueueChannelId(e.target.value)}
+              className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="">Selecione a conexão</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>{ch.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-[#334155] mb-1.5">Fila (opcional)</label>
+            <select
+              value={sendToQueueQueueId}
+              onChange={(e) => setSendToQueueQueueId(e.target.value)}
+              className="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#1E293B] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
+            >
+              <option value="">Nenhuma</option>
+              {queues.map((q) => (
+                <option key={q.id} value={q.id}>{q.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setSendToQueueSideOverOpen(false)}
+              className="rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={sendToQueueLoading || !sendToQueueChannelId}
+              onClick={async () => {
+                const ids = Array.from(selectedContactIds);
+                const selected = contacts.filter((c) => ids.includes(c.id));
+                const channelIds = [...new Set(selected.map((c) => c.channel_id))];
+                if (channelIds.length > 1 || !sendToQueueChannelId) {
+                  setAlertMessage("Selecione contatos de uma única conexão.");
+                  return;
+                }
+                if (!channelIds.includes(sendToQueueChannelId)) {
+                  setAlertMessage("A conexão selecionada não corresponde aos contatos.");
+                  return;
+                }
+                setSendToQueueLoading(true);
+                try {
+                  const r = await fetch("/api/broadcast-queue/add", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                    body: JSON.stringify({
+                      channel_id: sendToQueueChannelId,
+                      queue_id: sendToQueueQueueId || undefined,
+                      contact_ids: ids,
+                    }),
+                  });
+                  const data = await r.json();
+                  if (r.ok) {
+                    setAlertMessage(data.message ?? `${data.count} contato(s) adicionado(s) à fila de envio.`);
+                    setSelectedContactIds(new Set());
+                    setSendToQueueSideOverOpen(false);
+                    router.push(`/${slug}/conversas/broadcast?openFlow=1&autoSelect=1`);
+                  } else {
+                    setAlertMessage(data?.error ?? "Falha ao adicionar à fila.");
+                  }
+                } catch {
+                  setAlertMessage("Erro de rede ao adicionar à fila.");
+                } finally {
+                  setSendToQueueLoading(false);
+                }
+              }}
+              className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
+            >
+              {sendToQueueLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Salvar
+            </button>
+          </div>
+        </div>
+      </SideOver>
 
       <AddToAgendaModal
         open={addToAgendaModalOpen}
@@ -3202,7 +3453,7 @@ export default function ContatosPage() {
               ))}
             </select>
             <p className="text-xs text-[#64748B]">
-              O contato será criado na agenda do WhatsApp da conexão selecionada.
+              Contatos serão salvos na agenda do WhatsApp e na lista do ClicVend desta conexão. Confira se é a conexão correta.
             </p>
           </div>
 
@@ -3220,12 +3471,14 @@ export default function ContatosPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-[#334155]">Nome</label>
+                  <label className="block text-sm font-medium text-[#334155]">
+                    Nome <span className="font-normal text-[#94A3B8]">(opcional)</span>
+                  </label>
                   <input
                     type="text"
                     value={addContactName}
                     onChange={(e) => setAddContactName(e.target.value)}
-                    placeholder="Nome que aparecerá na agenda"
+                    placeholder="Só o número já basta — nome e avatar vêm do WhatsApp"
                     className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange"
                   />
                 </div>
@@ -3318,54 +3571,80 @@ export default function ContatosPage() {
 
           {addContactTab === "bulk" && (
             <div className="space-y-4">
-              <p className="text-sm text-[#64748B]">
-                Use uma planilha para importar vários contatos de uma vez (até{" "}
-                <span className="font-semibold">90 contatos</span> por importação). Cada linha deve ter{" "}
-                <span className="font-mono text-xs text-[#0F172A]">telefone;nome</span>. O cabeçalho é
-                opcional.
-              </p>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleDownloadContactsTemplate}
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]"
-                >
-                  <Download className="h-4 w-4" />
-                  Baixar modelo (CSV)
-                </button>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC]">
-                  <Upload className="h-4 w-4" />
-                  Enviar planilha preenchida
-                  <input
-                    type="file"
-                    accept=".csv,text/csv"
-                    className="sr-only"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (!file) return;
-                      try {
-                        const rows = await parseContactsCSVFile(file);
-                        setBulkContactsRows(rows);
-                        setAddContactResult(null);
-                        setAddContactError(null);
-                      } catch {
-                        setAddContactError("Erro ao processar o arquivo. Use o modelo em CSV.");
-                      }
-                    }}
-                  />
-                </label>
+              <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                <p className="text-sm font-medium text-[#334155] mb-2">Tag em massa</p>
+                <p className="text-xs text-[#64748B] mb-2">
+                  Opcional. A tag será aplicada a todos os contatos importados.
+                </p>
+                {contactTagsLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-[#64748B]">
+                    <Loader2 className="h-3 w-3 animate-spin text-clicvend-orange" />
+                    Carregando tags…
+                  </div>
+                ) : availableContactTags.length === 0 ? (
+                  <p className="text-xs text-[#94A3B8]">
+                    Nenhuma tag cadastrada. Crie em <span className="font-medium">Tags e formulários</span>.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {availableContactTags.map((tag) => (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        onClick={() => toggleNewContactTag(tag.id)}
+                        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          selectedNewContactTagIds.has(tag.id)
+                            ? "border-transparent text-white"
+                            : "border-[#E2E8F0] text-[#475569] bg-white hover:bg-[#F8FAFC]"
+                        }`}
+                        style={
+                          selectedNewContactTagIds.has(tag.id) && tag.color_hex
+                            ? { backgroundColor: tag.color_hex }
+                            : undefined
+                        }
+                      >
+                        <span className="truncate">{tag.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <pre className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-2 text-xs text-[#475569]">
-telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente VIP{"\n"}5511944442222;Sem Nome (usa número)
-              </pre>
+              <p className="text-sm text-[#64748B]">
+                Cole a lista de números (até <span className="font-semibold">90 contatos</span>). Um por linha ou separados por vírgula/ponto e vírgula. Nome e avatar serão buscados automaticamente no WhatsApp.
+              </p>
+
+              <div>
+                <label className="block text-sm font-medium text-[#334155] mb-1">Números</label>
+                <textarea
+                  value={bulkContactsText}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setBulkContactsText(text);
+                    const rows = parsePastedNumbers(text);
+                    setBulkContactsRows(rows);
+                    setAddContactResult(null);
+                    setAddContactError(null);
+                  }}
+                  placeholder={"5511999990000\n5511988887777\n5548999991111"}
+                  rows={5}
+                  className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-1 focus:ring-clicvend-orange font-mono"
+                />
+                <p className="mt-1 text-xs text-[#94A3B8]">
+                  Ex.: copie e cole do Excel, WhatsApp ou qualquer lista. Só os números.
+                </p>
+              </div>
 
               {bulkContactsRows.length > 0 && (
                 <>
                   <p className="text-sm font-medium text-[#334155]">
-                    Preview: {bulkContactsRows.length} contato(s) pronto(s) para importar
+                    Preview: {bulkContactsRows.length} contato(s) — serão salvos em:{" "}
+                    <span className="font-semibold text-clicvend-orange">
+                      {channels.find((c) => c.id === addContactChannelId)?.name ?? "—"}
+                    </span>
+                  </p>
+                  <p className="text-xs text-[#64748B] mt-1">
+                    ℹ️ Nome e avatar serão buscados automaticamente no WhatsApp após a importação.
                   </p>
                   {bulkContactsRows.length > 90 && (
                     <p className="text-xs text-red-600">
@@ -3377,15 +3656,13 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                     <table className="min-w-full text-xs">
                       <thead className="sticky top-0 bg-[#F8FAFC]">
                         <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Telefone</th>
-                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Nome</th>
+                          <th className="px-2 py-1.5 text-left font-medium text-[#64748B]">Número</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#E2E8F0]">
                         {bulkContactsRows.slice(0, 30).map((row, i) => (
                           <tr key={i}>
-                            <td className="px-2 py-1.5 text-[#1E293B]">{row.number}</td>
-                            <td className="px-2 py-1.5 text-[#64748B]">{row.name}</td>
+                            <td className="px-2 py-1.5 text-[#1E293B] font-mono">{row.number}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -3395,6 +3672,20 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                         … e mais {bulkContactsRows.length - 30} contato(s).
                       </p>
                     )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBulkContactsText("");
+                        setBulkContactsRows([]);
+                        setAddContactResult(null);
+                        setAddContactError(null);
+                      }}
+                      className="rounded-lg border border-[#E2E8F0] px-4 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F8FAFC]"
+                    >
+                      Limpar
+                    </button>
                   </div>
                 </>
               )}
@@ -3428,6 +3719,11 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                 addContactSaving ||
                 !addContactChannelId ||
                 (addContactTab === "single" ? !addContactPhone.trim() : bulkContactsRows.length === 0)
+              }
+              title={
+                addContactTab === "bulk" && bulkContactsRows.length > 0
+                  ? `Importar ${Math.min(bulkContactsRows.length, 90)} contato(s) na agenda do WhatsApp`
+                  : undefined
               }
               onClick={async () => {
                 if (!addContactChannelId) return;
@@ -3486,47 +3782,41 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
                       mutateContacts();
                     }
                   } else {
-                    let ok = 0;
-                    let fail = 0;
-                    let firstError: string | null = null;
                     const maxPerBatch = 90;
                     const rowsToProcess = bulkContactsRows.slice(0, maxPerBatch);
-                    for (const row of rowsToProcess) {
-                      const number = row.number.replace(/\D/g, "");
-                      const name = row.name.trim() || number;
-                      if (!number) {
-                        fail++;
-                        if (!firstError) firstError = "Telefone inválido em uma das linhas.";
-                        continue;
-                      }
-                      try {
-                        const res = await fetch("/api/contacts/add-to-agenda", {
-                          method: "POST",
-                          credentials: "include",
-                          headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
-                          body: JSON.stringify({ channel_id: addContactChannelId, number, name }),
-                        });
-                        if (res.ok) {
-                          ok++;
-                        } else {
-                          fail++;
-                          if (!firstError) {
-                            const data = await res.json().catch(() => ({}));
-                            firstError = data?.error ?? "Falha ao adicionar um dos contatos.";
-                          }
+                    const contactsPayload = rowsToProcess.map((row) => ({
+                      number: row.number.replace(/\D/g, ""),
+                      contact_name: row.contact_name.trim() || undefined,
+                      first_name: row.first_name?.trim() || undefined,
+                    }));
+                    try {
+                      const res = await fetch("/api/contacts/bulk-add", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
+                        body: JSON.stringify({
+                          channel_id: addContactChannelId,
+                          contacts: contactsPayload,
+                          tag_ids: selectedNewContactTagIds.size > 0 ? Array.from(selectedNewContactTagIds) : undefined,
+                        }),
+                      });
+                      const data = await res.json().catch(() => ({}));
+                      if (!res.ok) {
+                        setAddContactError(data?.error ?? "Falha ao importar contatos.");
+                        setAddContactResult({ ok: 0, fail: rowsToProcess.length });
+                      } else {
+                        setAddContactResult({ ok: data.ok ?? 0, fail: data.fail ?? 0 });
+                        if (data.error) setAddContactError(data.error);
+                        if ((data.ok ?? 0) > 0) {
+                          mutateContacts();
+                          setBulkContactsText("");
+                          setBulkContactsRows([]);
+                          setSelectedNewContactTagIds(new Set());
                         }
-                      } catch {
-                        fail++;
-                        if (!firstError) firstError = "Erro de rede ao adicionar um dos contatos.";
                       }
-                    }
-                    if (bulkContactsRows.length > maxPerBatch && !firstError) {
-                      firstError = `Limite de ${maxPerBatch} contatos por importação. Apenas os primeiros ${maxPerBatch} foram processados.`;
-                    }
-                    setAddContactResult({ ok, fail });
-                    if (firstError) setAddContactError(firstError);
-                    if (ok > 0) {
-                      mutateContacts();
+                    } catch {
+                      setAddContactError("Erro de rede ao importar contatos.");
+                      setAddContactResult({ ok: 0, fail: rowsToProcess.length });
                     }
                   }
                 } finally {
@@ -3535,8 +3825,19 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
               }}
               className="inline-flex items-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
             >
-              {addContactSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Salvar
+              {addContactSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {addContactTab === "bulk" ? "Importando…" : "Salvando…"}
+                </>
+              ) : addContactTab === "bulk" && bulkContactsRows.length > 0 ? (
+                <>
+                  <Upload className="h-4 w-4" />
+                  Importar {Math.min(bulkContactsRows.length, 90)} contato(s)
+                </>
+              ) : (
+                "Salvar"
+              )}
             </button>
           </div>
         </div>
@@ -3559,6 +3860,20 @@ telefone;nome{"\n"}5511999990000;João Silva{"\n"}5548999991111;Maria - Cliente 
         confirmLabel="Excluir"
         variant="danger"
         onConfirm={handleDeleteGroup}
+      />
+      <ConfirmDialog
+        open={!!bulkConfirm}
+        onClose={() => setBulkConfirm(null)}
+        title={bulkConfirm?.title ?? ""}
+        message={bulkConfirm?.message ?? ""}
+        confirmLabel={bulkConfirm?.confirmLabel ?? "Confirmar"}
+        variant={bulkConfirm?.variant}
+        onConfirm={async () => {
+          const pending = bulkConfirm;
+          setBulkConfirm(null);
+          if (!pending) return;
+          await pending.onConfirm();
+        }}
       />
       {/* Toast simples para mensagens de feedback */}
       {alertMessage && (

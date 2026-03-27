@@ -26,9 +26,10 @@ export async function getCompanyIdFromRequest(request: Request): Promise<string 
     const { data } = await supabase
       .from("company_links")
       .select("company_id")
-      .eq("slug", slugFromHeader)
+      .ilike("slug", slugFromHeader)
       .eq("is_active", true)
-      .single();
+      .limit(1)
+      .maybeSingle();
     if (data?.company_id) return data.company_id;
   }
   const fromCookie = await getCompanyIdFromCookie();

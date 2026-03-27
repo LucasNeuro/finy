@@ -77,18 +77,11 @@ Corrected text:`;
 
     if (!res.ok) {
       const errText = await res.text();
-      const errJson = await (async () => {
-        try { return JSON.parse(errText); } catch { return null; }
-      })();
-      const detail = errJson?.detail ?? errJson?.message ?? errJson?.error ?? errJson?.msg;
-      const detailStr = typeof detail === "string" ? detail : JSON.stringify(detail ?? errText);
-      const isUnauthorized = res.status === 401 || (typeof detailStr === "string" && /unauthorized|invalid.*key|invalid.*token/i.test(detailStr));
-      const message = isUnauthorized
-        ? `Chave da API AI recusada (${res.status}). Verifique suas credenciais.`
-        : (detailStr || errText || `AI API ${res.status}`).slice(0, 300);
-      
+      if (process.env.NODE_ENV === "development") {
+        console.error("[correct-text] Mistral API error:", res.status, errText?.slice(0, 200));
+      }
       return NextResponse.json(
-        { error: `Falha ao corrigir: ${message}` },
+        { error: "Correção temporariamente indisponível. Edite o texto manualmente." },
         { status: res.status >= 500 ? 502 : 400 }
       );
     }
@@ -103,9 +96,11 @@ Corrected text:`;
 
     return NextResponse.json({ corrected: cleanCorrected });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Erro ao chamar IA";
+    if (process.env.NODE_ENV === "development") {
+      console.error("[correct-text] Fetch error:", e instanceof Error ? e.message : e);
+    }
     return NextResponse.json(
-      { error: `Erro ao corrigir: ${message}` },
+      { error: "Correção temporariamente indisponível. Edite o texto manualmente." },
       { status: 502 }
     );
   }

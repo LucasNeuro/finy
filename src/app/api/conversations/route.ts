@@ -6,6 +6,7 @@ import { withMetricsHeaders } from "@/lib/api/metrics";
 import { getCachedConversationList, setCachedConversationList } from "@/lib/redis/inbox-state";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getCommercialQueueIdSet } from "@/lib/queue/commercial";
 import { NextResponse } from "next/server";
 
 /** Busca nomes dos atendentes (bypass RLS — profiles só permite SELECT do próprio perfil). */
@@ -178,6 +179,20 @@ export async function GET(request: Request) {
     }
   }
 
+  const commercialQueueIds =
+    user && !canSeeAll && !canManageTickets
+      ? await getCommercialQueueIdSet(supabase, companyId, allowedQueueIds)
+      : new Set<string>();
+  const shouldRestrictCommercial = !!user && !canSeeAll && !canManageTickets && commercialQueueIds.size > 0;
+  const filterCommercialRows = <T extends { queue_id?: string | null; assigned_to?: string | null }>(rows: T[]): T[] => {
+    if (!shouldRestrictCommercial || !user) return rows;
+    return rows.filter((row) => {
+      const qid = row.queue_id ?? null;
+      if (!qid || !commercialQueueIds.has(qid)) return true;
+      return row.assigned_to === user.id;
+    });
+  };
+
   type ConvRow = { id: string; channel_id: string; external_id: string; wa_chat_jid: string | null; kind: string; is_group: boolean; customer_phone: string; customer_name: string | null; queue_id: string | null; assigned_to: string | null; status: string; last_message_at: string; created_at: string };
 
   if (allowedQueueIds !== null && allowedQueueIds.length === 0 && allowedGroupKeys.length === 0) {
@@ -188,6 +203,7 @@ export async function GET(request: Request) {
   // Cache Redis para todos (inbox e tickets). Atendimento fluido: não esperar carregar toda vez.
   const useCache = !skipCache && offset === 0 && limit <= 500;
   if (useCache) {
+    const userScope = user?.id ?? "anon";
     const cached = await getCachedConversationList(
       companyId,
       queueIdParam ?? "",
@@ -196,12 +212,16 @@ export async function GET(request: Request) {
       includeClosed,
       onlyUnassigned,
       offset,
-      limit
+      limit,
+      userScope
     );
     if (cached) {
       let sorted = !onlyAssignedToMe && !includeClosed && !onlyUnassigned
         ? sortQueuesListNewFirst((cached.data ?? []) as { assigned_to?: string | null; status?: string; last_message_at: string; channel_id?: string; customer_phone?: string; is_group?: boolean }[])
         : (cached.data ?? []) as { assigned_to?: string | null; channel_id?: string; customer_phone?: string; is_group?: boolean }[];
+      sorted = filterCommercialRows(
+        sorted as { queue_id?: string | null; assigned_to?: string | null }[] & typeof sorted
+      ) as typeof sorted;
       // Deduplica contatos (mesmo canal + mesmo telefone) também ao ler do cache
       const seen = new Set<string>();
       sorted = sorted.filter((c) => {
@@ -228,7 +248,7 @@ export async function GET(request: Request) {
         companyId,
         sorted as { status?: string; queue_id?: string | null; assigned_to?: string | null }[]
       );
-      const res = NextResponse.json({ data: sortedWithStatusVisuals, total: (cached.total ?? sortedWithStatusVisuals.length) });
+      const res = NextResponse.json({ data: sortedWithStatusVisuals, total: sortedWithStatusVisuals.length });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }
@@ -250,7 +270,9 @@ export async function GET(request: Request) {
     if (allowedGroupKeys.length === 0) {
       q = q.in("queue_id", allowedQueueIds);
     } else {
-      q = q.or(`queue_id.in.(${allowedQueueIds.join(",")}),external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`);
+      const groupPart = `external_id.in.("${allowedGroupKeys.map((k) => k.group_jid).join('","')}")`;
+      const queuePart = allowedQueueIds.length > 0 ? `queue_id.in.(${allowedQueueIds.join(",")})` : "";
+      q = q.or(queuePart ? `${queuePart},${groupPart}` : groupPart);
     }
   }
   if (onlyAssignedToMe && user) {
@@ -281,9 +303,10 @@ export async function GET(request: Request) {
       const { data: groupData, error: groupErr } = await statusFilter.range(offset, offset + limit - 1);
       if (groupErr) return NextResponse.json({ error: groupErr.message }, { status: 500 });
       const list = filteredByChannel((groupData ?? []) as ConvRow[]);
-      const gAssignedIds = [...new Set(list.map((c) => c.assigned_to).filter(Boolean))] as string[];
+      const commercialFiltered = filterCommercialRows(list);
+      const gAssignedIds = [...new Set(commercialFiltered.map((c) => c.assigned_to).filter(Boolean))] as string[];
       const gAssignedNames = await fetchAssignedNames(companyId, gAssignedIds);
-      const listWithNames = list.map((c) => ({ ...c, assigned_to_name: c.assigned_to ? gAssignedNames[c.assigned_to] ?? null : null }));
+      const listWithNames = commercialFiltered.map((c) => ({ ...c, assigned_to_name: c.assigned_to ? gAssignedNames[c.assigned_to] ?? null : null }));
       const gConvIds = listWithNames.map((c) => c.id);
       let gLastByConv: Record<string, { content: string; message_type?: string }> = {};
       if (gConvIds.length > 0) {
@@ -313,7 +336,7 @@ export async function GET(request: Request) {
   }
   q = q.range(offset, offset + limit - 1);
 
-  const { data, error, count } = await q;
+  const { data, error } = await q;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -325,6 +348,7 @@ export async function GET(request: Request) {
       return false;
     });
   }
+  result = filterCommercialRows(result);
 
   const assignedIds = [...new Set(result.map((c) => c.assigned_to).filter(Boolean))] as string[];
   const assignedNames = await fetchAssignedNames(companyId, assignedIds);
@@ -456,8 +480,9 @@ export async function GET(request: Request) {
     listWithPreview = sortQueuesListNewFirst(listWithPreview);
   }
 
-  const payload = { data: listWithPreview, total: count ?? result.length };
+  const payload = { data: listWithPreview, total: listWithPreview.length };
   if (useCache && !skipCache) {
+    const userScope = user?.id ?? "anon";
     await setCachedConversationList(
       companyId,
       queueIdParam ?? "",
@@ -467,7 +492,8 @@ export async function GET(request: Request) {
       includeClosed,
       onlyUnassigned,
       offset,
-      limit
+      limit,
+      userScope
     );
   }
   const res = NextResponse.json(payload);

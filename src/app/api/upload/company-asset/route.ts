@@ -11,6 +11,7 @@ const MAX_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_TYPES: Record<string, string[]> = {
   "channel-logo": ["image/jpeg", "image/png", "image/gif", "image/webp"],
   "group-image": ["image/jpeg", "image/png", "image/gif", "image/webp"],
+  "broadcast-image": ["image/jpeg", "image/png", "image/gif", "image/webp"],
 };
 const DEFAULT_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
@@ -23,6 +24,8 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
   const type = (formData.get("type") as string)?.trim() || "group-image";
+  const allowedTypes = ["channel-logo", "group-image", "broadcast-image"];
+  const effectiveType = allowedTypes.includes(type) ? type : "group-image";
 
   if (!file || !(file instanceof Blob)) {
     return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 });
@@ -31,14 +34,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Arquivo muito grande. Máximo 5MB." }, { status: 400 });
   }
 
-  const allowed = ALLOWED_TYPES[type] ?? DEFAULT_TYPES;
+  const allowed = ALLOWED_TYPES[effectiveType] ?? DEFAULT_TYPES;
   const fileType = file.type?.toLowerCase();
   if (!fileType || !allowed.includes(fileType)) {
     return NextResponse.json({ error: "Tipo não permitido. Use JPEG, PNG, GIF ou WebP." }, { status: 400 });
   }
 
   const ext = fileType.split("/")[1] ?? "jpg";
-  const path = `${companyId}/${type}/${crypto.randomUUID()}.${ext}`;
+  const path = `${companyId}/${effectiveType}/${crypto.randomUUID()}.${ext}`;
 
   const supabase = createServiceRoleClient();
   const arrayBuffer = await file.arrayBuffer();

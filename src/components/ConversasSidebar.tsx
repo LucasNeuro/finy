@@ -4,10 +4,11 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, memo, useRef, useMemo } from "react";
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive, Hash, Layers } from "lucide-react";
+import { Search, Users, Inbox, UserCheck, User, Loader2, Plus, ChevronLeft, ChevronRight, Archive, Hash, Layers, Send, Plug } from "lucide-react";
 import { ConversationListSkeleton } from "@/components/Skeleton";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { queryKeys } from "@/lib/query-keys";
+import { useBroadcastStore } from "@/stores/broadcast-store";
 
 type Conversation = {
   id: string;
@@ -117,8 +118,8 @@ function withAlpha(hex: string, alphaHex = "1A"): string | null {
 
 type ViewMode = "mine" | "queues" | "unassigned" | "mine_closed";
 type ConversationTypeFilter = "all" | "individual" | "group";
-/** Tab ativa: Novos, Filas, Meus, Meus encerrado, Contatos, Grupos */
-type TabId = "novos" | "queues" | "mine" | "mine_closed" | "contacts" | "groups";
+/** Tab ativa: Novos, Filas, Meus, Meus encerrado, Contatos, Grupos, Envio em fila */
+type TabId = "novos" | "queues" | "mine" | "mine_closed" | "contacts" | "groups" | "broadcast_queue";
 
 /** Contato da API /api/contacts (mesma lista do módulo Contatos) */
 type SidebarContact = {
@@ -420,6 +421,128 @@ const ContactListItem = memo(function ContactListItem({
   );
 });
 
+/** Item da fila de envio em massa */
+type BroadcastQueueItem = {
+  id: string;
+  channel_id: string;
+  channel_name?: string | null;
+  queue_id: string | null;
+  status: string;
+  created_at: string;
+  sent_at: string | null;
+  error_message: string | null;
+  contact: {
+    id: string;
+    jid: string;
+    phone: string | null;
+    contact_name: string | null;
+    first_name: string | null;
+    avatar_url: string | null;
+  } | null;
+};
+
+const BroadcastQueueListItem = memo(function BroadcastQueueListItem({
+  item,
+  selected,
+  onToggleSelect,
+}: {
+  item: BroadcastQueueItem;
+  selected: boolean;
+  onToggleSelect: () => void;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const contact = item.contact;
+  const displayName =
+    (contact?.contact_name ?? contact?.first_name ?? formatPhoneBrazil(contact?.phone ?? contact?.jid) ?? contact?.jid) ?? "—";
+  const initial = displayName.slice(0, 1).toUpperCase();
+  const avatarSrc = contact && !imgError ? avatarProxySrc(contact.avatar_url) : null;
+  const shortId = item.id.replace(/-/g, "").slice(0, 8).toUpperCase();
+
+  return (
+    <li className="px-2 py-1">
+      <div
+        className={`flex items-stretch rounded-xl border transition-all duration-200 overflow-hidden ${
+          selected
+            ? "border-blue-400/50 bg-blue-50/50 shadow-sm ring-1 ring-blue-300/30"
+            : "border-[#E2E8F0]/80 bg-white hover:border-[#CBD5E1] hover:shadow-sm"
+        } border-l-4 ${selected ? "border-l-blue-500" : "border-l-[#CBD5E1]"}`}
+        role="button"
+        tabIndex={0}
+        onClick={onToggleSelect}
+        onKeyDown={(e) => e.key === "Enter" && onToggleSelect()}
+      >
+        {/* Checkbox redondo */}
+        <div className="flex shrink-0 items-center pl-3 pr-1" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={onToggleSelect}
+            aria-label={`Selecionar ${displayName}`}
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-150 ${
+              selected
+                ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                : "border-[#CBD5E1] bg-white hover:border-blue-400"
+            }`}
+          >
+            {selected && (
+              <svg viewBox="0 0 12 10" fill="none" className="h-3 w-3">
+                <path d="M1 5l3.5 3.5L11 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {/* Card content */}
+        <div className="flex min-w-0 flex-1 flex-col cursor-pointer">
+          <div className="flex items-start gap-3 p-3 pl-2">
+            <span className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-50 to-indigo-50 text-base font-semibold text-blue-600 shadow-sm ring-1 ring-white/80">
+              {avatarSrc ? (
+                <img
+                  src={avatarSrc}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  referrerPolicy="no-referrer"
+                  onError={() => setImgError(true)}
+                />
+              ) : (
+                <span aria-hidden>{initial || <Send className="h-5 w-5" />}</span>
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-sm font-semibold text-[#1E293B]">{displayName}</p>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  <ChannelIcon variant="outline" provider="generic" channelName={item.channel_name} size={20} title={item.channel_name ?? "WhatsApp"} />
+                  <span className="text-xs font-medium text-[#64748B] tabular-nums">
+                    {formatLastMessageTime(item.created_at)}
+                  </span>
+                </span>
+              </div>
+              <p className="mt-0.5 truncate text-xs text-[#64748B]">
+                {formatPhoneBrazil(contact?.phone ?? contact?.jid)}
+              </p>
+            </div>
+          </div>
+          <footer className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-[#F1F5F9] bg-[#F8FAFC]/80 px-3 py-2 text-[10px] text-[#64748B]">
+            <span className="inline-flex items-center gap-1" title={`ID: ${item.id}`}>
+              <Hash className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+              <span className="font-mono font-medium tracking-wide">{shortId}</span>
+            </span>
+            {item.channel_name && (
+              <span className="inline-flex items-center gap-1" title={`Conexão: ${item.channel_name}`}>
+                <Layers className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
+                <span className="truncate max-w-[100px]">{item.channel_name}</span>
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">
+              Envio em fila
+            </span>
+          </footer>
+        </div>
+      </div>
+    </li>
+  );
+});
+
 const GroupListItem = memo(function GroupListItem({
   group,
   base,
@@ -502,14 +625,20 @@ const GroupListItem = memo(function GroupListItem({
 
 export function ConversasSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
+  const selectedBroadcastIds = useBroadcastStore((s) => s.selectedQueueItemIds);
+  const toggleBroadcastItem = useBroadcastStore((s) => s.toggleQueueItem);
+  const selectAllBroadcast = useBroadcastStore((s) => s.selectAllQueueItems);
+
   const [activeTab, setActiveTab] = useState<TabId>("mine");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
   const [unassigning, setUnassigning] = useState(false);
   const tabsScrollRef = useRef<HTMLDivElement>(null);
   const statusScrollRef = useRef<HTMLDivElement>(null);
@@ -521,7 +650,18 @@ export function ConversasSidebar() {
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab);
     setStatusFilter("all");
+    setChannelFilter("all");
+    if (tab === "broadcast_queue") {
+      router.push(`${base}/conversas/broadcast`);
+    }
   };
+
+  // Sincroniza aba quando navega para /conversas/broadcast
+  useEffect(() => {
+    if (pathname?.includes("/conversas/broadcast")) {
+      setActiveTab("broadcast_queue");
+    }
+  }, [pathname]);
   const viewMode: ViewMode =
     activeTab === "queues" ? "queues"
     : activeTab === "novos" ? "unassigned"
@@ -608,7 +748,7 @@ export function ConversasSidebar() {
       container.removeEventListener("scroll", checkStatusScroll);
       window.removeEventListener("resize", checkStatusScroll);
     };
-  }, [activeTab, statusFilter]);
+  }, [activeTab, statusFilter, channelFilter]);
 
   const { data: permissionsData } = useQuery({
     queryKey: queryKeys.permissions(slug ?? ""),
@@ -618,6 +758,8 @@ export function ConversasSidebar() {
     staleTime: 5 * 60 * 1000,
   });
   const inboxSeeAll = permissionsData?.inbox_see_all === true;
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessBroadcast = permissions.includes("broadcast.view") || permissions.includes("broadcast.manage");
 
   const { data: countsData } = useQuery({
     queryKey: queryKeys.counts(slug ?? ""),
@@ -687,6 +829,21 @@ export function ConversasSidebar() {
     enabled: !!slug && activeTab === "groups",
     staleTime: 2 * 60 * 1000,
   });
+
+  const { data: broadcastQueueData, isLoading: broadcastQueueLoading } = useQuery({
+    queryKey: queryKeys.broadcastQueue(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/broadcast-queue?status=pending", {
+        credentials: "include",
+        headers: apiHeaders,
+      }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 30 * 1000,
+    refetchInterval: activeTab === "broadcast_queue" ? 20 * 1000 : 60 * 1000,
+  });
+  const broadcastQueueItems: BroadcastQueueItem[] = Array.isArray(broadcastQueueData?.items)
+    ? broadcastQueueData.items
+    : [];
   const groupsListRaw: SidebarGroup[] = Array.isArray(groupsData) ? groupsData : [];
   const groupsList = useMemo(() => {
     const byKey = new Map<string, SidebarGroup>();
@@ -752,7 +909,7 @@ export function ConversasSidebar() {
       if ((lastPage?.data?.length ?? 0) < 200 || fetched >= total) return undefined;
       return fetched;
     },
-    enabled: !!slug,
+    enabled: !!slug && activeTab !== "contacts" && activeTab !== "groups" && activeTab !== "broadcast_queue",
     staleTime: 60 * 1000,
     refetchInterval: 15 * 1000,
     refetchIntervalInBackground: true,
@@ -762,6 +919,34 @@ export function ConversasSidebar() {
   const allConversations = conversationsData?.pages?.flatMap((p) => p.data ?? []) ?? [];
   const totalFromApi = conversationsData?.pages?.[0]?.total ?? 0;
 
+  const channelOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>();
+    for (const c of allConversations) {
+      const id = (c.channel_id ?? "").trim();
+      if (!id) continue;
+      const existing = map.get(id);
+      const name = (c.channel_name ?? "").trim() || id.slice(0, 8);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(id, { id, name, count: 1 });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [allConversations]);
+
+  useEffect(() => {
+    if (channelFilter === "all") return;
+    if (!channelOptions.some((opt) => opt.id === channelFilter)) {
+      setChannelFilter("all");
+    }
+  }, [channelFilter, channelOptions]);
+
+  const conversationsForChannel =
+    channelFilter === "all"
+      ? allConversations
+      : allConversations.filter((c) => (c.channel_id ?? "") === channelFilter);
+
   const errorMessage =
     conversationsError?.message === "Failed to fetch"
       ? "Erro de conexão. Verifique sua internet ou se o servidor está no ar."
@@ -769,23 +954,29 @@ export function ConversasSidebar() {
 
   const filtered = (() => {
     let list = search.trim()
-      ? allConversations.filter(
+      ? conversationsForChannel.filter(
           (c) =>
             (c.customer_name ?? "").toLowerCase().includes(search.toLowerCase()) ||
             (c.customer_phone ?? "").includes(search)
         )
-      : allConversations;
+      : conversationsForChannel;
     if (typeFilter === "group") list = list.filter((c) => c.is_group === true);
     else if (typeFilter === "individual") list = list.filter((c) => c.is_group !== true);
     if (statusFilter !== "all") {
       list = list.filter((c) => normalizeConversationStatus(c) === statusFilter);
     }
+    // Sempre ordenar por última mensagem: quem enviou por último sobe na fila (priorizar resposta)
+    list = [...list].sort((a, b) => {
+      const at = new Date(a.last_message_at || 0).getTime();
+      const bt = new Date(b.last_message_at || 0).getTime();
+      return bt - at;
+    });
     return list;
   })();
 
   const statusOptions = (() => {
     const map = new Map<string, { label: string; color: string | null; count: number }>();
-    for (const c of allConversations) {
+    for (const c of conversationsForChannel) {
       const key = normalizeConversationStatus(c);
       const current = map.get(key);
       const label = c.ticket_status_name?.trim() || statusFallbackLabel(key);
@@ -800,7 +991,7 @@ export function ConversasSidebar() {
       .map(([key, v]) => ({ key, ...v }))
       .sort((a, b) => b.count - a.count);
   })();
-  const showStatusFilters = activeTab !== "contacts" && activeTab !== "groups";
+  const showStatusFilters = activeTab !== "contacts" && activeTab !== "groups" && activeTab !== "broadcast_queue";
 
   const searchLower = search.trim().toLowerCase();
   const filteredContacts = searchLower
@@ -980,6 +1171,27 @@ export function ConversasSidebar() {
               </span>
             )}
           </button>
+          {canAccessBroadcast && (
+            <button
+              type="button"
+              onClick={() => handleTabChange("broadcast_queue")}
+              className={`relative flex min-w-[5rem] shrink-0 items-center justify-center gap-2 rounded-lg px-3 py-2 transition-all duration-200 ${
+                activeTab === "broadcast_queue"
+                  ? "bg-blue-50 text-blue-600 shadow-md shadow-blue-200/50 border border-blue-200/70"
+                  : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
+              }`}
+              title="Envio em fila"
+              aria-label="Envio em fila"
+            >
+              <Send className="h-5 w-5 shrink-0" />
+              <span className="truncate text-xs font-semibold">Envio em fila</span>
+              {broadcastQueueItems.length > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
+                  {broadcastQueueItems.length > 99 ? "99+" : broadcastQueueItems.length}
+                </span>
+              )}
+            </button>
+          )}
         </div>
         <button
           type="button"
@@ -1017,8 +1229,43 @@ export function ConversasSidebar() {
                 }`}
               >
                 Todos
-                <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">{allConversations.length}</span>
+                <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">{conversationsForChannel.length}</span>
               </button>
+              {channelOptions.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setChannelFilter("all")}
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                    channelFilter === "all"
+                      ? "bg-sky-50 text-sky-700 border border-sky-200"
+                      : "bg-white text-[#64748B] border border-[#E2E8F0] hover:bg-[#F8FAFC]"
+                  }`}
+                  title="Mostrar todas as instâncias"
+                >
+                  <Plug className="h-3 w-3" />
+                  Todas instâncias
+                </button>
+              )}
+              {channelOptions.length > 1 &&
+                channelOptions.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setChannelFilter(opt.id)}
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                      channelFilter === opt.id
+                        ? "bg-sky-50 text-sky-700 border border-sky-200"
+                        : "bg-white text-[#64748B] border border-[#E2E8F0] hover:bg-[#F8FAFC]"
+                    }`}
+                    title={`Instância: ${opt.name}`}
+                  >
+                    <Plug className="h-3 w-3" />
+                    <span className="max-w-[120px] truncate">{opt.name}</span>
+                    <span className="rounded-full bg-[#E2E8F0] px-1.5 py-0.5 text-[10px] text-[#475569]">
+                      {opt.count}
+                    </span>
+                  </button>
+                ))}
               {statusOptions.map((opt) => (
                 <button
                   key={opt.key}
@@ -1100,6 +1347,61 @@ export function ConversasSidebar() {
                 <ContactListItem key={c.id} contact={c} base={base} apiHeaders={apiHeaders} />
               ))}
             </ul>
+          )
+        ) : activeTab === "broadcast_queue" ? (
+          broadcastQueueLoading ? (
+            <ConversationListSkeleton count={8} />
+          ) : broadcastQueueItems.length === 0 ? (
+            <div className="p-4 text-center text-sm text-[#64748B]">
+              <p className="font-medium text-[#1E293B]">Nenhum contato na fila</p>
+              <p className="mt-1 text-xs">
+                Em <Link href={`${base}/contatos`} className="text-clicvend-orange hover:underline">Contatos</Link>, selecione contatos e clique em <strong>Enviar pra todos</strong> para adicioná-los à fila de envio em massa.
+              </p>
+            </div>
+          ) : (
+            <>
+              {(() => {
+                const allSelected = broadcastQueueItems.length > 0 && broadcastQueueItems.every((i) => selectedBroadcastIds.has(i.id));
+                return (
+                  <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-[#E2E8F0]/60 bg-[#F8FAFC]">
+                    <button
+                      type="button"
+                      onClick={() => selectAllBroadcast(broadcastQueueItems.map((i) => i.id))}
+                      aria-label="Selecionar todos"
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold transition-all duration-200 border ${
+                        allSelected
+                          ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                          : "bg-white text-[#334155] border-[#CBD5E1] hover:border-blue-400 hover:text-blue-600"
+                      }`}
+                    >
+                      <span className={`flex h-4 w-4 items-center justify-center rounded-full border-2 transition-all ${allSelected ? "border-white bg-white" : "border-current"}`}>
+                        {allSelected && (
+                          <svg viewBox="0 0 10 8" fill="none" className="h-2.5 w-2.5">
+                            <path d="M1 4l2.5 2.5L9 1" stroke="#2563EB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </span>
+                      Selecionar todos
+                    </button>
+                    {selectedBroadcastIds.size > 0 && (
+                      <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                        {selectedBroadcastIds.size} selecionado(s)
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              <ul className="divide-y divide-[#E2E8F0]/40 px-2">
+                {broadcastQueueItems.map((item) => (
+                  <BroadcastQueueListItem
+                    key={item.id}
+                    item={item}
+                    selected={selectedBroadcastIds.has(item.id)}
+                    onToggleSelect={() => toggleBroadcastItem(item.id)}
+                  />
+                ))}
+              </ul>
+            </>
           )
         ) : activeTab === "groups" ? (
           groupsLoading ? (

@@ -9,20 +9,30 @@
     "start": "next start",
     "lint": "next lint",
     "test:redis": "node scripts/test-redis.mjs",
+    "test:mistral": "node scripts/test-mistral.mjs",
+    "test:cora": "node scripts/test-cora-token.mjs",
     "backfill:media": "node scripts/backfill-media.mjs",
+    "run-broadcast-cron": "node scripts/run-broadcast-cron.mjs",
     "clean": "node -e \"const fs=require('fs');['.next','node_modules/.cache'].forEach(p=>{if(fs.existsSync(p)){fs.rmSync(p,{recursive:true});console.log('Removed '+p)}})\"",
     "dev:clean": "npm run clean && next dev"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.10",
     "@tanstack/react-query": "^5.90.21",
     "@tanstack/react-table": "^8.21.3",
+<<<<<<< HEAD
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+=======
+    "@xyflow/react": "^12.10.1",
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
     "emoji-mart": "^5.6.0",
+    "ffmpeg-static": "^5.3.0",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
     "next": "14.2.35",

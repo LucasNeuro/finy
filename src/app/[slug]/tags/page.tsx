@@ -2,7 +2,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import {
   Plus,
   Tag,
@@ -87,12 +89,29 @@ const EMPTY_FORM_BUILDER: FormBuilderState = {
 
 export default function TagsPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = pathname?.split("/").filter(Boolean)[0] ?? "";
 
   const apiHeaders = useMemo(
     () => (slug ? { "X-Company-Slug": slug } : undefined),
     [slug]
   );
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessTags = permissions.includes("tags.view") || permissions.includes("tags.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessTags) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessTags, router]);
 
   const [activeTab, setActiveTab] = useState<"tags" | "forms">("tags");
   const [loading, setLoading] = useState(false);
@@ -407,6 +426,10 @@ export default function TagsPage() {
       setError("Erro ao aplicar ação em massa nas tags.");
     }
   };
+
+  if (slug && permissionsData !== undefined && !canAccessTags) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-4 px-4 py-6 sm:px-6">

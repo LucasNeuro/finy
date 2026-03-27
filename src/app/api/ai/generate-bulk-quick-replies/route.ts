@@ -103,16 +103,12 @@ Example output:
           return null;
         }
       })();
-      const detail = errJson?.detail ?? errJson?.message ?? errJson?.error ?? errJson?.msg;
-      const detailStr = typeof detail === "string" ? detail : JSON.stringify(detail ?? errText);
-      const isUnauthorized = res.status === 401 || (typeof detailStr === "string" && /unauthorized|invalid.*key|invalid.*token/i.test(detailStr));
-      const message = isUnauthorized
-        ? `Chave da API AI recusada (${res.status}). ${detailStr || "Verifique AI_API_KEY no .env."} Reinicie o servidor após configurar.`
-        : (detailStr || errText || `AI API ${res.status}`).slice(0, 300);
+      if (process.env.NODE_ENV === "development") {
+        const detail = errJson?.detail ?? errJson?.message ?? errJson?.error ?? errJson?.msg;
+        console.error("[generate-bulk-quick-replies] Mistral API error:", res.status, detail);
+      }
       return NextResponse.json(
-        {
-          error: `Falha ao gerar: ${message}`,
-        },
+        { error: "Geração temporariamente indisponível. Tente novamente mais tarde." },
         { status: res.status >= 500 ? 502 : 400 }
       );
     }
@@ -150,9 +146,11 @@ Example output:
 
     return NextResponse.json({ suggestions });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Erro ao chamar Mistral";
+    if (process.env.NODE_ENV === "development") {
+      console.error("[generate-bulk-quick-replies] Fetch error:", e instanceof Error ? e.message : e);
+    }
     return NextResponse.json(
-      { error: `Erro ao gerar: ${message}` },
+      { error: "Geração temporariamente indisponível. Tente novamente mais tarde." },
       { status: 502 }
     );
   }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { SideOver } from "@/components/SideOver";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   Loader2,
   MessageCircle,
@@ -156,6 +157,13 @@ export function GroupManageSideOver({
   const [activeTab, setActiveTab] = useState<TabId>("info");
   const [leaving, setLeaving] = useState(false);
   const [deletingFromList, setDeletingFromList] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    variant?: "danger" | "warning";
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
 
   const apiHeaders = useMemo(
     () => (companySlug ? { "X-Company-Slug": companySlug } : undefined),
@@ -196,7 +204,7 @@ export function GroupManageSideOver({
   const participants = info?.Participants ?? [];
 
   const handleLeave = () => {
-    if (!group || !window.confirm("Tem certeza que deseja sair deste grupo?")) return;
+    if (!group) return;
     setLeaving(true);
     setError(null);
     apiCall(
@@ -214,7 +222,7 @@ export function GroupManageSideOver({
   };
 
   const handleDeleteFromList = async () => {
-    if (!group?.jid || !group?.channel_id || !window.confirm("Excluir este grupo/comunidade da lista e sair no WhatsApp? Esta ação não pode ser desfeita.")) return;
+    if (!group?.jid || !group?.channel_id) return;
     setDeletingFromList(true);
     setError(null);
     try {
@@ -337,7 +345,15 @@ export function GroupManageSideOver({
                 </p>
                 <button
                   type="button"
-                  onClick={handleLeave}
+                  onClick={() =>
+                    setConfirmAction({
+                      title: "Sair do grupo?",
+                      message: "Tem certeza que deseja sair deste grupo?",
+                      confirmLabel: "Sair",
+                      variant: "warning",
+                      onConfirm: handleLeave,
+                    })
+                  }
                   disabled={leaving}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                 >
@@ -346,7 +362,15 @@ export function GroupManageSideOver({
                 </button>
                 <button
                   type="button"
-                  onClick={handleDeleteFromList}
+                  onClick={() =>
+                    setConfirmAction({
+                      title: "Excluir da lista?",
+                      message: "Excluir este grupo/comunidade da lista e sair no WhatsApp? Esta ação não pode ser desfeita.",
+                      confirmLabel: "Excluir",
+                      variant: "danger",
+                      onConfirm: handleDeleteFromList,
+                    })
+                  }
                   disabled={leaving || deletingFromList}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-100 px-4 py-3 text-sm font-medium text-red-800 hover:bg-red-200 disabled:opacity-60"
                 >
@@ -358,6 +382,20 @@ export function GroupManageSideOver({
           </>
         )}
       </div>
+      <ConfirmDialog
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        title={confirmAction?.title ?? ""}
+        message={confirmAction?.message ?? ""}
+        confirmLabel={confirmAction?.confirmLabel ?? "Confirmar"}
+        variant={confirmAction?.variant ?? "warning"}
+        onConfirm={async () => {
+          const pending = confirmAction;
+          setConfirmAction(null);
+          if (!pending) return;
+          await pending.onConfirm();
+        }}
+      />
     </SideOver>
   );
 }
@@ -520,6 +558,7 @@ function GroupConfigTab({
   const [locked, setLocked] = useState(info?.IsLocked ?? false);
   const [savingAll, setSavingAll] = useState(false);
   const [resettingLink, setResettingLink] = useState(false);
+  const [confirmResetInviteOpen, setConfirmResetInviteOpen] = useState(false);
 
   useEffect(() => {
     if (info) {
@@ -570,7 +609,6 @@ function GroupConfigTab({
   };
 
   const handleResetInvite = () => {
-    if (!window.confirm("Isso vai invalidar o link atual. Continuar?")) return;
     setResettingLink(true);
     onError(null);
     apiCall("/api/groups/reset-invite", base, apiHeaders).then(({ ok, error: err }) => {
@@ -686,13 +724,25 @@ function GroupConfigTab({
         ) : null}
         <button
           type="button"
-          onClick={handleResetInvite}
+          onClick={() => setConfirmResetInviteOpen(true)}
           disabled={resettingLink || savingAll}
           className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-sm font-medium text-[#64748B] hover:bg-[#F1F5F9] disabled:opacity-60"
         >
           {resettingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           Gerar novo link
         </button>
+        <ConfirmDialog
+          open={confirmResetInviteOpen}
+          onClose={() => setConfirmResetInviteOpen(false)}
+          title="Gerar novo link?"
+          message="Isso vai invalidar o link atual. Continuar?"
+          confirmLabel="Gerar novo link"
+          variant="warning"
+          onConfirm={async () => {
+            setConfirmResetInviteOpen(false);
+            handleResetInvite();
+          }}
+        />
       </div>
       <div className="flex items-center justify-between rounded-lg border border-[#E2E8F0] px-3 py-2">
         <span className="text-[#1E293B]">Todos podem enviar mensagens</span>

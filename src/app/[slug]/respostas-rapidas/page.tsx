@@ -1,7 +1,14 @@
 "use client";
 
+<<<<<<< HEAD
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+=======
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 import {
   AlignCenter,
   AlignLeft,
@@ -228,9 +235,26 @@ function RichTextEditor({
 }
 
 export default function RespostasRapidasPage() {
-  const pathname = usePathname();
-  const segments = pathname?.split("/").filter(Boolean) ?? [];
-  const slug = segments[0];
+  const params = useParams();
+  const router = useRouter();
+  const slug = (params?.slug as string) ?? "";
+  const apiHeadersForPerms = slug ? { "X-Company-Slug": slug } : undefined;
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeadersForPerms }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessQuickReplies = permissions.includes("quickreplies.view") || permissions.includes("quickreplies.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessQuickReplies) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessQuickReplies, router]);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -731,7 +755,7 @@ export default function RespostasRapidasPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.text) {
         setFormAiError(
-          data?.error ?? "Falha ao gerar sugestão. Verifique MISTRAL_API_KEY no .env ou ignore este botão."
+          data?.error ?? "Sugestão indisponível no momento. Ignore ou tente mais tarde."
         );
         return;
       }
@@ -1297,6 +1321,7 @@ export default function RespostasRapidasPage() {
       .filter(Boolean)
       .join(", ") || "—";
 
+<<<<<<< HEAD
   const tabRows = useMemo(() => {
     return rows.filter((r) => (r.templateCategory ?? "general") === moduleTab);
   }, [rows, moduleTab]);
@@ -1325,6 +1350,11 @@ export default function RespostasRapidasPage() {
       emptyHint: "As ações desta aba ficam na tabela (editar/excluir).",
     },
   }[moduleTab];
+=======
+  if (slug && permissionsData !== undefined && !canAccessQuickReplies) {
+    return null;
+  }
+>>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   return (
     <div className="flex flex-col gap-4 p-6">

@@ -44,6 +44,7 @@ const TTL_TICKETS_SECONDS = 55;
  */
 function listKey(
   companyId: string,
+  userScope: string,
   queueId: string,
   status: string,
   onlyAssigned: string,
@@ -52,7 +53,7 @@ function listKey(
   offset: number,
   limit: number
 ): string {
-  return `${KEY_PREFIX}${companyId}:${queueId}:${status}:${onlyAssigned}:${includeClosed}:${onlyUnassigned}:${offset}:${limit}`;
+  return `${KEY_PREFIX}${companyId}:${userScope}:${queueId}:${status}:${onlyAssigned}:${includeClosed}:${onlyUnassigned}:${offset}:${limit}`;
 }
 
 /**
@@ -66,12 +67,13 @@ export async function getCachedConversationList(
   includeClosed = false,
   onlyUnassigned = false,
   offset = 0,
-  limit = 100
+  limit = 100,
+  userScope = ""
 ): Promise<{ data: unknown[]; total: number } | null> {
   const redis = await getRedisClient();
   if (!redis) return null;
   try {
-    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", onlyUnassigned ? "1" : "0", offset, limit);
+    const key = listKey(companyId, userScope, queueId, status, onlyAssigned, includeClosed ? "1" : "0", onlyUnassigned ? "1" : "0", offset, limit);
     const raw = await redis.get(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { data: unknown[]; total: number };
@@ -93,12 +95,13 @@ export async function setCachedConversationList(
   includeClosed = false,
   onlyUnassigned = false,
   offset = 0,
-  limit = 100
+  limit = 100,
+  userScope = ""
 ): Promise<void> {
   const redis = await getRedisClient();
   if (!redis) return;
   try {
-    const key = listKey(companyId, queueId, status, onlyAssigned, includeClosed ? "1" : "0", onlyUnassigned ? "1" : "0", offset, limit);
+    const key = listKey(companyId, userScope, queueId, status, onlyAssigned, includeClosed ? "1" : "0", onlyUnassigned ? "1" : "0", offset, limit);
     const ttl = includeClosed ? TTL_TICKETS_SECONDS : TTL_SECONDS;
     await redis.set(key, JSON.stringify(payload), { EX: ttl });
   } catch {

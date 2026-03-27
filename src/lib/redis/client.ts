@@ -6,6 +6,34 @@ let client: RedisClientType | null = null;
 let connecting: Promise<RedisClientType | null> | null = null;
 /** Após falha de conexão, não tentar de novo até reiniciar (evita log em toda requisição). */
 let connectionFailed = false;
+let lastRedisErrorLog = 0;
+const REDIS_ERROR_LOG_MS = 30_000;
+
+function handleRedisClientError(err: Error, c: RedisClientType | null) {
+  const msg = err.message || String(err);
+  const now = Date.now();
+
+  // Plano Redis (ex.: Redis Cloud free) tem limite baixo de conexões; outras apps + dev + Insight somam no mesmo limite.
+  if (msg.includes("max number of clients") || msg.includes("ERR max number")) {
+    connectionFailed = true;
+    client = null;
+    void c?.disconnect().catch(() => {});
+    if (now - lastRedisErrorLog > REDIS_ERROR_LOG_MS) {
+      lastRedisErrorLog = now;
+      console.warn(
+        "Redis: limite de conexões atingido (max clients). Cache desativado até reiniciar o servidor. " +
+          "Reduza consumidores (outro ambiente, Redis Insight, scripts) ou aumente o limite no painel / plano. " +
+          "Em dev local: USE_REDIS=false no .env evita usar Redis.",
+      );
+    }
+    return;
+  }
+
+  if (now - lastRedisErrorLog > REDIS_ERROR_LOG_MS) {
+    lastRedisErrorLog = now;
+    console.warn("Redis error (cache desativado):", msg);
+  }
+}
 
 /**
  * Parse REDIS_HOST aceitando "host" ou "host:port".
@@ -50,21 +78,26 @@ export async function getRedisClient(): Promise<RedisClientType | null> {
 
   // REDIS_URL com auth (redis://user:pass@host:port) tem prioridade
   if (url && url.includes("@")) {
-    try {
-      const c = createClient({ url });
-      c.on("error", (err) => console.warn("Redis error (cache desativado):", err.message));
-      await c.connect();
-      client = c as RedisClientType;
-      return client;
-    } catch (err) {
-      connectionFailed = true;
-      if (process.env.NODE_ENV !== "test") {
-        console.warn("Redis não disponível — verifique REDIS_URL e credenciais.");
-      }
-      return null;
-    } finally {
-      connecting = null;
+    if (!connecting) {
+      connecting = (async (): Promise<RedisClientType | null> => {
+        try {
+          const c = createClient({ url });
+          c.on("error", (err) => handleRedisClientError(err as Error, c as RedisClientType));
+          await c.connect();
+          client = c as RedisClientType;
+          return client;
+        } catch {
+          connectionFailed = true;
+          if (process.env.NODE_ENV !== "test") {
+            console.warn("Redis não disponível — verifique REDIS_URL e credenciais.");
+          }
+          return null;
+        } finally {
+          connecting = null;
+        }
+      })();
     }
+    return connecting;
   }
 
   // Conexão por host + port + username + password (alinhado ao .env e Redis Labs)
@@ -82,9 +115,7 @@ export async function getRedisClient(): Promise<RedisClientType | null> {
           password: password || undefined,
         });
 
-        c.on("error", (err) => {
-          console.warn("Redis error (cache desativado):", err.message);
-        });
+        c.on("error", (err) => handleRedisClientError(err as Error, c as RedisClientType));
 
         await c.connect();
         client = c as RedisClientType;

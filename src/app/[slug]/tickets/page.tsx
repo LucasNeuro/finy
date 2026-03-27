@@ -1,16 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, GripVertical, LayoutGrid, Table2, Settings2, UserPlus, MessageSquare, ChevronLeft, ChevronRight, X, Hash, Layers, UserCheck } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { queryKeys } from "@/lib/query-keys";
-
-const StatusConfigSideOver = dynamic(() => import("./StatusConfigSideOver").then((m) => ({ default: m.StatusConfigSideOver })), { ssr: false });
-const ReassignSideOver = dynamic(() => import("./ReassignSideOver").then((m) => ({ default: m.ReassignSideOver })), { ssr: false });
+import { StatusConfigSideOver } from "./StatusConfigSideOver";
+import { ReassignSideOver } from "./ReassignSideOver";
 
 const TICKETS_PAGE_SIZE = 40;
 const TABLE_PAGE_SIZE = 20;
@@ -76,6 +74,7 @@ function statusToApi(slug: string): string {
 
 export default function TicketsPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
@@ -88,6 +87,7 @@ export default function TicketsPage() {
   const [selectedTicketIds, setSelectedTicketIds] = useState<Set<string>>(new Set());
   const [bulkStatusSaving, setBulkStatusSaving] = useState(false);
   const [optimisticStatusById, setOptimisticStatusById] = useState<Record<string, string>>({});
+  const [actionFeedback, setActionFeedback] = useState<{ type: "error" | "success"; message: string } | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -416,7 +416,7 @@ export default function TicketsPage() {
           delete next[ticketId];
           return next;
         });
-        alert(d?.error ?? "Falha ao atualizar status");
+        setActionFeedback({ type: "error", message: d?.error ?? "Falha ao atualizar status." });
       } else {
         // Mantém o estado otimista por uma janela curta para evitar "pisca"
         // quando a lista volta do cache antigo logo após o PATCH.
@@ -442,7 +442,7 @@ export default function TicketsPage() {
         delete next[ticketId];
         return next;
       });
-      alert("Erro de rede");
+      setActionFeedback({ type: "error", message: "Erro de rede ao atualizar status." });
     } finally {
       setSaving(false);
     }
@@ -480,7 +480,7 @@ export default function TicketsPage() {
         });
         if (!globalReorder.ok) {
           const d = await globalReorder.json().catch(() => ({}));
-          alert(d?.error ?? "Falha ao reordenar padrões");
+          setActionFeedback({ type: "error", message: d?.error ?? "Falha ao reordenar padrões." });
           return;
         }
 
@@ -494,7 +494,7 @@ export default function TicketsPage() {
           });
           if (!queueReorder.ok) {
             const d = await queueReorder.json().catch(() => ({}));
-            alert(d?.error ?? "Falha ao reordenar fila");
+            setActionFeedback({ type: "error", message: d?.error ?? "Falha ao reordenar fila." });
             return;
           }
         }
@@ -503,7 +503,7 @@ export default function TicketsPage() {
         if (previousStatuses !== undefined) {
           queryClient.setQueryData(statusesKey, previousStatuses);
         }
-        alert("Erro de rede");
+        setActionFeedback({ type: "error", message: "Erro de rede ao reordenar status." });
       } finally {
         setReorderingColumns(false);
         setDraggingColumnKey(null);
@@ -530,15 +530,14 @@ export default function TicketsPage() {
     }));
   }, [tickets, statusColumns, optimisticStatusById]);
 
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessTickets) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessTickets, router]);
+
   if (slug && permissionsData !== undefined && !canAccessTickets) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-[#F1F5F9] p-8">
-        <h1 className="text-lg font-semibold text-[#0F172A]">Sem permissão</h1>
-        <p className="max-w-md text-center text-sm text-[#64748B]">
-          Você não tem acesso ao módulo Tickets. Peça ao administrador para conceder a permissão &quot;Acesso: ver módulo Tickets&quot; no seu cargo.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -608,6 +607,17 @@ export default function TicketsPage() {
           {error}
         </div>
       )}
+      {actionFeedback && (
+        <div
+          className={`rounded-md border px-3 py-2 text-sm ${
+            actionFeedback.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-red-200 bg-red-50 text-red-700"
+          }`}
+        >
+          {actionFeedback.message}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto pb-2">
@@ -672,7 +682,7 @@ export default function TicketsPage() {
                         queryClient.invalidateQueries({ queryKey: queryKeys.counts(slug ?? "") });
                         setSelectedTicketIds(new Set());
                       } catch {
-                        alert("Erro ao atualizar status");
+                        setActionFeedback({ type: "error", message: "Erro ao atualizar status em massa." });
                       } finally {
                         setBulkStatusSaving(false);
                       }

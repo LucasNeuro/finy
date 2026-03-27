@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { UserCog, Users, Plus, Loader2, Settings, Trash2, Briefcase, UserCircle, Eye, EyeOff, List, UserPlus, Search, ChevronLeft, ChevronRight } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
@@ -46,8 +48,25 @@ const USERS_PAGE_SIZE = 6;
 
 export default function CargosUsuariosPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const slug = getCompanySlug(pathname);
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+
+  const { data: permissionsData } = useQuery({
+    queryKey: queryKeys.permissions(slug ?? ""),
+    queryFn: () =>
+      fetch("/api/auth/permissions", { credentials: "include", headers: apiHeaders }).then((r) => r.json()),
+    enabled: !!slug,
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+  const canAccessUsers = permissions.includes("users.view") || permissions.includes("users.manage");
+
+  useEffect(() => {
+    if (slug && permissionsData !== undefined && !canAccessUsers) {
+      router.replace(`/${slug}/conversas`);
+    }
+  }, [slug, permissionsData, canAccessUsers, router]);
 
   const [activeTab, setActiveTab] = useState<"cargos" | "usuarios">("cargos");
   const [roles, setRoles] = useState<Role[]>([]);
@@ -95,6 +114,7 @@ export default function CargosUsuariosPage() {
   const [whatsProfilePhone, setWhatsProfilePhone] = useState<string | null>(null);
 
   const [deleteRoleConfirm, setDeleteRoleConfirm] = useState<Role | null>(null);
+  const [deleteSelectedRolesConfirmOpen, setDeleteSelectedRolesConfirmOpen] = useState(false);
 
   const fetchRoles = useCallback(() => {
     return fetch("/api/roles", { credentials: "include", headers: apiHeaders })
@@ -520,8 +540,6 @@ export default function CargosUsuariosPage() {
   const deleteSelectedRoles = async () => {
     if (selectedRoleIds.size === 0) return;
     const ids = Array.from(selectedRoleIds);
-    const ok = window.confirm(`Excluir ${ids.length} cargo(s) selecionado(s)?`);
-    if (!ok) return;
     setError("");
     try {
       await Promise.all(
@@ -610,6 +628,10 @@ export default function CargosUsuariosPage() {
       setBulkQueueSaving(false);
     }
   };
+
+  if (slug && permissionsData !== undefined && !canAccessUsers) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-4 bg-[#F1F5F9] p-4 md:p-6">
@@ -703,7 +725,10 @@ export default function CargosUsuariosPage() {
                     )}
                     <button
                       type="button"
-                      onClick={deleteSelectedRoles}
+                      onClick={() => {
+                        if (selectedRoleIds.size === 0) return;
+                        setDeleteSelectedRolesConfirmOpen(true);
+                      }}
                       className="inline-flex items-center gap-1.5 border-r border-[#E2E8F0] bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 last:border-r-0"
                       title="Excluir cargos selecionados"
                     >
@@ -1574,6 +1599,18 @@ export default function CargosUsuariosPage() {
             ? `Excluir o cargo "${deleteRoleConfirm.name}"? Usuários com este cargo precisarão ser reatribuídos.`
             : ""
         }
+        confirmLabel="Excluir"
+        variant="danger"
+      />
+      <ConfirmDialog
+        open={deleteSelectedRolesConfirmOpen}
+        onClose={() => setDeleteSelectedRolesConfirmOpen(false)}
+        onConfirm={async () => {
+          setDeleteSelectedRolesConfirmOpen(false);
+          await deleteSelectedRoles();
+        }}
+        title="Excluir cargos selecionados?"
+        message={`Excluir ${selectedRoleIds.size} cargo(s) selecionado(s)? Esta ação não pode ser desfeita.`}
         confirmLabel="Excluir"
         variant="danger"
       />

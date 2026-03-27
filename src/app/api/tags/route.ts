@@ -113,18 +113,20 @@ export async function POST(request: Request) {
   }
 
   // Ensure category exists (per company + kind + name)
+  // Usa limit(1) em vez de maybeSingle() para evitar erro quando há categorias duplicadas
   let categoryId: string | null = null;
   {
-    const { data: existing, error: catErr } = await supabase
+    const { data: existingRows, error: catErr } = await supabase
       .from("tag_categories")
       .select("id")
       .eq("company_id", companyId)
       .eq("kind", categoryType)
       .ilike("name", categoryName)
-      .maybeSingle();
+      .limit(1);
     if (catErr) {
       return NextResponse.json({ error: catErr.message }, { status: 500 });
     }
+    const existing = Array.isArray(existingRows) ? existingRows[0] : null;
     if (existing?.id) {
       categoryId = existing.id;
     } else {

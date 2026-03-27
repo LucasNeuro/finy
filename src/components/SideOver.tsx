@@ -68,15 +68,15 @@ export function SideOver({
         }`}
         style={{ width: w, maxWidth: "100vw" }}
       >
-        <header className="flex shrink-0 items-center justify-between border-b border-gray-200 px-6 py-4">
-          <h2 id={titleId} className="text-lg font-semibold text-gray-900">
+        <header className="flex shrink-0 items-center justify-between border-b border-[#E2E8F0] px-6 py-4">
+          <h2 id={titleId} className="text-lg font-semibold text-[#1E293B]">
             {title}
           </h2>
           <button
             type="button"
             ref={closeButtonRef}
             onClick={onClose}
-            className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#334155]"
             aria-label="Fechar painel"
           >
             <X className="h-5 w-5" />

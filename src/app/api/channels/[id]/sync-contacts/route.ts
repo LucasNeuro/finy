@@ -4,9 +4,14 @@ import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { listContacts, listGroups, getChatDetails, getGroupInfo } from "@/lib/uazapi/client";
+import { listGroups, getChatDetails, getGroupInfo, findChats, extractContactNameFromDetails } from "@/lib/uazapi/client";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+
+/**
+ * Traz apenas contatos que têm conversa com a instância (chats).
+ * NÃO usa a agenda do celular — só contatos com chat aberto na instância.
+ */
 
 const MAX_AVATAR_SYNC = 200;
 const AVATAR_SYNC_DELAY_MS = 120;
@@ -114,83 +119,80 @@ async function runSync(
   onProgress: ProgressCallback,
   clearFirst = false
 ): Promise<{ ok: boolean; contacts_synced?: number; groups_synced?: number; avatars_synced?: number; error?: string }> {
-  // Opcional: limpar tudo do canal antes (evita resquícios de duplicatas)
   const supabase = await createClient();
   if (clearFirst) {
     await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("company_id", companyId);
     await supabase.from("channel_groups").delete().eq("channel_id", channelId).eq("company_id", companyId);
   }
 
-  // Sem duplicar: apaga todos os contatos deste canal e insere só os da API (JID normalizado + deduplicado).
   onProgress(5);
-  const [contactsRes, groupsRes] = await Promise.all([
-    listContacts(token),
-    listGroups(token, { force: true, noparticipants: true }),
-  ]);
-  onProgress(15);
 
   let contactsCount = 0;
+  let avatars_synced = 0;
   let syncedJids: string[] = [];
+  let groupsRes: { ok: boolean; data?: unknown[] };
 
-  if (!contactsRes.ok || !Array.isArray(contactsRes.data) || contactsRes.data.length === 0) {
-    if (process.env.NODE_ENV !== "test") {
-      console.log("[sync-contacts] Nenhum contato retornado pela UAZAPI:", contactsRes.ok ? "lista vazia" : contactsRes.error);
-    }
-  }
-  if (contactsRes.ok && Array.isArray(contactsRes.data) && contactsRes.data.length > 0) {
-    const seen = new Set<string>();
-    const rows = contactsRes.data
-      .map((c) => {
-        const rawJid = (typeof (c as { jid?: string }).jid === "string"
-          ? (c as { jid: string }).jid
-          : typeof (c as { JID?: string }).JID === "string"
-            ? (c as { JID: string }).JID
-            : ""
-        ).trim();
+  // Apenas contatos que têm conversa com a instância (chats) — NÃO agenda do celular.
+  const seenByJid = new Set<string>();
+  const seenByPhone = new Set<string>();
+  const allContactRows: { channel_id: string; company_id: string; jid: string; phone: string | null; contact_name: string | null; first_name: string | null }[] = [];
+  let offset = 0;
+  const limit = 100;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data: chatsData, ok: chatsOk } = await findChats(token, {
+      limit,
+      offset,
+      sort: "-wa_lastMsgTimestamp",
+      wa_isGroup: false,
+    });
+    if (!chatsOk || !chatsData?.chats?.length) break;
+
+    const chats = chatsData.chats as { wa_chatid?: string; wa_contactName?: string; wa_name?: string }[];
+    for (const chat of chats) {
+        const rawJid = (chat.wa_chatid ?? "").toString().trim();
+        if (!rawJid || rawJid.endsWith("@g.us")) continue;
         const jid = normalizeContactJid(rawJid);
-        if (!jid || seen.has(jid)) return null;
-        seen.add(jid);
         const phone = toCanonicalDigits(jid.replace(/@.*$/, "").replace(/\D/g, "")) ?? (jid.replace(/@.*$/, "").replace(/\D/g, "") || null);
-        return {
+        if (!jid) continue;
+        if (seenByJid.has(jid)) continue;
+        if (phone && seenByPhone.has(phone)) continue;
+        seenByJid.add(jid);
+        if (phone) seenByPhone.add(phone);
+        const name = (chat.wa_contactName ?? chat.wa_name ?? "").trim() || null;
+        allContactRows.push({
           channel_id: channelId,
           company_id: companyId,
           jid,
           phone: phone || null,
-          contact_name: (
-            (c as { contactName?: string }).contactName
-            ?? (c as { contact_name?: string }).contact_name
-            ?? (c as { name?: string }).name
-            ?? (c as { pushName?: string }).pushName
-            ?? (c as { shortName?: string }).shortName
-            ?? (c as { wa_contactName?: string }).wa_contactName
-            ?? ""
-          ).trim() || null,
-          first_name: (
-            (c as { contact_FirstName?: string }).contact_FirstName
-            ?? (c as { contactName?: string }).contactName
-            ?? (c as { name?: string }).name
-            ?? (c as { pushName?: string }).pushName
-            ?? ""
-          ).trim() || null,
-        };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
-    if (rows.length > 0) {
-      await supabase
-        .from("channel_contacts")
-        .delete()
-        .eq("channel_id", channelId)
-        .eq("company_id", companyId);
-      const { error: err } = await supabase.from("channel_contacts").insert(rows);
-      if (!err) {
-        contactsCount = rows.length;
-        syncedJids = rows.map((r) => r.jid);
-      }
+          contact_name: name,
+          first_name: name,
+        });
+    }
+    if (chats.length < limit) hasMore = false;
+    else offset += limit;
+  }
+
+  if (allContactRows.length > 0) {
+    await supabase
+      .from("channel_contacts")
+      .delete()
+      .eq("channel_id", channelId)
+      .eq("company_id", companyId);
+    const { error: err } = await supabase.from("channel_contacts").insert(allContactRows);
+    if (!err) {
+      contactsCount = allContactRows.length;
+      syncedJids = allContactRows.map((r) => r.jid);
     }
   }
+  if (process.env.NODE_ENV !== "test" && contactsCount > 0) {
+    console.log("[sync-contacts] trazidos", contactsCount, "contatos da instância (chats)");
+  }
+  groupsRes = await listGroups(token, { force: true, noparticipants: true });
+
   onProgress(30);
 
-  let avatars_synced = 0;
   if (syncedJids.length > 0) {
     const toFetch = syncedJids.slice(0, MAX_AVATAR_SYNC);
     for (let i = 0; i < toFetch.length; i++) {
@@ -198,8 +200,7 @@ async function runSync(
       try {
         const detail = await getChatDetails(token, jid, { preview: true });
         const imageUrl = detail.data?.imagePreview ?? detail.data?.image;
-        const nameFromDetail =
-          (detail.data?.wa_contactName ?? detail.data?.wa_name ?? detail.data?.name)?.trim() || null;
+        const nameFromDetail = extractContactNameFromDetails(detail.data);
         const updates: Record<string, unknown> = {
           synced_at: new Date().toISOString(),
         };
