@@ -14,13 +14,10 @@ import {
   Inbox,
   UserCog,
   Ticket,
-<<<<<<< HEAD
   Megaphone,
-=======
   ChartLine,
   Shield,
   ShieldCheck,
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 } from "lucide-react";
 
 const fetcher = (url: string, slug: string) =>

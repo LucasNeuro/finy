@@ -12,11 +12,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-<<<<<<< HEAD
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Download, Upload, Megaphone, ShieldCheck, History } from "lucide-react";
-=======
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload, Send } from "lucide-react";
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload, Megaphone, ShieldCheck, History, Send } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SideOver } from "@/components/SideOver";
@@ -77,28 +73,6 @@ function canonicalContactDigits(phone: string | null | undefined, jid: string | 
   if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   if ((digits.length === 12 || digits.length === 13) && digits.startsWith("55")) return digits;
   return digits;
-}
-
-<<<<<<< HEAD
-type PipelineBlockedReason = "missing_opt_in" | "opted_out" | "invalid_number";
-
-function blockedReasonLabel(reason: PipelineBlockedReason): string {
-  if (reason === "missing_opt_in") return "Sem opt-in";
-  if (reason === "opted_out") return "Opt-out ativo";
-  return "Numero invalido";
-=======
-/** Nome para exibição: se contact_name/first_name for o número, mostra "Sem Nome" em vez do número na coluna NOME. */
-function displayContactName(c: { contact_name?: string | null; first_name?: string | null; phone?: string | null; jid?: string | null }): string {
-  const raw = (c.contact_name || c.first_name || "").trim();
-  if (!raw) return "Sem Nome";
-  const nameDigits = raw.replace(/\D/g, "").trim();
-  if (nameDigits.length >= 10) {
-    const canonicalPhone = canonicalContactDigits(c.phone, c.jid);
-    const canonicalName = toCanonicalDigits(nameDigits) ?? nameDigits;
-    if (canonicalPhone && canonicalName === canonicalPhone) return "Sem Nome";
-  }
-  return raw;
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 }
 
 /** URL de avatar: se for externa (http/https), usa proxy para evitar CORS/referrer e permitir cache. */
@@ -779,7 +753,6 @@ export default function ContatosPage() {
     { id: string; name: string; color_hex: string | null; category_name: string; active: boolean }[]
   >([]);
   const [selectedNewContactTagIds, setSelectedNewContactTagIds] = useState<Set<string>>(new Set());
-<<<<<<< HEAD
   const [pipelineSideOverOpen, setPipelineSideOverOpen] = useState(false);
   const [pipelineDraftName, setPipelineDraftName] = useState("");
   const [pipelineBatchPlan, setPipelineBatchPlan] = useState("500,300,150");
@@ -792,7 +765,6 @@ export default function ContatosPage() {
     eligible: number;
     blocked: number;
   } | null>(null);
-=======
   const [sendToQueueSideOverOpen, setSendToQueueSideOverOpen] = useState(false);
   const [sendToQueueChannelId, setSendToQueueChannelId] = useState("");
   const [sendToQueueQueueId, setSendToQueueQueueId] = useState("");
@@ -808,13 +780,14 @@ export default function ContatosPage() {
   });
   const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
   const canAccessContacts = permissions.includes("contacts.view") || permissions.includes("contacts.manage");
+  /** Botão destrutivo "Apagar agenda do telefone" — API exige channels.manage e ENABLE_PHONE_AGENDA_WIPE no servidor. */
+  const allowPhoneAgendaWipe = permissions.includes("channels.manage");
 
   useEffect(() => {
     if (slug && permissionsData !== undefined && !canAccessContacts) {
       router.replace(`/${slug}/conversas`);
     }
   }, [slug, permissionsData, canAccessContacts, router]);
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   const fetchChannels = useCallback(() => {
     return fetch("/api/channels", { credentials: "include", headers: apiHeaders })
@@ -865,24 +838,6 @@ export default function ContatosPage() {
     });
   };
 
-<<<<<<< HEAD
-  const permissionsKey = useMemo(() => (slug ? (["auth-permissions", slug] as const) : null), [slug]);
-  const { data: permissionsPayload } = useSWR(
-    permissionsKey,
-    async ([, s]: readonly [string, string]) => {
-      const r = await fetch("/api/auth/permissions", {
-        credentials: "include",
-        headers: { "X-Company-Slug": s },
-      });
-      return r.json() as Promise<{ permissions?: string[] }>;
-    },
-    { revalidateOnFocus: false, dedupingInterval: 60_000 }
-  );
-  /** Botão destrutivo "Apagar agenda do telefone" — API exige channels.manage e ENABLE_PHONE_AGENDA_WIPE no servidor. */
-  const allowPhoneAgendaWipe =
-    Array.isArray(permissionsPayload?.permissions) &&
-    permissionsPayload.permissions.includes("channels.manage");
-=======
   // Ao abrir o modal de adicionar contato, pré-selecionar o canal para evitar salvar no lugar errado
   useEffect(() => {
     if (!addContactSideOverOpen || channels.length === 0) return;
@@ -901,7 +856,6 @@ export default function ContatosPage() {
       .then((data) => setQueues(Array.isArray(data) ? data : []))
       .catch(() => setQueues([]));
   }, [sendToQueueSideOverOpen, slug, apiHeaders]);
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   const contactsKey = useMemo(() => ["contacts", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
   const groupsKey = useMemo(() => ["groups", slug, filterChannelId || ""] as const, [slug, filterChannelId]);
@@ -1941,7 +1895,6 @@ export default function ContatosPage() {
     return () => window.clearTimeout(id);
   }, [alertMessage]);
 
-<<<<<<< HEAD
   const openPipelineFromSelection = () => {
     if (selectedContactIds.size === 0) return;
     const now = new Date();
@@ -2000,11 +1953,10 @@ export default function ContatosPage() {
       setPipelineSaving(false);
     }
   };
-=======
+
   if (slug && permissionsData !== undefined && !canAccessContacts) {
     return null;
   }
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   return (
     <div className="flex flex-col gap-4 px-4 py-6 sm:px-6">
@@ -2059,11 +2011,7 @@ export default function ContatosPage() {
                 title={
                   syncing === ch.id
                     ? "Sincronizando contatos, grupos e comunidades…"
-<<<<<<< HEAD
                     : `Sincronizar agenda (contatos, grupos e comunidades) — não importa histórico de mensagens: ${ch.name}`
-=======
-                    : `Sincronizar: traz contatos que têm conversa com ${ch.name} (não usa agenda do celular)`
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
                 }
               >
                 <span className="relative z-10 flex items-center justify-center gap-1 truncate">

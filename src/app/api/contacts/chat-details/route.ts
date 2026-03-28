@@ -2,7 +2,6 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { toCanonicalDigits, toCanonicalJid } from "@/lib/phone-canonical";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { getChatDetails, extractContactNameFromDetails, type ChatDetails } from "@/lib/uazapi/client";
-import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -58,67 +57,31 @@ export async function POST(request: Request) {
   const avatarUrl = (data as { imagePreview?: string; image?: string }).imagePreview
     || (data as { image?: string }).image
     || null;
-<<<<<<< HEAD
-  const contactName = ((data as { wa_contactName?: string }).wa_contactName
-    ?? (data as { wa_name?: string }).wa_name
-    ?? (data as { name?: string }).name)?.trim() || null;
-  const canonicalDigits = toCanonicalDigits(number);
-  const canonicalJid = toCanonicalJid(number, false).toLowerCase();
-=======
   const contactName = extractContactNameFromDetails(data as ChatDetails);
   const digits = number.replace(/\D/g, "").replace(/@.*$/, "");
-  const canonicalDigits = toCanonicalDigits(digits) ?? digits;
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
+  const canonicalDigits = toCanonicalDigits(number) ?? toCanonicalDigits(digits) ?? digits;
+  const canonicalJid = toCanonicalJid(number, false).toLowerCase();
 
   const hasUpdates = (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) || contactName;
   if (hasUpdates) {
     const supabase = await createClient();
-<<<<<<< HEAD
     const isGroup = number.toLowerCase().includes("@g.us");
     if (!isGroup) {
-=======
-    const canonicalJid = canonicalDigits ? `${canonicalDigits}@s.whatsapp.net` : (number.includes("@") ? number : `${digits}@s.whatsapp.net`);
-    const jids = number.includes("@") && number !== canonicalJid ? [canonicalJid, number] : [canonicalJid];
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
-    const contactUpdates: Record<string, unknown> = { synced_at: new Date().toISOString() };
-    if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
-      contactUpdates.avatar_url = avatarUrl.trim();
-    }
-    if (contactName) {
-      contactUpdates.contact_name = contactName;
-      contactUpdates.first_name = contactName;
-    }
-<<<<<<< HEAD
-    await supabase
-      .from("channel_contacts")
-      .upsert(
-        {
-          channel_id: channelId,
-          company_id: companyId,
-          jid: canonicalJid,
-          ...(canonicalDigits ? { phone: canonicalDigits } : {}),
-          ...contactUpdates,
-        },
-        { onConflict: "channel_id,jid", ignoreDuplicates: false }
-      );
-
-    // Limpa variante antiga sem sufixo (@s.whatsapp.net), se existir.
-    const rawDigits = number.replace(/\D/g, "");
-    if (rawDigits && rawDigits !== canonicalJid) {
-      await supabase
-        .from("channel_contacts")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("channel_id", channelId)
-        .eq("jid", rawDigits);
-    }
-    }
-=======
-    await Promise.all(
-      jids.map((jid) =>
-        supabase
-          .from("channel_contacts")
-          .upsert(
+      const jids =
+        number.includes("@") && number.toLowerCase() !== canonicalJid
+          ? [canonicalJid, number]
+          : [canonicalJid];
+      const contactUpdates: Record<string, unknown> = { synced_at: new Date().toISOString() };
+      if (avatarUrl && typeof avatarUrl === "string" && avatarUrl.trim()) {
+        contactUpdates.avatar_url = avatarUrl.trim();
+      }
+      if (contactName) {
+        contactUpdates.contact_name = contactName;
+        contactUpdates.first_name = contactName;
+      }
+      await Promise.all(
+        jids.map((jid) =>
+          supabase.from("channel_contacts").upsert(
             {
               channel_id: channelId,
               company_id: companyId,
@@ -126,11 +89,21 @@ export async function POST(request: Request) {
               ...(canonicalDigits ? { phone: canonicalDigits } : {}),
               ...contactUpdates,
             },
-            { onConflict: "channel_id,jid" }
+            { onConflict: "channel_id,jid", ignoreDuplicates: false }
           )
-      )
-    );
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
+        )
+      );
+
+      const rawDigits = number.replace(/\D/g, "");
+      if (rawDigits && rawDigits !== canonicalJid) {
+        await supabase
+          .from("channel_contacts")
+          .delete()
+          .eq("company_id", companyId)
+          .eq("channel_id", channelId)
+          .eq("jid", rawDigits);
+      }
+    }
     if (conversationId && contactName) {
       await supabase
         .from("conversations")

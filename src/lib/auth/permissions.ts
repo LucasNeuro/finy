@@ -37,10 +37,8 @@ export const PERMISSIONS = {
   quickreplies: { view: "quickreplies.view", manage: "quickreplies.manage" },
   // Tags
   tags: { view: "tags.view", manage: "tags.manage" },
-<<<<<<< HEAD
   // Campanhas
   campaigns: { view: "campaigns.view", manage: "campaigns.manage" },
-=======
   // CRM Comercial
   crm: { view: "crm.view", manage: "crm.manage" },
   // Envio em massa (fila de envio / broadcast)
@@ -50,7 +48,6 @@ export const PERMISSIONS = {
     view: "insurance_multicalculo.view",
     manage: "insurance_multicalculo.manage",
   },
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
   // Perfil (próprio perfil / link de acesso / foto)
   profile: { view: "profile.view" },
 } as const;
@@ -65,13 +62,10 @@ export type PermissionKey =
   | (typeof PERMISSIONS)["contacts"][keyof (typeof PERMISSIONS)["contacts"]]
   | (typeof PERMISSIONS)["quickreplies"][keyof (typeof PERMISSIONS)["quickreplies"]]
   | (typeof PERMISSIONS)["tags"][keyof (typeof PERMISSIONS)["tags"]]
-<<<<<<< HEAD
   | (typeof PERMISSIONS)["campaigns"][keyof (typeof PERMISSIONS)["campaigns"]]
-=======
   | (typeof PERMISSIONS)["crm"][keyof (typeof PERMISSIONS)["crm"]]
   | (typeof PERMISSIONS)["broadcast"][keyof (typeof PERMISSIONS)["broadcast"]]
   | (typeof PERMISSIONS)["insurance_multicalculo"][keyof (typeof PERMISSIONS)["insurance_multicalculo"]]
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
   | (typeof PERMISSIONS)["profile"][keyof (typeof PERMISSIONS)["profile"]];
 
 const ALL_PERMISSION_KEYS: PermissionKey[] = [
@@ -102,17 +96,14 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.quickreplies.manage,
   PERMISSIONS.tags.view,
   PERMISSIONS.tags.manage,
-<<<<<<< HEAD
   PERMISSIONS.campaigns.view,
   PERMISSIONS.campaigns.manage,
-=======
   PERMISSIONS.crm.view,
   PERMISSIONS.crm.manage,
   PERMISSIONS.broadcast.view,
   PERMISSIONS.broadcast.manage,
   PERMISSIONS.insurance_multicalculo.view,
   PERMISSIONS.insurance_multicalculo.manage,
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
   PERMISSIONS.profile.view,
 ];
 
@@ -171,10 +162,10 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
     keys: [PERMISSIONS.tags.view, PERMISSIONS.tags.manage],
   },
   {
-<<<<<<< HEAD
     label: "Módulo Campanhas",
     keys: [PERMISSIONS.campaigns.view, PERMISSIONS.campaigns.manage],
-=======
+  },
+  {
     label: "Módulo CRM Comercial",
     keys: [PERMISSIONS.crm.view, PERMISSIONS.crm.manage],
   },
@@ -185,7 +176,6 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
   {
     label: "Módulo Multicálculo de Seguros",
     keys: [PERMISSIONS.insurance_multicalculo.view, PERMISSIONS.insurance_multicalculo.manage],
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
   },
   {
     label: "Perfil (próprio perfil da empresa)",
@@ -221,17 +211,14 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.quickreplies.manage]: "Ação: gerenciar Respostas rápidas",
   [PERMISSIONS.tags.view]: "Acesso: ver Tags",
   [PERMISSIONS.tags.manage]: "Ação: gerenciar Tags",
-<<<<<<< HEAD
   [PERMISSIONS.campaigns.view]: "Acesso: ver Campanhas",
   [PERMISSIONS.campaigns.manage]: "Ação: gerenciar Campanhas",
-=======
   [PERMISSIONS.crm.view]: "Acesso: ver CRM Comercial",
   [PERMISSIONS.crm.manage]: "Ação: gerenciar CRM Comercial (carteiras, distribuição e painel)",
   [PERMISSIONS.broadcast.view]: "Acesso: ver Envio em massa (fila de envio)",
   [PERMISSIONS.broadcast.manage]: "Ação: gerenciar Envio em massa (adicionar/remover e disparar)",
   [PERMISSIONS.insurance_multicalculo.view]: "Acesso: ver módulo Multicálculo de Seguros",
   [PERMISSIONS.insurance_multicalculo.manage]: "Ação: gerenciar módulo Multicálculo de Seguros",
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
   [PERMISSIONS.profile.view]: "Acesso: ver Perfil (próprio perfil, link de acesso, foto)",
 };
 

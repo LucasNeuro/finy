@@ -9,12 +9,16 @@ import { toCanonicalJid } from "@/lib/phone-canonical";
 import { findChats, findMessages, type UazapiChat, type UazapiMessage } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
+/** Vercel / plataformas com limite — sync pode levar vários minutos. */
+export const maxDuration = 300;
+
 /**
  * POST /api/channels/[id]/sync-history
- * Sincroniza histórico de mensagens apenas para conversas que já existem (criadas pelo webhook).
- * Não cria conversas novas: assim Novos/Filas só recebem chamados de mensagens novas.
- * Atualiza channel_groups com nome de grupos; mensagens antigas são inseridas só em conversas existentes.
- * Pode ser chamado pelo usuário (auth + permission) ou internamente (X-Internal-Sync-Secret).
+ * Sincroniza histórico de mensagens via UAZAPI (lista de chats e mensagens por chat).
+ * Por padrão só preenche conversas que já existem. Com body { create_missing: true } ou
+ * ?create_missing=1, cria conversa/contato faltante e importa até messages_per_chat (default 200, max 1000).
+ * Atualiza channel_groups para grupos mesmo quando não cria conversa.
+ * Auth: usuário com channels.manage, ou chamada interna com X-Internal-Sync-Secret.
  */
 export async function POST(
   request: Request,
@@ -70,15 +74,18 @@ export async function POST(
   const createMissingConversations =
     String(body.create_missing ?? url.searchParams.get("create_missing") ?? "").toLowerCase() === "true" ||
     String(body.create_missing ?? url.searchParams.get("create_missing") ?? "") === "1";
+  const envDefault = Number(process.env.SYNC_HISTORY_MAX_MESSAGES_PER_CHAT);
+  const defaultPerChat =
+    Number.isFinite(envDefault) && envDefault > 0 ? Math.min(5000, Math.floor(envDefault)) : 200;
   const targetMessagesPerChatRaw = Number(
-    body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? 200
+    body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? defaultPerChat
   );
   const targetMessagesPerChat =
     Number.isFinite(targetMessagesPerChatRaw) && targetMessagesPerChatRaw > 0
       ? Math.min(Math.max(Math.floor(targetMessagesPerChatRaw), 1), 1000)
       : 200;
 
-  /** uazapi devolve chats paginados; antes só lia 1 página (100), cortando o restante (ex.: 150 conversas). */
+  /** uazapi devolve chats paginados. */
   const CHAT_PAGE_SIZE = 100;
   const MAX_CHAT_PAGES = 50;
   const chats: UazapiChat[] = [];
@@ -108,43 +115,53 @@ export async function POST(
     });
   }
 
-  const MAX_MESSAGES_PER_INSTANCE = 15_000;
-  const MESSAGES_PAGE_SIZE = 100;
+  const { data: channelRow } = await supabase
+    .from("channels")
+    .select("id, company_id")
+    .eq("id", channelId)
+    .eq("company_id", companyId)
+    .single();
+  if (!channelRow) {
+    return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+  }
 
-  const chats = chatsData.chats as UazapiChat[];
-  let conversationsCreated = 0;
-  let messagesInserted = 0;
-
-  for (const chat of chats) {
-    if (messagesInserted >= MAX_MESSAGES_PER_INSTANCE) break;
-
-    const waChatid = (chat.wa_chatid ?? "").toString().trim();
-    if (!waChatid) continue;
-
-    const isGroup = chat.wa_isGroup === true || waChatid.endsWith("@g.us");
-    const canonicalChatId = toCanonicalJid(waChatid, isGroup) || waChatid;
-
-    const { data: channelRow } = await supabase
-      .from("channels")
-      .select("id, company_id")
-      .eq("id", channelId)
-      .eq("company_id", companyId)
-      .single();
-
-    if (!channelRow) continue;
-
-    const { data: cqData } = await supabase
-      .from("channel_queues")
-      .select("queue_id, is_default")
-      .eq("channel_id", channelId)
-      .order("is_default", { ascending: false });
-    const cqList = (cqData ?? []) as { queue_id: string; is_default: boolean }[];
+  const { data: cqData } = await supabase
+    .from("channel_queues")
+    .select("queue_id, is_default")
+    .eq("channel_id", channelId)
+    .order("is_default", { ascending: false });
+  const cqList = (cqData ?? []) as { queue_id: string; is_default: boolean }[];
+  const queueIds = cqList.map((cq) => cq.queue_id);
+  let queues = [] as {
+    id: string;
+    kind: string;
+    business_hours?: BusinessHoursItem[] | null;
+    special_dates?: SpecialDateItem[] | null;
+  }[];
+  if (queueIds.length > 0) {
     const { data: queuesData } = await supabase
       .from("queues")
       .select("id, kind, business_hours, special_dates")
-      .in("id", cqList.map((cq) => cq.queue_id));
+      .in("id", queueIds);
+    queues = (queuesData ?? []) as typeof queues;
+  }
 
-    const queues = (queuesData ?? []) as { id: string; kind: string; business_hours?: BusinessHoursItem[] | null; special_dates?: SpecialDateItem[] | null }[];
+  const queueHoursAt = new Date();
+
+  const { data: convRows } = await supabase
+    .from("conversations")
+    .select("id, external_id, kind")
+    .eq("channel_id", channelId);
+  const conversationIdByKey = new Map<string, string>();
+  for (const row of convRows ?? []) {
+    const r = row as { id: string; external_id?: string | null; kind?: string | null };
+    if (!r.external_id || (r.kind !== "group" && r.kind !== "ticket")) continue;
+    conversationIdByKey.set(`${r.external_id}\t${r.kind}`, r.id);
+  }
+
+  const convKey = (externalId: string, kind: "group" | "ticket") => `${externalId}\t${kind}`;
+
+  function pickQueueId(isGroup: boolean): string | null {
     let queueId: string | null = null;
     if (isGroup) {
       const gq = cqList.find((cq) => queues.find((q) => q.id === cq.queue_id && q.kind === "group"));
@@ -154,16 +171,18 @@ export async function POST(
         const q = queues.find((r) => r.id === cq.queue_id);
         return q && (q.kind === "ticket" || !q.kind);
       });
-      const at = new Date();
       for (const cq of ticketCqList) {
         const q = queues.find((r) => r.id === cq.queue_id);
-        if (q && isQueueOpen(
-          {
-            business_hours: (q.business_hours ?? []) as BusinessHoursItem[],
-            special_dates: (q.special_dates ?? []) as SpecialDateItem[],
-          },
-          at
-        )) {
+        if (
+          q &&
+          isQueueOpen(
+            {
+              business_hours: (q.business_hours ?? []) as BusinessHoursItem[],
+              special_dates: (q.special_dates ?? []) as SpecialDateItem[],
+            },
+            queueHoursAt
+          )
+        ) {
           queueId = cq.queue_id;
           break;
         }
@@ -171,21 +190,40 @@ export async function POST(
       if (!queueId && ticketCqList.length > 0) queueId = ticketCqList[0].queue_id;
       if (!queueId && cqList.length > 0) queueId = cqList[0].queue_id;
     }
+    return queueId;
+  }
 
-    let conversationId: string | null = null;
-    const { data: existing } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("channel_id", channelId)
-      .eq("external_id", canonicalChatId)
-      .eq("kind", isGroup ? "group" : "ticket")
-      .single();
+  const MAX_MESSAGES_PER_INSTANCE = 15_000;
+  const MESSAGES_PAGE_SIZE = 100;
+  const MESSAGE_INSERT_BATCH = 40;
+  let conversationsCreated = 0;
+  let messagesInserted = 0;
 
-    if (existing) {
-      conversationId = existing.id;
-    } else {
-      // Por padrão não cria conversa no sync (mantém fluxo "Novos" só com mensagem nova).
-      // Quando create_missing=true, cria conversa e permite importar histórico antigo do contato/grupo.
+  const mediaTypeMap: Record<string, string> = {
+    image: "image",
+    video: "video",
+    audio: "audio",
+    myaudio: "audio",
+    ptt: "ptt",
+    ptv: "video",
+    document: "document",
+    sticker: "sticker",
+  };
+
+  for (const chat of chats) {
+    if (messagesInserted >= MAX_MESSAGES_PER_INSTANCE) break;
+
+    const waChatid = (chat.wa_chatid ?? "").toString().trim();
+    if (!waChatid) continue;
+
+    const isGroup = chat.wa_isGroup === true || waChatid.endsWith("@g.us");
+    const canonicalChatId = toCanonicalJid(waChatid, isGroup) || waChatid;
+    const kind: "group" | "ticket" = isGroup ? "group" : "ticket";
+    const queueId = pickQueueId(isGroup);
+
+    let conversationId: string | null = conversationIdByKey.get(convKey(canonicalChatId, kind)) ?? null;
+
+    if (!conversationId) {
       if (isGroup) {
         await supabase.from("channel_groups").upsert(
           {
@@ -200,7 +238,7 @@ export async function POST(
       }
 
       if (!createMissingConversations) {
-        continue; // pula este chat: não criar conversa nem buscar mensagens
+        continue;
       }
 
       if (isGroup) {
@@ -223,8 +261,10 @@ export async function POST(
           })
           .select("id")
           .single();
-        if (!insertedConv?.id) continue;
-        conversationId = insertedConv.id;
+        const newGroupConvId = insertedConv?.id;
+        if (!newGroupConvId) continue;
+        conversationId = newGroupConvId;
+        conversationIdByKey.set(convKey(canonicalChatId, kind), newGroupConvId);
         conversationsCreated++;
       } else {
         const digits = waChatid.replace(/@.*$/, "").replace(/\D/g, "");
@@ -260,23 +300,53 @@ export async function POST(
           })
           .select("id")
           .single();
-        if (!insertedConv?.id) continue;
-        conversationId = insertedConv.id;
+        const newTicketConvId = insertedConv?.id;
+        if (!newTicketConvId) continue;
+        conversationId = newTicketConvId;
+        conversationIdByKey.set(convKey(canonicalChatId, kind), newTicketConvId);
         conversationsCreated++;
       }
     }
 
     if (!conversationId) continue;
 
-    const mediaTypeMap: Record<string, string> = {
-      image: "image", video: "video", audio: "audio", myaudio: "audio", ptt: "ptt", ptv: "video",
-      document: "document", sticker: "sticker",
-    };
+    const { data: existMsgRows } = await supabase
+      .from("messages")
+      .select("external_id, sent_at")
+      .eq("conversation_id", conversationId)
+      .limit(8000);
+    const seenExt = new Set<string>();
+    const seenSent = new Set<string>();
+    for (const r of existMsgRows ?? []) {
+      const row = r as { external_id?: string | null; sent_at?: string };
+      if (row.external_id) seenExt.add(row.external_id);
+      else if (row.sent_at) seenSent.add(row.sent_at);
+    }
+
     let msgOffset = 0;
     let latestSentAt = 0;
     let chatMessagesInserted = 0;
+    const pendingInserts: Record<string, unknown>[] = [];
 
-    while (messagesInserted < MAX_MESSAGES_PER_INSTANCE) {
+    const flushMessages = async () => {
+      if (pendingInserts.length === 0) return;
+      const batch = pendingInserts.splice(0, pendingInserts.length);
+      const { error: batchErr } = await supabase.from("messages").insert(batch);
+      if (!batchErr) {
+        messagesInserted += batch.length;
+        chatMessagesInserted += batch.length;
+        return;
+      }
+      for (const row of batch) {
+        const { error: oneErr } = await supabase.from("messages").insert(row);
+        if (!oneErr) {
+          messagesInserted++;
+          chatMessagesInserted++;
+        }
+      }
+    };
+
+    while (messagesInserted < MAX_MESSAGES_PER_INSTANCE && chatMessagesInserted < targetMessagesPerChat) {
       const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, {
         limit: MESSAGES_PAGE_SIZE,
         offset: msgOffset,
@@ -285,16 +355,22 @@ export async function POST(
       if (messages.length === 0) break;
 
       for (const msg of messages) {
-        if (chatMessagesInserted >= MAX_MESSAGES_PER_CHAT) break;
+        if (chatMessagesInserted >= targetMessagesPerChat) break;
         const fromMe = msg.fromMe === true;
-        const body = (msg.body ?? msg.text ?? "").toString().trim();
+        const bodyText = (msg.body ?? msg.text ?? "").toString().trim();
         const rawType = (msg.type ?? msg.mediaType ?? "") as string;
-        const msgMediaUrl = (msg.mediaUrl ?? msg.file ?? msg.url ?? msg.image ?? msg.base64 ?? (msg as { media?: { url?: string } }).media?.url ?? "") as string;
+        const msgMediaUrl = (msg.mediaUrl ??
+          msg.file ??
+          msg.url ??
+          msg.image ??
+          msg.base64 ??
+          (msg as { media?: { url?: string } }).media?.url ??
+          "") as string;
         const msgCaption = (msg.caption ?? msg.body ?? msg.text ?? "").toString().trim();
         const msgFileName = (msg.fileName ?? msg.filename ?? msg.docName ?? "") as string;
         const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
         const isMedia = messageType !== "text" && msgMediaUrl;
-        const content = body || (isMedia ? `[${messageType}]` : "");
+        const content = bodyText || (isMedia ? `[${messageType}]` : "");
         const rawTs = msg.timestamp;
         const sentAt =
           rawTs != null && typeof rawTs === "number"
@@ -304,23 +380,9 @@ export async function POST(
         const extId = (msg.id ?? "").toString() || null;
 
         if (extId) {
-          const { data: existingByExt } = await supabase
-            .from("messages")
-            .select("id")
-            .eq("conversation_id", conversationId)
-            .eq("external_id", extId)
-            .limit(1)
-            .single();
-          if (existingByExt) continue;
+          if (seenExt.has(extId)) continue;
         } else {
-          const { data: existingBySent } = await supabase
-            .from("messages")
-            .select("id")
-            .eq("conversation_id", conversationId)
-            .eq("sent_at", sentAt)
-            .limit(1)
-            .single();
-          if (existingBySent) continue;
+          if (seenSent.has(sentAt)) continue;
         }
 
         const insertPayload: Record<string, unknown> = {
@@ -335,14 +397,24 @@ export async function POST(
         if (isMedia && msgCaption) insertPayload.caption = msgCaption.slice(0, 2000);
         if (msgFileName && typeof msgFileName === "string") insertPayload.file_name = msgFileName.slice(0, 255);
 
-        const { error: msgInsErr } = await supabase.from("messages").insert(insertPayload);
-        if (!msgInsErr) messagesInserted++;
+        pendingInserts.push(insertPayload);
+        if (extId) seenExt.add(extId);
+        else seenSent.add(sentAt);
+
+        if (pendingInserts.length >= MESSAGE_INSERT_BATCH) {
+          await flushMessages();
+        }
+        if (chatMessagesInserted >= targetMessagesPerChat) break;
       }
 
-      if (chatMessagesInserted >= MAX_MESSAGES_PER_CHAT) break;
+      await flushMessages();
+
+      if (chatMessagesInserted >= targetMessagesPerChat) break;
       if (messages.length < MESSAGES_PAGE_SIZE) break;
       msgOffset += MESSAGES_PAGE_SIZE;
     }
+
+    await flushMessages();
 
     if (latestSentAt > 0) {
       await supabase

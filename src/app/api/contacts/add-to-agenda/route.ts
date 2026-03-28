@@ -1,9 +1,5 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
-<<<<<<< HEAD
 import { sendAutoConsentIfNeeded } from "@/lib/consent/auto-consent";
-import { addContactToAgenda } from "@/lib/uazapi/client";
-import { getChannelToken } from "@/lib/uazapi/channel-token";
-=======
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import {
   addContactToAgendaWithRetries,
@@ -14,7 +10,6 @@ import {
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { upsertChannelContactNoDuplicate } from "@/lib/channel-contacts";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -92,30 +87,6 @@ export async function POST(request: Request) {
   const jid = digits ? `${canonicalDigits || digits}@s.whatsapp.net` : "";
   if (jid) {
     const supabase = await createClient();
-<<<<<<< HEAD
-    await supabase
-      .from("channel_contacts")
-      .upsert({
-        company_id: companyId,
-        channel_id: channelId,
-        jid,
-        phone: digits || null,
-        contact_name: name || null,
-        first_name: name || null,
-        synced_at: new Date().toISOString(),
-      }, { onConflict: "channel_id,jid", ignoreDuplicates: false });
-  }
-
-  await sendAutoConsentIfNeeded({
-    companyId,
-    channelId,
-    phoneOrJid: number,
-    name: name || null,
-    reason: "contact_created",
-  });
-
-  return NextResponse.json(result.data ?? { ok: true });
-=======
     const now = new Date().toISOString();
     const { error: upsertErr } = await upsertChannelContactNoDuplicate(supabase, channelId, companyId, {
       channel_id: channelId,
@@ -130,7 +101,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: upsertErr.message }, { status: 500 });
     }
 
-    // Busca nome e avatar na UAZAPI (igual ao bulk-add e chat-details)
     try {
       const detail = await getChatDetails(resolved.token, jid, { preview: true });
       const imageUrl = detail.data?.imagePreview ?? detail.data?.image;
@@ -157,6 +127,14 @@ export async function POST(request: Request) {
     await invalidateConversationList(companyId);
   }
 
+  await sendAutoConsentIfNeeded({
+    companyId,
+    channelId,
+    phoneOrJid: number,
+    name: name || null,
+    reason: "contact_created",
+  });
+
   const waPayload =
     typeof result.data === "object" && result.data !== null && !Array.isArray(result.data)
       ? (result.data as Record<string, unknown>)
@@ -169,5 +147,4 @@ export async function POST(request: Request) {
       ? "Contato salvo só na plataforma; sincronize na agenda do WhatsApp depois se precisar."
       : undefined,
   });
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 }

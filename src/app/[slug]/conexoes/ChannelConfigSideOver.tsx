@@ -775,6 +775,9 @@ export function ChannelConfigSideOver({
                   )}
                   <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens. Novas mensagens e grupos entram automaticamente nas filas.</p>
                 </div>
+                <p className="text-xs text-[#94A3B8]">
+                  Pode levar vários minutos (muitas chamadas ao WhatsApp). Deixe esta janela aberta até terminar. Se outras abas mostrarem erro ao carregar contatos, espere o fim do sync.
+                </p>
                 <button
                   type="button"
                   disabled={syncingHistory}

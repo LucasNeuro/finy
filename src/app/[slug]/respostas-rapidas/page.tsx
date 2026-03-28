@@ -1,14 +1,9 @@
 "use client";
 
-<<<<<<< HEAD
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
-=======
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 import {
   AlignCenter,
   AlignLeft,
@@ -1321,7 +1316,6 @@ export default function RespostasRapidasPage() {
       .filter(Boolean)
       .join(", ") || "—";
 
-<<<<<<< HEAD
   const tabRows = useMemo(() => {
     return rows.filter((r) => (r.templateCategory ?? "general") === moduleTab);
   }, [rows, moduleTab]);
@@ -1350,11 +1344,10 @@ export default function RespostasRapidasPage() {
       emptyHint: "As ações desta aba ficam na tabela (editar/excluir).",
     },
   }[moduleTab];
-=======
+
   if (slug && permissionsData !== undefined && !canAccessQuickReplies) {
     return null;
   }
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
   return (
     <div className="flex flex-col gap-4 p-6">

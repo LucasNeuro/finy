@@ -1,9 +1,6 @@
 import { createServiceRoleClient } from "@/lib/supabase/admin";
-<<<<<<< HEAD
 import { sendAutoConsentIfNeeded } from "@/lib/consent/auto-consent";
-=======
 import { upsertInboxNotificationsForIncomingMessage } from "@/lib/notifications/inbox-incoming";
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 import {
   normalizeWhatsAppJid,

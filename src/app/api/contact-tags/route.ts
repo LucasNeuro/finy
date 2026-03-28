@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
-<<<<<<< HEAD
 import { toCanonicalDigits, toCanonicalJid } from "@/lib/phone-canonical";
-=======
-import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { upsertChannelContactNoDuplicate } from "@/lib/channel-contacts";
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 import { createClient } from "@/lib/supabase/server";
 
 type ContactTagsPostBody =
@@ -223,34 +219,15 @@ export async function POST(request: Request) {
       }
 
       const now = new Date().toISOString();
-<<<<<<< HEAD
-      const { data: inserted, error: insertErr } = await supabase
-        .from("channel_contacts")
-        .upsert(
-          {
-            company_id: companyId,
-            channel_id: channelId,
-            jid: toCanonicalJid(jidToInsert, false).toLowerCase(),
-            phone: canonicalDigits || rawDigits || null,
-            contact_name: null,
-            first_name: null,
-            synced_at: now,
-          },
-          { onConflict: "channel_id,jid", ignoreDuplicates: false }
-        )
-        .select("id")
-        .single();
-=======
       const { id: newId, error: upsertErr } = await upsertChannelContactNoDuplicate(supabase, channelId, companyId, {
         channel_id: channelId,
         company_id: companyId,
-        jid: jidToInsert,
+        jid: toCanonicalJid(jidToInsert, false).toLowerCase(),
         phone: canonicalDigits || rawDigits || null,
         contact_name: null,
         first_name: null,
         synced_at: now,
       });
->>>>>>> 90177313e89862f0eb89d72726a0395ad050d21b
 
       if (upsertErr) {
         return NextResponse.json(
