@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { BRAND_NAME } from "@/lib/brand";
 import { queryKeys } from "@/lib/query-keys";
 import {
   getDesktopNotifyEnabled,
@@ -172,8 +173,8 @@ export function RealtimeConversations() {
                 (newRow?.customer_phone && String(newRow.customer_phone).trim()) ||
                 "Nova mensagem";
               const bodyHint = isUnassignedNew
-                ? "Novo na fila — abra o chat no ClicVend."
-                : "Nova mensagem — abra o chat no ClicVend.";
+                ? `Novo na fila — abra o chat no ${BRAND_NAME}.`
+                : `Nova mensagem — abra o chat no ${BRAND_NAME}.`;
               showIncomingChatDesktopNotification({
                 slug,
                 conversationId: id,

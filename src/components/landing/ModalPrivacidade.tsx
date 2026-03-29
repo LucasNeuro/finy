@@ -1,5 +1,6 @@
 "use client";
 
+import { BRAND_NAME } from "@/lib/brand";
 import { motion } from "framer-motion";
 import { X } from "lucide-react";
 
@@ -30,7 +31,7 @@ export function ModalPrivacidade({ onClose }: { onClose: () => void }) {
         </div>
         <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#0a0a0a]">
           <p className="mb-4">
-            O ClicVend respeita sua privacidade e está em conformidade com a Lei Geral de Proteção de Dados (LGPD). Esta política descreve como coletamos, usamos e protegemos suas informações.
+            O {BRAND_NAME} respeita sua privacidade e está em conformidade com a Lei Geral de Proteção de Dados (LGPD). Esta política descreve como coletamos, usamos e protegemos suas informações.
           </p>
           <h3 className="mb-2 font-semibold text-[#0F172A]">Dados que coletamos</h3>
           <p className="mb-4">

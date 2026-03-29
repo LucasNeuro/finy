@@ -1,3 +1,5 @@
+import { BRAND_NAME } from "@/lib/brand";
+
 /**
  * Notificações nativas do sistema (Windows / macOS / Linux) via Web Notification API.
  * Ativas automaticamente quando o navegador concede permissão (pedido no primeiro clique na área da empresa).
@@ -21,7 +23,7 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 
 /**
  * Aviso ao receber mensagem noutra conversa (não a aberta no URL).
- * Mostra mesmo com o ClicVend em foco — o utilizador pediu alerta a cada mensagem relevante.
+ * Mostra mesmo com a app em foco — o utilizador pediu alerta a cada mensagem relevante.
  */
 export function showIncomingChatDesktopNotification(opts: {
   slug: string;
@@ -33,7 +35,7 @@ export function showIncomingChatDesktopNotification(opts: {
   if (Notification.permission !== "granted") return;
 
   const { slug, conversationId, title, body } = opts;
-  const safeTitle = title.trim() || "ClicVend";
+  const safeTitle = title.trim() || BRAND_NAME;
   const safeBody = (body ?? "Nova mensagem — clique para abrir o chat.").slice(0, 240);
   const url = `${window.location.origin}/${slug}/conversas/${conversationId}`;
 

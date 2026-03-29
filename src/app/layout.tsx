@@ -14,8 +14,8 @@ const sora = Sora({
 });
 
 export const metadata: Metadata = {
-  title: "ClicVend",
-  description: "Sistema de atendimento multi-empresas (WhatsApp)",
+  title: "Smart Vendas",
+  description: "Centralize o atendimento WhatsApp da sua empresa — smartvendas.com.br",
 };
 
 export default function RootLayout({

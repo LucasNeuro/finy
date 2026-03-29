@@ -126,7 +126,7 @@ export async function POST(request: Request) {
     },
     services: [
       {
-        name: "Taxa de Implantação ClicVend",
+        name: "Taxa de Implantação Smart Vendas",
         description: `Cobrança de implantação (${dueDateStr})`.slice(0, 100),
         amount: amountCents,
       },

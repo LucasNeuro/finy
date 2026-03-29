@@ -125,7 +125,7 @@ export async function POST(request: Request) {
     }
     const dueDateStr = dueDate.toISOString().slice(0, 10);
 
-    const serviceName = `Mensalidade ClicVend - Plano ${PLAN_LABELS[plan] ?? plan}`;
+    const serviceName = `Mensalidade Smart Vendas - Plano ${PLAN_LABELS[plan] ?? plan}`;
     const serviceDesc = `${MONTH_NAMES[d.getMonth()]} ${year}`.slice(0, 100);
 
     try {

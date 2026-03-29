@@ -22,6 +22,7 @@ import { GroupManageSideOver } from "./GroupManageSideOver";
 import { CreateCommunitySideOver } from "./CreateCommunitySideOver";
 import { CreateGroupSideOver } from "./CreateGroupSideOver";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { BRAND_NAME } from "@/lib/brand";
 
 type Channel = { id: string; name: string };
 
@@ -3410,7 +3411,7 @@ export default function ContatosPage() {
               ))}
             </select>
             <p className="text-xs text-[#64748B]">
-              Contatos serão salvos na agenda do WhatsApp e na lista do ClicVend desta conexão. Confira se é a conexão correta.
+              Contatos serão salvos na agenda do WhatsApp e na lista do {BRAND_NAME} desta conexão. Confira se é a conexão correta.
             </p>
           </div>
 

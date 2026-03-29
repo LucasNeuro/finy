@@ -1,5 +1,6 @@
 "use client";
 
+import { BRAND_NAME } from "@/lib/brand";
 import { motion } from "framer-motion";
 import { X } from "lucide-react";
 
@@ -30,7 +31,7 @@ export function ModalTermos({ onClose }: { onClose: () => void }) {
         </div>
         <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#0a0a0a]">
           <p className="mb-4">
-            Ao utilizar o ClicVend, você concorda com estes Termos de Uso. O serviço destina-se a empresas e profissionais que desejam centralizar o atendimento via WhatsApp.
+            Ao utilizar o {BRAND_NAME}, você concorda com estes Termos de Uso. O serviço destina-se a empresas e profissionais que desejam centralizar o atendimento via WhatsApp.
           </p>
           <h3 className="mb-2 font-semibold text-[#0F172A]">1. Uso do serviço</h3>
           <p className="mb-4">

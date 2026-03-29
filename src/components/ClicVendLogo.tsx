@@ -1,5 +1,7 @@
 "use client";
 
+import { BRAND_NAME } from "@/lib/brand";
+
 type ClicVendLogoProps = {
   /** Tamanho do logo (altura aproximada em px). Wordmark escala junto. */
   size?: "sm" | "md" | "lg";
@@ -14,8 +16,8 @@ const sizes = {
   lg: { h: 48, w: 48 },
 };
 
-/** Dimensões do logo completo (wordmark) por size - proporção preservada */
-const logoWidths = { sm: 110, md: 140, lg: 180 };
+/** Dimensões do logo completo (wordmark) por size — SVG Smart Vendas */
+const logoWidths = { sm: 140, md: 175, lg: 220 };
 
 export function ClicVendLogo({ size = "md", iconOnly = false, className = "" }: ClicVendLogoProps) {
   const { h, w } = sizes[size];
@@ -24,7 +26,7 @@ export function ClicVendLogo({ size = "md", iconOnly = false, className = "" }: 
     return (
       <img
         src="/logo-icon.svg"
-        alt="ClicVend"
+        alt={BRAND_NAME}
         width={w}
         height={h}
         className={`inline-block object-contain ${className}`}
@@ -38,7 +40,7 @@ export function ClicVendLogo({ size = "md", iconOnly = false, className = "" }: 
   return (
     <img
       src="/logo.svg"
-      alt="ClicVend"
+      alt={BRAND_NAME}
       width={width}
       height={h}
       className={`inline-block object-contain ${className}`}

@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMenu } from "@/lib/uazapi/client";
+import { BRAND_NAME, BRAND_URL } from "@/lib/brand";
 import { NextResponse } from "next/server";
 
 function getAppOrigin(request: Request): string {
@@ -10,7 +11,7 @@ function getAppOrigin(request: Request): string {
   if (env) return env.startsWith("http") ? env : `https://${env}`;
   const host = request.headers.get("host") ?? request.headers.get("x-forwarded-host");
   const proto = request.headers.get("x-forwarded-proto") ?? "https";
-  return host ? `${proto}://${host}` : "https://app.clicvend.com.br";
+  return host ? `${proto}://${host}` : BRAND_URL;
 }
 
 /**
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
   const email = (profile.email ?? "").trim() || "—";
 
   const cardText =
-    `*ClicVend – Suas credenciais de acesso*\n\n` +
+    `*${BRAND_NAME} – Suas credenciais de acesso*\n\n` +
     `E-mail: ${email}\n` +
     `Senha: ${password}\n\n` +
     `_Guarde esta mensagem em local seguro. Altere a senha no primeiro acesso._`;

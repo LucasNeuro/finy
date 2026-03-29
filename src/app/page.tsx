@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { LandingHeader } from "@/components/landing/LandingHeader";
 import { LandingFooter } from "@/components/landing/LandingFooter";
+import { BRAND_NAME } from "@/lib/brand";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare,
@@ -208,7 +209,7 @@ export default function HomePage() {
                         </span>
                         <div className="text-xs">
                           <p className="font-semibold text-[#0F172A]">WhatsApp</p>
-                          <p className="text-[10px] text-[#64748B]">Conectado ao ClicVend</p>
+                          <p className="text-[10px] text-[#64748B]">Conectado ao {BRAND_NAME}</p>
                         </div>
                       </div>
                       <span className="rounded-full bg-[#E5F3FF] px-2 py-0.5 text-[10px] font-medium text-[#0369A1]">
@@ -227,7 +228,7 @@ export default function HomePage() {
                         </div>
                       </div>
                       <p className="pt-1 text-[10px] text-[#94A3B8]">
-                        Mensagem enviada automaticamente pelo ClicVend.
+                        Mensagem enviada automaticamente pelo {BRAND_NAME}.
                       </p>
                     </div>
                   </div>
@@ -328,7 +329,7 @@ export default function HomePage() {
               </div>
               <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#0a0a0a]">
                 <p className="mb-4">
-                  Ao utilizar o ClicVend, você concorda com estes Termos de Uso. O serviço destina-se a empresas e profissionais que desejam centralizar o atendimento via WhatsApp.
+                  Ao utilizar o {BRAND_NAME}, você concorda com estes Termos de Uso. O serviço destina-se a empresas e profissionais que desejam centralizar o atendimento via WhatsApp.
                 </p>
                 <h3 className="mb-2 font-semibold text-[#0F172A]">1. Uso do serviço</h3>
                 <p className="mb-4">
@@ -465,7 +466,7 @@ export default function HomePage() {
               </div>
               <div className="overflow-y-auto p-6 text-sm leading-relaxed text-[#0a0a0a]">
                 <p className="mb-4">
-                  O ClicVend respeita sua privacidade e está em conformidade com a Lei Geral de Proteção de Dados (LGPD). Esta política descreve como coletamos, usamos e protegemos suas informações.
+                  O {BRAND_NAME} respeita sua privacidade e está em conformidade com a Lei Geral de Proteção de Dados (LGPD). Esta política descreve como coletamos, usamos e protegemos suas informações.
                 </p>
                 <h3 className="mb-2 font-semibold text-[#0F172A]">Dados que coletamos</h3>
                 <p className="mb-4">
