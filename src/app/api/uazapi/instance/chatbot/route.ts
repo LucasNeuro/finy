@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
  * Atualiza configurações do chatbot da instância.
  * Body: {
  *   channel_id,
- *   openai_apikey?,
+ *   openai_apikey? (nome fixo da UAZAPI; pode ser chave Mistral),
  *   chatbot_enabled?,
  *   chatbot_ignoreGroups?,
  *   chatbot_stopConversation?,

@@ -182,10 +182,9 @@ export default function TicketsPage() {
       return r.json();
     },
     initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      const loaded = allPages.reduce((acc, pg) => acc + (Array.isArray(pg?.data) ? pg.data.length : 0), 0);
-      const total = typeof lastPage?.total === "number" ? lastPage.total : 0;
-      return loaded < total ? loaded : undefined;
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.has_more) return undefined;
+      return typeof lastPage.next_offset === "number" ? lastPage.next_offset : undefined;
     },
     enabled: !!slug && permissionsData !== undefined,
     staleTime: 8 * 1000,
@@ -193,7 +192,26 @@ export default function TicketsPage() {
     refetchOnWindowFocus: "always",
   });
 
-  const tickets = ticketsData?.pages.flatMap((pg) => (Array.isArray(pg?.data) ? pg.data : [])) ?? [];
+  const tickets = useMemo(() => {
+    const pages = ticketsData?.pages ?? [];
+    const byId = new Map<string, Ticket>();
+    for (const pg of pages) {
+      const list = Array.isArray(pg?.data) ? (pg.data as Ticket[]) : [];
+      for (const t of list) {
+        const id = t.id.trim();
+        if (!id) continue;
+        const prev = byId.get(id);
+        if (!prev) {
+          byId.set(id, t);
+          continue;
+        }
+        const pt = new Date(prev.last_message_at || 0).getTime();
+        const nt = new Date(t.last_message_at || 0).getTime();
+        if (nt >= pt) byId.set(id, t);
+      }
+    }
+    return Array.from(byId.values());
+  }, [ticketsData?.pages]);
   const totalCount = ticketsData?.pages[0]?.total ?? tickets.length;
   const error = ticketsError instanceof Error ? ticketsError.message : null;
 

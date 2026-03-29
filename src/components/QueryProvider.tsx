@@ -1,7 +1,11 @@
 "use client";
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import {
+  isServer,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
+import { useEffect } from "react";
 import { queryKeys } from "@/lib/query-keys";
 
 function makeQueryClient() {
@@ -18,6 +22,19 @@ function makeQueryClient() {
   });
 }
 
+let browserQueryClient: QueryClient | undefined;
+
+/** SSR: novo cliente por render. Cliente: um singleton (evita useRef + dispatcher nulo no RSC). */
+function getQueryClient() {
+  if (isServer) {
+    return makeQueryClient();
+  }
+  if (!browserQueryClient) {
+    browserQueryClient = makeQueryClient();
+  }
+  return browserQueryClient;
+}
+
 type InitialData = {
   slug: string;
   permissions?: Record<string, unknown>;
@@ -32,11 +49,7 @@ type Props = {
 };
 
 export function QueryProvider({ children, initialData }: Props) {
-  const queryClientRef = useRef<QueryClient | null>(null);
-  if (queryClientRef.current === null) {
-    queryClientRef.current = makeQueryClient();
-  }
-  const queryClient = queryClientRef.current;
+  const queryClient = getQueryClient();
 
   useEffect(() => {
     if (!initialData?.slug) return;

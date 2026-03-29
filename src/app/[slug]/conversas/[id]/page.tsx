@@ -1,9 +1,9 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, X } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
 import { SideOver } from "@/components/SideOver";
@@ -1265,12 +1265,17 @@ export default function ConversaThreadPage({
   const [messageSearchTerm, setMessageSearchTerm] = useState("");
   const [messageSearchIndex, setMessageSearchIndex] = useState(0);
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [pullingRemoteHistory, setPullingRemoteHistory] = useState(false);
   const [hasMoreOlderMessages, setHasMoreOlderMessages] = useState(true);
+  const [showScrollToTopBtn, setShowScrollToTopBtn] = useState(false);
   const [inputEmojiPickerOpen, setInputEmojiPickerOpen] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  /** Evita scroll ao fim ao carregar mensagens antigas no topo (última msg não muda). */
+  const scrollChatConvIdRef = useRef<string | null>(null);
+  const scrollChatTailIdRef = useRef<string | null>(null);
   const messageSearchInputRef = useRef<HTMLInputElement>(null);
   const messageNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -1281,6 +1286,7 @@ export default function ConversaThreadPage({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const copilotAgentScrollRef = useRef<HTMLDivElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const inputEmojiPickerRef = useRef<HTMLDivElement>(null);
@@ -1336,6 +1342,16 @@ export default function ConversaThreadPage({
     setCanTransfer(perms.includes("inbox.transfer"));
   }, [permissionsData?.permissions]);
 
+  const copilotModuleOn = permissionsData?.copilot_module_enabled !== false;
+  const canUseCopilot = useMemo(() => {
+    const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+    return copilotModuleOn && perms.includes("copilot.use");
+  }, [permissionsData?.permissions, copilotModuleOn]);
+  const canManageCopilotAgent = useMemo(() => {
+    const perms = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
+    return copilotModuleOn && perms.includes("copilot.manage");
+  }, [permissionsData?.permissions, copilotModuleOn]);
+
   const invalidateConversation = useCallback(
     (id: string) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
@@ -1369,9 +1385,68 @@ export default function ConversaThreadPage({
 
   const [quickSearch, setQuickSearch] = useState<string | null>(null);
   const [quickIndex, setQuickIndex] = useState(0);
-  const [inputTab, setInputTab] = useState<'write' | 'quick' | 'note'>('write');
-  const [quickReplySearch, setQuickReplySearch] = useState('');
+  const [inputTab, setInputTab] = useState<"write" | "quick" | "note" | "copilot">("write");
+  const [quickReplySearch, setQuickReplySearch] = useState("");
   const [correctingText, setCorrectingText] = useState(false);
+  const [copilotAgentMessages, setCopilotAgentMessages] = useState<{ role: "user" | "assistant"; content: string }[]>(
+    []
+  );
+  const [copilotAgentConvId, setCopilotAgentConvId] = useState<string | null>(null);
+  const [copilotAgentInput, setCopilotAgentInput] = useState("");
+  const [copilotAgentLoading, setCopilotAgentLoading] = useState(false);
+  const [copilotAgentError, setCopilotAgentError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canUseCopilot && inputTab === "copilot") {
+      setInputTab("write");
+    }
+  }, [canUseCopilot, inputTab]);
+
+  useEffect(() => {
+    if (!resolved?.id) return;
+    setCopilotAgentError(null);
+    setCopilotAgentInput("");
+    try {
+      const raw =
+        typeof window !== "undefined" ? sessionStorage.getItem(`finy-copilot-agent:${resolved.id}`) : null;
+      if (raw) {
+        const p = JSON.parse(raw) as {
+          v?: number;
+          convId?: string | null;
+          messages?: { role: string; content: string }[];
+        };
+        if (p?.v === 1) {
+          setCopilotAgentConvId(
+            typeof p.convId === "string" && p.convId.startsWith("conv_") ? p.convId : null
+          );
+          if (Array.isArray(p.messages)) {
+            const msgs = p.messages
+              .filter(
+                (m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string"
+              )
+              .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+            setCopilotAgentMessages(msgs);
+            return;
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    setCopilotAgentConvId(null);
+    setCopilotAgentMessages([]);
+  }, [resolved?.id]);
+
+  const persistCopilotAgentSession = useCallback(
+    (convId: string | null, messages: { role: "user" | "assistant"; content: string }[]) => {
+      if (!resolved?.id || typeof window === "undefined") return;
+      sessionStorage.setItem(
+        `finy-copilot-agent:${resolved.id}`,
+        JSON.stringify({ v: 1, convId, messages })
+      );
+    },
+    [resolved?.id]
+  );
 
   const { data: quickReplies } = useQuery({
     queryKey: ["quick-replies", slug],
@@ -1449,6 +1524,54 @@ export default function ConversaThreadPage({
       (a, b) => new Date((a as Message).sent_at).getTime() - new Date((b as Message).sent_at).getTime()
     ) as Message[];
   }, [conv?.messages, optimisticMessages]);
+
+  const mergedTailId = mergedMessages.length
+    ? String(mergedMessages[mergedMessages.length - 1]?.id ?? "")
+    : "";
+
+  const handleMessagesScroll = useCallback(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    setShowScrollToTopBtn(el.scrollTop > 120);
+  }, []);
+
+  const scrollMessagesToTop = useCallback(() => {
+    messagesScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  /** Abrir conversa ou nova mensagem no fim → rolar ao último; troca de conversa → instantâneo. Prepend de antigas não muda mergedTailId → não rola. */
+  useLayoutEffect(() => {
+    if (!resolved?.id) return;
+    if (loading && !conv) return;
+    if (!mergedMessages.length || !mergedTailId) return;
+
+    const cid = resolved.id;
+    const convChanged = scrollChatConvIdRef.current !== cid;
+
+    if (convChanged) {
+      scrollChatConvIdRef.current = cid;
+      scrollChatTailIdRef.current = mergedTailId;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+        });
+      });
+      return;
+    }
+
+    if (scrollChatTailIdRef.current !== mergedTailId) {
+      scrollChatTailIdRef.current = mergedTailId;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        });
+      });
+    }
+  }, [resolved?.id, loading, conv, mergedMessages.length, mergedTailId]);
+
+  useEffect(() => {
+    handleMessagesScroll();
+  }, [mergedMessages.length, resolved?.id, handleMessagesScroll]);
 
   const matchedMessageIds = useMemo(() => {
     const term = messageSearchTerm.trim().toLocaleLowerCase();
@@ -1582,60 +1705,155 @@ export default function ConversaThreadPage({
     }
   }
 
+  function resetCopilotAgentThread() {
+    setCopilotAgentConvId(null);
+    setCopilotAgentMessages([]);
+    setCopilotAgentError(null);
+    if (resolved?.id && typeof window !== "undefined") {
+      sessionStorage.removeItem(`finy-copilot-agent:${resolved.id}`);
+    }
+  }
+
+  async function sendCopilotAgentMessage() {
+    const text = copilotAgentInput.trim();
+    if (!text || !resolved?.id || !apiHeaders || copilotAgentLoading) return;
+    setCopilotAgentLoading(true);
+    setCopilotAgentError(null);
+    setCopilotAgentInput("");
+    setCopilotAgentMessages((prev) => {
+      const next = [...prev, { role: "user" as const, content: text }];
+      persistCopilotAgentSession(copilotAgentConvId, next);
+      return next;
+    });
+    try {
+      const res = await fetch("/api/ai/copilot-agent/chat", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({
+          ticketConversationId: resolved.id,
+          mistralConversationId: copilotAgentConvId,
+          message: text,
+          includeTicketContext: copilotAgentConvId == null,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reply?: string;
+        mistralConversationId?: string;
+      };
+      if (!res.ok) {
+        setCopilotAgentError(typeof json.error === "string" ? json.error : "Falha ao falar com o agente.");
+        setCopilotAgentMessages((prev) => {
+          const rolled = prev.slice(0, -1);
+          persistCopilotAgentSession(copilotAgentConvId, rolled);
+          return rolled;
+        });
+        return;
+      }
+      const reply = typeof json.reply === "string" ? json.reply : "";
+      const nextConv =
+        typeof json.mistralConversationId === "string" ? json.mistralConversationId : copilotAgentConvId;
+      const nextConvFinal = nextConv ?? null;
+      setCopilotAgentConvId(nextConvFinal);
+      setCopilotAgentMessages((prev) => {
+        const next = [...prev, { role: "assistant" as const, content: reply.trim() || "(sem texto)" }];
+        persistCopilotAgentSession(nextConvFinal, next);
+        return next;
+      });
+      requestAnimationFrame(() => {
+        const el = copilotAgentScrollRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    } catch {
+      setCopilotAgentError("Erro de rede.");
+      setCopilotAgentMessages((prev) => {
+        const rolled = prev.slice(0, -1);
+        persistCopilotAgentSession(copilotAgentConvId, rolled);
+        return rolled;
+      });
+    } finally {
+      setCopilotAgentLoading(false);
+    }
+  }
+
   const loadOlderMessages = useCallback(async () => {
     if (!resolved?.id || !conv?.messages?.length || loadingOlderMessages || !hasMoreOlderMessages) return;
     const first = conv.messages[0] as { sent_at?: string };
     const before = first?.sent_at;
     if (!before) return;
+    const id = resolved.id;
+    const url = `/api/conversations/${id}/messages?before=${encodeURIComponent(before)}&limit=50`;
+
+    const mergeOlderBatch = (older: Message[]) => {
+      if (older.length === 0) return;
+      const scrollEl = messagesScrollRef.current;
+      const prevHeight = scrollEl?.scrollHeight ?? 0;
+      const prevScroll = scrollEl?.scrollTop ?? 0;
+      queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(id), (c) => {
+        if (!c) return c;
+        const existing = Array.isArray(c.messages) ? c.messages : [];
+        return { ...c, messages: [...older, ...existing] };
+      });
+      requestAnimationFrame(() => {
+        if (scrollEl) {
+          const newHeight = scrollEl.scrollHeight;
+          scrollEl.scrollTop = prevScroll + (newHeight - prevHeight);
+        }
+      });
+    };
+
     setLoadingOlderMessages(true);
     try {
-      const url = `/api/conversations/${resolved.id}/messages?before=${encodeURIComponent(before)}&limit=50`;
       const res = await fetch(url, { credentials: "include", headers: apiHeaders });
       if (!res.ok) return;
       const data = await res.json();
       const older = Array.isArray(data?.messages) ? data.messages : [];
-      if (older.length === 0) setHasMoreOlderMessages(false);
-      else {
-        const scrollEl = messagesScrollRef.current;
-        const prevHeight = scrollEl?.scrollHeight ?? 0;
-        const prevScroll = scrollEl?.scrollTop ?? 0;
-        const id = resolved.id;
-        queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(id), (c) => {
-          if (!c) return c;
-          const existing = Array.isArray(c.messages) ? c.messages : [];
-          return { ...c, messages: [...older, ...existing] };
-        });
-        requestAnimationFrame(() => {
-          if (scrollEl) {
-            const newHeight = scrollEl.scrollHeight;
-            scrollEl.scrollTop = prevScroll + (newHeight - prevHeight);
-          }
-        });
+
+      if (older.length > 0) {
+        mergeOlderBatch(older as Message[]);
         if (!data?.has_more || older.length < 50) setHasMoreOlderMessages(false);
+        return;
       }
+
+      // Sem mensagens mais antigas só no banco: buscar na UAZAPI (só esta conversa) e gravar no Postgres + invalidar Redis
+      setPullingRemoteHistory(true);
+      try {
+        const pullRes = await fetch(`/api/conversations/${id}/pull-remote-history`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...apiHeaders },
+          body: JSON.stringify({ max_messages: 200 }),
+        });
+        const pullData = (await pullRes.json().catch(() => ({}))) as { inserted?: number; error?: string };
+        if (!pullRes.ok) {
+          setError(pullData?.error ?? "Não foi possível buscar histórico no WhatsApp.");
+          setHasMoreOlderMessages(false);
+          return;
+        }
+        if (!pullData.inserted || pullData.inserted <= 0) {
+          setHasMoreOlderMessages(false);
+          return;
+        }
+      } finally {
+        setPullingRemoteHistory(false);
+      }
+
+      const res2 = await fetch(url, { credentials: "include", headers: apiHeaders });
+      if (!res2.ok) return;
+      const data2 = await res2.json();
+      const older2 = Array.isArray(data2?.messages) ? data2.messages : [];
+      if (older2.length === 0) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
+        setHasMoreOlderMessages(false);
+        return;
+      }
+      mergeOlderBatch(older2 as Message[]);
+      if (!data2?.has_more || older2.length < 50) setHasMoreOlderMessages(false);
     } finally {
       setLoadingOlderMessages(false);
     }
   }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders, queryClient]);
-
-  // Scroll automático apenas na primeira carga ou quando o usuário está no final
-  useEffect(() => {
-    if (!conv?.messages?.length || !messagesScrollRef.current) return;
-    
-    const scrollContainer = messagesScrollRef.current;
-    const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 300;
-    
-    // Só faz scroll automático se estiver próximo do final
-    if (isNearBottom) {
-      const t = requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-        });
-      });
-      return () => cancelAnimationFrame(t);
-    }
-  }, [conv?.messages?.length]);
 
   // Não atribuir ao abrir: atribuição só pelo botão "+" no minicard da lista.
 
@@ -2576,8 +2794,24 @@ export default function ConversaThreadPage({
       )}
 
       {resolved?.id && typeof window !== "undefined" && <RealtimeMessages conversationId={resolved.id} />}
-      <div className="flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
-        <div ref={messagesScrollRef} data-messages-scroll className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
+      <div className="relative flex flex-1 min-h-0 flex-col min-w-0 overflow-hidden">
+        {showScrollToTopBtn && !isLoading && (
+          <button
+            type="button"
+            onClick={scrollMessagesToTop}
+            className="absolute right-3 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-[#E2E8F0] bg-white/95 text-[#64748B] shadow-sm backdrop-blur-sm transition-colors hover:bg-[#F8FAFC] hover:text-[#334155]"
+            title="Ir ao início da conversa"
+            aria-label="Ir ao início da conversa"
+          >
+            <ChevronsUp className="h-4 w-4" aria-hidden />
+          </button>
+        )}
+        <div
+          ref={messagesScrollRef}
+          onScroll={handleMessagesScroll}
+          data-messages-scroll
+          className="scroll-area flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain p-4"
+        >
           <div className="space-y-3">
             {isLoading ? (
               <>
@@ -2595,15 +2829,22 @@ export default function ConversaThreadPage({
             ) : (
               <>
                 {(conv?.messages?.length ?? 0) > 0 && hasMoreOlderMessages && (
-                  <div className="flex justify-center py-2">
+                  <div className="flex flex-col items-center gap-1 py-2">
                     <button
                       type="button"
                       onClick={loadOlderMessages}
                       disabled={loadingOlderMessages}
                       className="text-sm text-clicvend-orange hover:underline disabled:opacity-50"
                     >
-                      {loadingOlderMessages ? "Carregando…" : "Carregar mensagens antigas"}
+                      {pullingRemoteHistory
+                        ? "Buscando no WhatsApp…"
+                        : loadingOlderMessages
+                          ? "Carregando…"
+                          : "Carregar mensagens antigas"}
                     </button>
+                    <p className="max-w-md text-center text-xs text-[#94A3B8]">
+                      Primeiro carrega do servidor; se não houver mais, busca na conexão e atualiza o cache.
+                    </p>
                   </div>
                 )}
                 {mergedMessages.map((m) => (
@@ -2651,7 +2892,7 @@ export default function ConversaThreadPage({
           ) : (
           <>
 <div className={`flex flex-col bg-white overflow-hidden ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
-  <div className="flex items-center border-b border-[#E2E8F0] bg-[#F8FAFC]">
+  <div className="flex items-center border-b border-[#E2E8F0] bg-[#F8FAFC] overflow-x-auto [scrollbar-width:thin]">
     <button
       type="button"
       onClick={() => setInputTab('write')}
@@ -2676,6 +2917,17 @@ export default function ConversaThreadPage({
       <FileText className="h-4 w-4" />
       Comentário Interno
     </button>
+    {canUseCopilot ? (
+      <button
+        type="button"
+        onClick={() => setInputTab("copilot")}
+        className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 shrink-0 ${inputTab === "copilot" ? "border-sky-500 text-sky-800 bg-sky-50" : "border-transparent text-[#64748B] hover:text-[#1E293B] hover:bg-gray-50"}`}
+        title="Assistente interno: análise da conversa só para você"
+      >
+        <Bot className="h-4 w-4" />
+        Copiloto
+      </button>
+    ) : null}
   </div>
 
   <div className="p-0 relative bg-white">
@@ -2883,6 +3135,109 @@ export default function ConversaThreadPage({
             </div>
         </div>
       </>
+    ) : inputTab === "copilot" ? (
+      <div className="flex min-h-[340px] max-h-[min(640px,62vh)] flex-col border-t border-[#E2E8F0] bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white shadow-sm ring-1 ring-[#E2E8F0]">
+              <Bot className="h-4 w-4 text-[#475569]" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[#1E293B]">Chat com o agente</p>
+              <p className="text-[11px] leading-snug text-[#64748B]">
+                Interno — o cliente não vê. Na 1ª mensagem do fio o contexto do chamado é enviado automaticamente.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={resetCopilotAgentThread}
+              disabled={copilotAgentLoading}
+              className="rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#475569] hover:bg-[#F1F5F9] disabled:opacity-50"
+            >
+              Novo fio
+            </button>
+            {slug && canManageCopilotAgent ? (
+              <a
+                href={`/${slug}/copiloto`}
+                className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-clicvend-orange hover:underline"
+              >
+                Agentes e filas
+              </a>
+            ) : slug ? (
+              <span className="text-[11px] text-[#94A3B8]">Copiloto</span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col p-3">
+          <div
+            ref={copilotAgentScrollRef}
+            className="min-h-[160px] flex-1 overflow-y-auto rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-3 space-y-3 [scrollbar-width:thin]"
+          >
+            {copilotAgentMessages.length === 0 ? (
+              <div className="flex h-full min-h-[120px] flex-col items-center justify-center px-4 text-center">
+                <p className="text-sm text-[#64748B]">Converse com o agente desta conexão/fila.</p>
+                <p className="mt-1 max-w-sm text-xs text-[#94A3B8]">
+                  Pergunte o que precisar (tom, objeção, próximo passo…). Cada fio mantém o histórico até &quot;Novo fio&quot;.
+                </p>
+              </div>
+            ) : (
+              copilotAgentMessages.map((m, i) => (
+                <div
+                  key={`copilot-msg-${i}-${m.role}`}
+                  className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[min(100%,28rem)] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm leading-relaxed shadow-sm ${
+                      m.role === "user"
+                        ? "rounded-br-md bg-clicvend-orange text-white"
+                        : "rounded-bl-md border border-[#E2E8F0] bg-white text-[#1e293b]"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
+                </div>
+              ))
+            )}
+            {copilotAgentLoading ? (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-2xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#64748B] shadow-sm">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  Pensando…
+                </div>
+              </div>
+            ) : null}
+          </div>
+          {copilotAgentError ? <p className="mt-2 text-xs text-red-600">{copilotAgentError}</p> : null}
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+            <textarea
+              value={copilotAgentInput}
+              onChange={(e) => setCopilotAgentInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void sendCopilotAgentMessage();
+                }
+              }}
+              placeholder="Escreva para o agente… (Enter envia, Shift+Enter quebra linha)"
+              rows={2}
+              disabled={copilotAgentLoading || !canSendMessages}
+              className="min-h-[44px] min-w-0 flex-1 resize-y rounded-xl border border-[#E2E8F0] bg-white px-3 py-2.5 text-sm text-[#1E293B] placeholder:text-[#94A3B8] focus:border-clicvend-orange focus:outline-none focus:ring-2 focus:ring-clicvend-orange/20 disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={() => void sendCopilotAgentMessage()}
+              disabled={copilotAgentLoading || !copilotAgentInput.trim() || !resolved?.id || !canSendMessages}
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-clicvend-orange px-5 text-sm font-semibold text-white hover:bg-clicvend-orange-dark disabled:opacity-50 sm:h-auto sm:self-stretch sm:px-4"
+            >
+              {copilotAgentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Enviar
+            </button>
+          </div>
+        </div>
+      </div>
     ) : (
        <div className="flex flex-col h-[300px]">
           <div className="flex-1 overflow-y-auto">

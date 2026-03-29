@@ -50,6 +50,8 @@ export const PERMISSIONS = {
   },
   // Perfil (próprio perfil / link de acesso / foto)
   profile: { view: "profile.view" },
+  // Copiloto (assistente interno nas conversas + configuração de agentes)
+  copilot: { use: "copilot.use", manage: "copilot.manage" },
 } as const;
 
 export type PermissionKey =
@@ -66,7 +68,8 @@ export type PermissionKey =
   | (typeof PERMISSIONS)["crm"][keyof (typeof PERMISSIONS)["crm"]]
   | (typeof PERMISSIONS)["broadcast"][keyof (typeof PERMISSIONS)["broadcast"]]
   | (typeof PERMISSIONS)["insurance_multicalculo"][keyof (typeof PERMISSIONS)["insurance_multicalculo"]]
-  | (typeof PERMISSIONS)["profile"][keyof (typeof PERMISSIONS)["profile"]];
+  | (typeof PERMISSIONS)["profile"][keyof (typeof PERMISSIONS)["profile"]]
+  | (typeof PERMISSIONS)["copilot"][keyof (typeof PERMISSIONS)["copilot"]];
 
 const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.inbox.read,
@@ -105,6 +108,8 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.insurance_multicalculo.view,
   PERMISSIONS.insurance_multicalculo.manage,
   PERMISSIONS.profile.view,
+  PERMISSIONS.copilot.use,
+  PERMISSIONS.copilot.manage,
 ];
 
 export function getAllPermissionKeys(): PermissionKey[] {
@@ -178,6 +183,10 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
     keys: [PERMISSIONS.insurance_multicalculo.view, PERMISSIONS.insurance_multicalculo.manage],
   },
   {
+    label: "Módulo Copiloto (assistente interno)",
+    keys: [PERMISSIONS.copilot.use, PERMISSIONS.copilot.manage],
+  },
+  {
     label: "Perfil (próprio perfil da empresa)",
     keys: [PERMISSIONS.profile.view],
   },
@@ -219,6 +228,8 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.broadcast.manage]: "Ação: gerenciar Envio em massa (adicionar/remover e disparar)",
   [PERMISSIONS.insurance_multicalculo.view]: "Acesso: ver módulo Multicálculo de Seguros",
   [PERMISSIONS.insurance_multicalculo.manage]: "Ação: gerenciar módulo Multicálculo de Seguros",
+  [PERMISSIONS.copilot.use]: "Acesso: usar Copiloto na conversa (chat interno e modo rápido)",
+  [PERMISSIONS.copilot.manage]: "Ação: configurar agentes copilot e regras por fila/conexão",
   [PERMISSIONS.profile.view]: "Acesso: ver Perfil (próprio perfil, link de acesso, foto)",
 };
 

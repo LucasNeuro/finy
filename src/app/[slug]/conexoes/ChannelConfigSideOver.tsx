@@ -97,7 +97,6 @@ export function ChannelConfigSideOver({
   const [connectStatus, setConnectStatus] = useState<"connected" | "connecting" | "disconnected" | null>(null);
   const onSavedRef = useRef(onSaved);
   const onCloseRef = useRef(onClose);
-  const hasAutoSyncedRef = useRef(false);
   onSavedRef.current = onSaved;
   onCloseRef.current = onClose;
   const [qrcode, setQrcode] = useState<string | null>(null);
@@ -107,7 +106,6 @@ export function ChannelConfigSideOver({
   const [connectPhone, setConnectPhone] = useState("");
   const [connectedNumber, setConnectedNumber] = useState<string | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(false);
-  const [syncingHistory, setSyncingHistory] = useState(false);
 
   const [queueId, setQueueId] = useState<string>(channelQueueId ?? "");
   const [queueSaving, setQueueSaving] = useState(false);
@@ -165,25 +163,11 @@ export function ChannelConfigSideOver({
     setQrcode(null);
     setPaircode(null);
     setConnectedNumber(null);
-    hasAutoSyncedRef.current = false;
     fetchConnectStatus();
     fetchPrivacy();
   }, [open, channelId, fetchConnectStatus]);
 
-  // Não disparar sync de histórico ao abrir o sidebar (fluxo é só fila por chamado;
-  // histórico só quando o usuário clicar em "Sincronizar histórico" no painel).
-  // useEffect(() => {
-  //   if (!open || !channelId || connectStatus !== "connected" || hasAutoSyncedRef.current) return;
-  //   hasAutoSyncedRef.current = true;
-  //   const base = companySlug ? `/${companySlug}` : "";
-  //   fetch(`/api/channels/${channelId}/sync-history`, {
-  //     method: "POST",
-  //     credentials: "include",
-  //     headers: base ? { "X-Company-Slug": companySlug } : undefined,
-  //   })
-  //     .then(() => onSavedRef.current?.())
-  //     .catch(() => {});
-  // }, [open, channelId, connectStatus, companySlug]);
+  // Histórico antigo: usar em Conversas → abrir o chat → "Carregar mensagens antigas" (por conversa).
 
   useEffect(() => {
     if (!open || activeTab !== "chatbot" || !channelId) return;
@@ -775,48 +759,9 @@ export function ChannelConfigSideOver({
                   )}
                   <p className="mt-1 text-sm text-[#64748B]">Este número já está vinculado e pronto para receber mensagens. Novas mensagens e grupos entram automaticamente nas filas.</p>
                 </div>
-                <p className="text-xs text-[#94A3B8]">
-                  Pode levar vários minutos (muitas chamadas ao WhatsApp). Deixe esta janela aberta até terminar. Se outras abas mostrarem erro ao carregar contatos, espere o fim do sync.
+                <p className="text-xs text-[#64748B]">
+                  Mensagens antigas: em <strong>Conversas</strong>, abra o chat e use <strong>Carregar mensagens antigas</strong> no topo — busca o histórico só daquela conversa.
                 </p>
-                <button
-                  type="button"
-                  disabled={syncingHistory}
-                  onClick={async () => {
-                    setSyncingHistory(true);
-                    setError("");
-                    try {
-                      const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/sync-history`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", ...apiHeaders },
-                        credentials: "include",
-                        body: JSON.stringify({
-                          create_missing: true,
-                          messages_per_chat: 200,
-                        }),
-                      });
-                      const data = await r.json().catch(() => ({}));
-                      if (!r.ok) {
-                        setError(data?.error ?? "Falha ao sincronizar histórico");
-                      } else {
-                        onSaved?.();
-                      }
-                    } catch {
-                      setError("Erro de rede ao sincronizar histórico");
-                    } finally {
-                      setSyncingHistory(false);
-                    }
-                  }}
-                  className="w-full rounded-lg border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
-                >
-                  {syncingHistory ? (
-                    <>
-                      <Loader2 className="inline h-4 w-4 animate-spin" />{" "}
-                      Sincronizando histórico...
-                    </>
-                  ) : (
-                    "Sincronizar histórico antigo (até 200 msgs/conversa)"
-                  )}
-                </button>
               </div>
             ) : connectStatus === "connecting" || qrcode || paircode ? (
               <>

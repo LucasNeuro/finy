@@ -872,8 +872,9 @@ export function ConversasSidebar() {
     return Array.from(byKey.values());
   }, [groupsListRaw]);
 
+  const CONVERSATIONS_PAGE_LIMIT = 200;
   const conversationsParams = new URLSearchParams();
-  conversationsParams.set("limit", "200");
+  conversationsParams.set("limit", String(CONVERSATIONS_PAGE_LIMIT));
   if (viewMode === "mine") conversationsParams.set("only_assigned_to_me", "1");
   if (viewMode === "unassigned") conversationsParams.set("only_unassigned", "1");
   if (viewMode === "mine_closed") {
@@ -900,14 +901,12 @@ export function ConversasSidebar() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error ?? "Falha ao carregar conversas");
-      return json as { data: Conversation[]; total: number };
+      return json as { data: Conversation[]; total: number; has_more?: boolean; next_offset?: number };
     },
     initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      const fetched = allPages.reduce((s, p) => s + (p.data?.length ?? 0), 0);
-      const total = lastPage?.total ?? 0;
-      if ((lastPage?.data?.length ?? 0) < 200 || fetched >= total) return undefined;
-      return fetched;
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.has_more) return undefined;
+      return typeof lastPage.next_offset === "number" ? lastPage.next_offset : undefined;
     },
     enabled: !!slug && activeTab !== "contacts" && activeTab !== "groups" && activeTab !== "broadcast_queue",
     staleTime: 60 * 1000,
@@ -916,7 +915,25 @@ export function ConversasSidebar() {
   });
 
   const baseList = conversationsData?.pages?.[0]?.data ?? [];
-  const allConversations = conversationsData?.pages?.flatMap((p) => p.data ?? []) ?? [];
+  const allConversations = useMemo(() => {
+    const pages = conversationsData?.pages ?? [];
+    const byId = new Map<string, Conversation>();
+    for (const page of pages) {
+      for (const c of page.data ?? []) {
+        const id = (c.id ?? "").trim();
+        if (!id) continue;
+        const prev = byId.get(id);
+        if (!prev) {
+          byId.set(id, c);
+          continue;
+        }
+        const pt = new Date(prev.last_message_at || 0).getTime();
+        const nt = new Date(c.last_message_at || 0).getTime();
+        if (nt >= pt) byId.set(id, c);
+      }
+    }
+    return Array.from(byId.values());
+  }, [conversationsData?.pages]);
   const totalFromApi = conversationsData?.pages?.[0]?.total ?? 0;
 
   const channelOptions = useMemo(() => {

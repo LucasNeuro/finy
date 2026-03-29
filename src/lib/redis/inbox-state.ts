@@ -76,7 +76,7 @@ export async function getCachedConversationList(
     const key = listKey(companyId, userScope, queueId, status, onlyAssigned, includeClosed ? "1" : "0", onlyUnassigned ? "1" : "0", offset, limit);
     const raw = await redis.get(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { data: unknown[]; total: number };
+    const parsed = JSON.parse(raw) as { data: unknown[]; total: number; has_more?: boolean; next_offset?: number };
     return Array.isArray(parsed?.data) ? parsed : null;
   } catch {
     return null;
@@ -91,7 +91,7 @@ export async function setCachedConversationList(
   queueId: string,
   status: string,
   onlyAssigned: string,
-  payload: { data: unknown[]; total: number },
+  payload: { data: unknown[]; total: number; has_more?: boolean; next_offset?: number },
   includeClosed = false,
   onlyUnassigned = false,
   offset = 0,

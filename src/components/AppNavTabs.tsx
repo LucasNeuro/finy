@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import useSWR from "swr";
 import {
   MessageSquare,
@@ -18,6 +18,9 @@ import {
   ChartLine,
   Shield,
   ShieldCheck,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 const fetcher = (url: string, slug: string) =>
@@ -52,6 +55,13 @@ const ALL_TABS = [
   { href: "/campanhas", label: "Campanhas", icon: Megaphone, requires: "campaigns.view" as const },
   { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.view" as const },
   {
+    href: "/copiloto",
+    label: "Copiloto",
+    icon: Bot,
+    requires: "copilot.manage" as const,
+    featureFlag: "copilot_module_enabled" as const,
+  },
+  {
     href: "/multicalculo",
     label: "Multicálculo",
     icon: ShieldCheck,
@@ -63,16 +73,17 @@ const ALL_TABS = [
 ];
 
 export function AppNavTabs() {
+  const scrollRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const slug = segments[0];
   const base = slug ? `/${slug}` : "";
 
-  const { data } = useSWR<{ permissions?: string[]; multicalculo_seguros_enabled?: boolean }>(
-    base ? [PERMISSIONS_KEY, slug] : null,
-    ([url]) => fetcher(url, slug),
-    swrOpts
-  );
+  const { data } = useSWR<{
+    permissions?: string[];
+    multicalculo_seguros_enabled?: boolean;
+    copilot_module_enabled?: boolean;
+  }>(base ? [PERMISSIONS_KEY, slug] : null, ([url]) => fetcher(url, slug), swrOpts);
   const { data: platformOwnerData } = useSWR<{ isPlatformOwner?: boolean }>(
     base ? PLATFORM_OWNER_KEY : null,
     platformOwnerFetcher,
@@ -80,6 +91,7 @@ export function AppNavTabs() {
   );
   const permissions = Array.isArray(data?.permissions) ? data.permissions : [];
   const multicalculoEnabled = data?.multicalculo_seguros_enabled === true;
+  const copilotModuleEnabled = data?.copilot_module_enabled !== false;
   const isPlatformOwner = platformOwnerData?.isPlatformOwner === true;
 
   const tabs = useMemo(() => {
@@ -87,6 +99,9 @@ export function AppNavTabs() {
       if (!("requires" in t) || !t.requires) return true;
       if (t.requires === "platformOwner") return isPlatformOwner;
       if ("featureFlag" in t && t.featureFlag === "multicalculo_seguros_enabled" && !multicalculoEnabled) {
+        return false;
+      }
+      if ("featureFlag" in t && t.featureFlag === "copilot_module_enabled" && !copilotModuleEnabled) {
         return false;
       }
       if (t.href === "/cargos-usuarios") {
@@ -100,12 +115,30 @@ export function AppNavTabs() {
       }
       return permissions.includes(t.requires);
     });
-  }, [permissions, isPlatformOwner, multicalculoEnabled]);
+  }, [permissions, isPlatformOwner, multicalculoEnabled, copilotModuleEnabled]);
 
   if (!base) return null;
 
+  const scrollByDelta = (delta: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: delta, behavior: "smooth" });
+  };
+
   return (
-    <div className="flex shrink-0 gap-0.5 overflow-x-auto px-4 py-2.5 scrollbar-thin scrollbar-track-emerald-950/50 scrollbar-thumb-emerald-600/50">
+    <div className="flex shrink-0 items-stretch gap-0.5 px-1 py-2.5 sm:px-2">
+      <button
+        type="button"
+        aria-label="Abas anteriores"
+        onClick={() => scrollByDelta(-240)}
+        className="flex w-8 shrink-0 items-center justify-center rounded-lg text-white/85 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+      >
+        <ChevronLeft className="h-5 w-5" strokeWidth={2.25} />
+      </button>
+      <div
+        ref={scrollRef}
+        className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto scroll-smooth px-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      >
       {tabs.map(({ href, label, icon: Icon }) => {
         const fullHref = `${base}${href}`;
         const isActive = pathname === fullHref || (href !== "/" && pathname?.startsWith(fullHref));
@@ -129,6 +162,15 @@ export function AppNavTabs() {
           </Link>
         );
       })}
+      </div>
+      <button
+        type="button"
+        aria-label="Próximas abas"
+        onClick={() => scrollByDelta(240)}
+        className="flex w-8 shrink-0 items-center justify-center rounded-lg text-white/85 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70"
+      >
+        <ChevronRight className="h-5 w-5" strokeWidth={2.25} />
+      </button>
     </div>
   );
 }

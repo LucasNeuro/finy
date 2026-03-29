@@ -65,6 +65,15 @@ function formatPhoneBrazil(raw: string | null | undefined): string {
   return s.slice(0, 14) + "…";
 }
 
+/** Nome na UI: contact_name / first_name; senão telefone formatado ou JID. */
+function displayContactName(c: Contact): string {
+  const name = (c.contact_name ?? c.first_name ?? "").trim();
+  if (name) return name;
+  const raw = (c.phone ?? (c.jid ?? "").replace(/@.*$/, "")).trim();
+  if (raw) return formatPhoneBrazil(raw);
+  return (c.jid ?? "").trim() || "—";
+}
+
 function canonicalContactDigits(phone: string | null | undefined, jid: string | null | undefined): string | null {
   const phoneDigits = (phone ?? "").replace(/\D/g, "").trim();
   const jidDigits = (jid ?? "").replace(/@.*$/, "").replace(/\D/g, "").trim();

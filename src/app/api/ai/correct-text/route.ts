@@ -1,4 +1,5 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
+import { getServerAiApiKey, SERVER_AI_KEY_ENV_HINT } from "@/lib/ai/server-api-key";
 import { NextResponse } from "next/server";
 
 const AI_BASE_URL = process.env.AI_BASE_URL?.replace(/\/+$/, "") || "https://api.mistral.ai/v1";
@@ -14,19 +15,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey =
-    process.env.AI_API_KEY?.trim() ||
-    process.env.MISTRAL_API_KEY?.trim() ||
-    process.env.MISTARL_API_KEY?.trim();
+  const apiKey = getServerAiApiKey();
   const isLocal = AI_BASE_URL.includes("localhost") || AI_BASE_URL.includes("127.0.0.1");
-  
+
   if (!apiKey && !isLocal) {
-    return NextResponse.json(
-      {
-        error: "AI_API_KEY ou MISTRAL_API_KEY não configurada. Adicione no .env e reinicie o servidor.",
-      },
-      { status: 503 }
-    );
+    return NextResponse.json({ error: SERVER_AI_KEY_ENV_HINT }, { status: 503 });
   }
 
   let body: { text?: string; instruction?: string };

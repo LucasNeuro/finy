@@ -196,7 +196,7 @@ export async function GET(request: Request) {
   type ConvRow = { id: string; channel_id: string; external_id: string; wa_chat_jid: string | null; kind: string; is_group: boolean; customer_phone: string; customer_name: string | null; queue_id: string | null; assigned_to: string | null; status: string; last_message_at: string; created_at: string };
 
   if (allowedQueueIds !== null && allowedQueueIds.length === 0 && allowedGroupKeys.length === 0) {
-    const res = NextResponse.json({ data: [], total: 0 });
+    const res = NextResponse.json({ data: [], total: 0, has_more: false, next_offset: 0 });
     return withMetricsHeaders(res, { cacheHit: false, startTime });
   }
 
@@ -248,7 +248,19 @@ export async function GET(request: Request) {
         companyId,
         sorted as { status?: string; queue_id?: string | null; assigned_to?: string | null }[]
       );
-      const res = NextResponse.json({ data: sortedWithStatusVisuals, total: sortedWithStatusVisuals.length });
+      const cachedMeta = cached as { has_more?: boolean; next_offset?: number };
+      const hasMoreCached =
+        typeof cachedMeta.has_more === "boolean"
+          ? cachedMeta.has_more
+          : sortedWithStatusVisuals.length >= limit;
+      const nextOffsetCached =
+        typeof cachedMeta.next_offset === "number" ? cachedMeta.next_offset : hasMoreCached ? limit : offset;
+      const res = NextResponse.json({
+        data: sortedWithStatusVisuals,
+        total: sortedWithStatusVisuals.length,
+        has_more: hasMoreCached,
+        next_offset: nextOffsetCached,
+      });
       return withMetricsHeaders(res, { cacheHit: true, startTime });
     }
   }
@@ -291,7 +303,8 @@ export async function GET(request: Request) {
     q = q.eq("queue_id", queueIdParam);
     if (allowedQueueIds !== null && !allowedQueueIds.includes(queueIdParam)) {
       const groupJids = [...new Set(allowedGroupKeys.map((k) => k.group_jid))];
-      if (groupJids.length === 0) return NextResponse.json({ data: [], total: 0 });
+      if (groupJids.length === 0)
+        return NextResponse.json({ data: [], total: 0, has_more: false, next_offset: offset });
       q = supabase
         .from("conversations")
         .select(selectFields, { count: "exact" })
@@ -302,6 +315,7 @@ export async function GET(request: Request) {
       const statusFilter = status ? q.eq("status", status) : q.in("status", statusesForList);
       const { data: groupData, error: groupErr } = await statusFilter.range(offset, offset + limit - 1);
       if (groupErr) return NextResponse.json({ error: groupErr.message }, { status: 500 });
+      const rawGroupPageCount = (groupData ?? []).length;
       const list = filteredByChannel((groupData ?? []) as ConvRow[]);
       const commercialFiltered = filterCommercialRows(list);
       const gAssignedIds = [...new Set(commercialFiltered.map((c) => c.assigned_to).filter(Boolean))] as string[];
@@ -331,7 +345,14 @@ export async function GET(request: Request) {
         return { ...c, last_message_preview };
       });
       const gWithStatusVisuals = await enrichWithStatusVisuals(supabase, companyId, gWithPreview);
-      return NextResponse.json({ data: gWithStatusVisuals, total: gWithStatusVisuals.length });
+      const gHasMore = rawGroupPageCount >= limit;
+      const gNextOffset = offset + rawGroupPageCount;
+      return NextResponse.json({
+        data: gWithStatusVisuals,
+        total: gWithStatusVisuals.length,
+        has_more: gHasMore,
+        next_offset: gNextOffset,
+      });
     }
   }
   q = q.range(offset, offset + limit - 1);
@@ -340,6 +361,7 @@ export async function GET(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  const rawPageRowCount = (data ?? []).length;
   let result = (data ?? []) as ConvRow[];
   if (allowedQueueIds !== null && allowedGroupKeys.length > 0) {
     result = result.filter((c) => {
@@ -480,7 +502,9 @@ export async function GET(request: Request) {
     listWithPreview = sortQueuesListNewFirst(listWithPreview);
   }
 
-  const payload = { data: listWithPreview, total: listWithPreview.length };
+  const has_more = rawPageRowCount >= limit;
+  const next_offset = offset + rawPageRowCount;
+  const payload = { data: listWithPreview, total: listWithPreview.length, has_more, next_offset };
   if (useCache && !skipCache) {
     const userScope = user?.id ?? "anon";
     await setCachedConversationList(

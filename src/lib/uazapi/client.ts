@@ -1162,6 +1162,7 @@ export async function updateDelaySettings(
 
 /**
  * Atualiza configurações do chatbot da instância.
+ * Nota: `openai_apikey` é o nome do campo exigido pela API UAZAPI (valor conforme o provedor configurado lá, ex. Mistral).
  */
 export async function updateChatbotSettings(
   token: string,
