@@ -42,11 +42,16 @@ export async function mistralChatCompletion(params: {
   if (!res.ok) {
     const raw = parseErr(data, res.status);
     if (res.status === 401 || res.status === 403 || /unauthorized/i.test(raw)) {
+      const prodHint =
+        process.env.NODE_ENV === "production"
+          ? "Em produção (ex.: Render), defina MISTRAL_API_KEY ou AI_API_KEY no painel Environment do serviço — não usa o .env da sua máquina. " +
+            "Se as duas variáveis existirem, AI_API_KEY tem prioridade. Guarde e faça redeploy. "
+          : "Reinicie o npm run dev após editar o .env. Teste: npm run test:mistral. ";
       throw new Error(
         `Chave Mistral recusada (chat completions). Detalhe: ${raw}. ` +
-          `Não precisa “trocar de chave em ciclo”: use uma chave válida de console.mistral.ai uma vez. ` +
-          `Se existirem AI_API_KEY e MISTRAL_API_KEY, o servidor usa sempre AI_API_KEY primeiro — apague a linha errada ou deixe só uma. ` +
-          `Reinicie o npm run dev após editar o .env. Teste: npm run test:mistral.`
+          `Use uma chave válida de console.mistral.ai. ` +
+          `Se existirem AI_API_KEY e MISTRAL_API_KEY, o servidor usa sempre AI_API_KEY primeiro — remova a errada ou deixe só uma. ` +
+          prodHint
       );
     }
     throw new Error(raw);
