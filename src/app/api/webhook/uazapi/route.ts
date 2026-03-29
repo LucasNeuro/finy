@@ -19,6 +19,40 @@ import { NextResponse } from "next/server";
  * Ex.: sync gravou 4184727733@s.whatsapp.net e o webhook usa 554184727733@s.whatsapp.net —
  * ficamos só com o canônico e evitamos dois cards "Vô Dos Meninos".
  */
+/**
+ * Eco do WhatsApp após envio pelo painel: já gravamos a mensagem em POST /conversations/[id]/messages.
+ * Se o webhook vier com fromMe e sem wasSentByApi, insere de novo. Só deduplicamos quando o payload
+ * não declara explicitamente envio "não-API" (wasSentByApi/fromApi === false = típico do celular).
+ */
+async function shouldSkipFromMeAsPanelEcho(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  conversationId: string,
+  contentTrim: string,
+  messageType: string,
+  data: WebhookPayload["data"]
+): Promise<boolean> {
+  if (!contentTrim) return false;
+  const d = (data ?? {}) as Record<string, unknown>;
+  const explicitlyFromPhone = d.wasSentByApi === false || d.fromApi === false;
+  if (explicitlyFromPhone) return false;
+
+  const since = new Date(Date.now() - 120_000).toISOString();
+  const { data: rows } = await supabase
+    .from("messages")
+    .select("id, content")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "out")
+    .eq("message_type", messageType)
+    .gte("sent_at", since)
+    .order("sent_at", { ascending: false })
+    .limit(12);
+  for (const r of rows ?? []) {
+    const c = typeof (r as { content?: string }).content === "string" ? (r as { content: string }).content.trim() : "";
+    if (c === contentTrim) return true;
+  }
+  return false;
+}
+
 async function mergeDuplicateContacts(
   supabase: ReturnType<typeof createServiceRoleClient>,
   channelId: string,
@@ -700,6 +734,24 @@ async function processOneMessage(
         conversationId = inserted.id;
       }
 
+      if (fromMe && !isHistoryEvent) {
+        const trim = finalContent.trim();
+        if (
+          trim &&
+          (await shouldSkipFromMeAsPanelEcho(supabase, conversationId, trim, finalMessageType, data))
+        ) {
+          console.log("[WEBHOOK] Eco fromMe (grupo) ignorado — já existe mensagem igual do painel:", {
+            conversationId,
+            preview: trim.slice(0, 48),
+          });
+          await Promise.all([
+            invalidateConversationList(companyId),
+            invalidateConversationDetail(conversationId),
+          ]);
+          return true;
+        }
+      }
+
       const { data: insertedGroupMsg, error: groupMsgErr } = await supabase
         .from("messages")
         .insert({
@@ -1068,6 +1120,24 @@ async function processOneMessage(
           name: customerName || null,
           reason: "conversation_created",
         });
+      }
+    }
+
+    if (fromMe && !isHistoryEvent) {
+      const trim = finalContent.trim();
+      if (
+        trim &&
+        (await shouldSkipFromMeAsPanelEcho(supabase, conversationId, trim, finalMessageType, data))
+      ) {
+        console.log("[WEBHOOK] Eco fromMe ignorado — já existe mensagem igual do painel (UAZAPI sem wasSentByApi):", {
+          conversationId,
+          preview: trim.slice(0, 48),
+        });
+        await Promise.all([
+          invalidateConversationList(companyId),
+          invalidateConversationDetail(conversationId),
+        ]);
+        return true;
       }
     }
 

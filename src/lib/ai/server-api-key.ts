@@ -10,6 +10,16 @@ function cleanKey(s: string | undefined): string {
  * Chave Mistral para chat/completions e rotas de IA (AI_BASE_URL padrão: api.mistral.ai).
  * Ordem: AI_API_KEY, MISTRAL_API_KEY, typo legado MISTARL_API_KEY.
  */
+export type ServerAiKeySource = "AI_API_KEY" | "MISTRAL_API_KEY" | "MISTARL_API_KEY" | "none";
+
+/** Qual variável está a ser usada (mesma ordem que getServerAiApiKey). Útil para diagnóstico sem expor a chave. */
+export function getServerAiKeySource(): ServerAiKeySource {
+  if (cleanKey(process.env.AI_API_KEY)) return "AI_API_KEY";
+  if (cleanKey(process.env.MISTRAL_API_KEY)) return "MISTRAL_API_KEY";
+  if (cleanKey(process.env.MISTARL_API_KEY)) return "MISTARL_API_KEY";
+  return "none";
+}
+
 export function getServerAiApiKey(): string {
   return (
     cleanKey(process.env.AI_API_KEY) ||

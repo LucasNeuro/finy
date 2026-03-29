@@ -29,7 +29,7 @@ export type MistralConvResult = {
  * Garante base com sufixo /v1 para rotas documentadas (/v1/agents, /v1/conversations).
  * Se AI_BASE_URL for só https://api.mistral.ai (sem /v1), o fetch ia para /agents e falhava.
  */
-function mistralApiV1Base(baseUrl: string): string {
+export function mistralApiV1Base(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
   if (/\/v1$/i.test(trimmed)) return trimmed;
   try {
@@ -42,6 +42,35 @@ function mistralApiV1Base(baseUrl: string): string {
     /* base relativa ou inválida: usar como veio */
   }
   return trimmed;
+}
+
+type MistralErrJson = { detail?: unknown; message?: string };
+
+function mistralErrorRaw(data: MistralErrJson, status: number): string {
+  let raw =
+    typeof data.detail === "string"
+      ? data.detail
+      : typeof data.message === "string"
+        ? data.message
+        : `HTTP ${status}`;
+  if (Array.isArray(data.detail) && data.detail.length > 0) {
+    const first = data.detail[0] as { msg?: string; message?: string };
+    const piece =
+      typeof first?.msg === "string" ? first.msg : typeof first?.message === "string" ? first.message : "";
+    if (piece) raw = piece;
+  }
+  return raw;
+}
+
+function throwMistralHttpError(res: Response, data: MistralErrJson, endpointHint: string): never {
+  const raw = mistralErrorRaw(data, res.status);
+  if (res.status === 401 || res.status === 403 || /unauthorized/i.test(raw)) {
+    const fromApi = raw && raw !== `HTTP ${res.status}` ? ` Detalhe da API: ${raw}` : "";
+    throw new Error(
+      `Chave Mistral recusada (${endpointHint}). Defina uma chave válida em AI_API_KEY ou MISTRAL_API_KEY no .env ou .env.local (sem aspas), reinicie o servidor e confira com npm run test:mistral.${fromApi}`
+    );
+  }
+  throw new Error(raw);
 }
 
 export async function mistralConversationStart(params: {
@@ -83,13 +112,7 @@ export async function mistralConversationStart(params: {
     message?: string;
   };
   if (!res.ok) {
-    const msg =
-      typeof data.detail === "string"
-        ? data.detail
-        : typeof data.message === "string"
-          ? data.message
-          : `HTTP ${res.status}`;
-    throw new Error(msg);
+    throwMistralHttpError(res, data, "conversas do copiloto — POST /v1/conversations");
   }
   const cid = data.conversation_id;
   if (!cid || typeof cid !== "string") throw new Error("Resposta sem conversation_id");
@@ -124,13 +147,7 @@ export async function mistralConversationAppend(params: {
     message?: string;
   };
   if (!res.ok) {
-    const msg =
-      typeof data.detail === "string"
-        ? data.detail
-        : typeof data.message === "string"
-          ? data.message
-          : `HTTP ${res.status}`;
-    throw new Error(msg);
+    throwMistralHttpError(res, data, "continuar conversa — POST /v1/conversations/{id}");
   }
   const cid = typeof data.conversation_id === "string" ? data.conversation_id : params.conversationId;
   const reply = extractAssistantReply(data);
@@ -169,17 +186,7 @@ export async function mistralAgentCreate(params: {
     message?: string;
   };
   if (!res.ok) {
-    let raw =
-      typeof data.detail === "string"
-        ? data.detail
-        : typeof data.message === "string"
-          ? data.message
-          : `HTTP ${res.status}`;
-    if (Array.isArray(data.detail) && data.detail.length > 0) {
-      const first = data.detail[0] as { msg?: string; message?: string };
-      const piece = typeof first?.msg === "string" ? first.msg : typeof first?.message === "string" ? first.message : "";
-      if (piece) raw = piece;
-    }
+    const raw = mistralErrorRaw(data, res.status);
     if (res.status === 401 || /unauthorized/i.test(raw)) {
       const fromApi = raw && raw !== `HTTP ${res.status}` ? ` Resposta da API: ${raw}` : "";
       throw new Error(

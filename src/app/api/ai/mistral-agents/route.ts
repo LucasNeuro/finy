@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       id: created.id,
       version: created.version ?? 0,
       message:
-        "Agente criado na Mistral. Para vincular à conexão/fila pela interface, use Copiloto → Novo agente → Criar no provedor e vincular (POST /api/companies/copilot-agents/provision).",
+        "Agente criado na Mistral. Para vincular à conexão/fila pela interface, use Copiloto → Novo agente → Salvar regra (POST /api/companies/copilot-agents/provision), ou cole o ID numa regra legado Conversations.",
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Falha ao criar agente";

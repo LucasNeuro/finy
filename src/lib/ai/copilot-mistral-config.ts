@@ -1,4 +1,16 @@
-/** Uma regra: agente no provedor (ex.: ag_*) + escopo (fila/conexão) + prompt extra na 1ª mensagem do fio. */
+/**
+ * ID devolvido por POST /v1/agents na Mistral (p.ex. `ag_…` ou UUID).
+ * Não exigir prefixo `ag_` — a API pública usa `id` string genérico.
+ */
+export function isPlausibleMistralAgentExternalId(s: unknown): s is string {
+  if (typeof s !== "string") return false;
+  const t = s.trim();
+  if (t.length < 4 || t.length > 200) return false;
+  if (/\s/.test(t)) return false;
+  return true;
+}
+
+/** Uma regra: agente no provedor + escopo (fila/conexão) + prompt extra na 1ª mensagem do fio. */
 export type CopilotMistralAgentEntry = {
   id: string;
   agent_id: string;
@@ -46,7 +58,7 @@ export function pickCopilotAgentForContext(
   const raw = Array.isArray(cfg.agents) ? cfg.agents : [];
   const valid: CopilotMistralAgentEntry[] = [];
   for (const a of raw) {
-    if (typeof a?.agent_id !== "string" || !a.agent_id.startsWith("ag_")) continue;
+    if (!isPlausibleMistralAgentExternalId(a?.agent_id)) continue;
     const id = typeof a.id === "string" ? a.id.trim() : "";
     if (!id) continue;
     const v = a.agent_version;
@@ -82,7 +94,9 @@ export function pickCopilotAgentForContext(
   }
 
   const legacyId =
-    typeof cfg.agent_id === "string" && cfg.agent_id.startsWith("ag_") ? cfg.agent_id.trim() : null;
+    typeof cfg.agent_id === "string" && isPlausibleMistralAgentExternalId(cfg.agent_id)
+      ? cfg.agent_id.trim()
+      : null;
   if (legacyId) {
     const v = cfg.agent_version;
     return {

@@ -1,14 +1,13 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
-import type {
-  CopilotMistralAgentEntry,
-  CopilotMistralStoredConfig,
+import {
+  isPlausibleMistralAgentExternalId,
+  type CopilotMistralAgentEntry,
+  type CopilotMistralStoredConfig,
 } from "@/lib/ai/copilot-mistral-config";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
-
-const AG_ID_RE = /^ag_[a-zA-Z0-9]+$/;
 
 function isUuid(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
@@ -23,7 +22,7 @@ function sanitizeAgents(raw: unknown): CopilotMistralAgentEntry[] {
     const id = typeof r.id === "string" ? r.id.trim() : "";
     const agent_id = typeof r.agent_id === "string" ? r.agent_id.trim() : "";
     if (!id || !isUuid(id)) continue;
-    if (!agent_id || !AG_ID_RE.test(agent_id)) continue;
+    if (!isPlausibleMistralAgentExternalId(agent_id)) continue;
     const av = r.agent_version;
     const agent_version =
       typeof av === "number" && Number.isFinite(av) ? Math.max(0, Math.floor(av)) : 0;
@@ -58,10 +57,8 @@ export async function GET(request: Request) {
     }
     const cfg = (data?.copilot_mistral_config ?? {}) as CopilotMistralStoredConfig;
     const agents = sanitizeAgents(cfg.agents);
-    const envFallback = Boolean(
-      (process.env.COPILOT_AGENT_ID?.trim() || process.env.MISTRAL_COPILOT_AGENT_ID?.trim())?.startsWith(
-        "ag_"
-      )
+    const envFallback = isPlausibleMistralAgentExternalId(
+      process.env.COPILOT_AGENT_ID?.trim() || process.env.MISTRAL_COPILOT_AGENT_ID?.trim()
     );
     return NextResponse.json({
       agents,
@@ -122,9 +119,9 @@ export async function PATCH(request: Request) {
     delete next.agent_version;
   } else if (typeof body.legacy_agent_id === "string") {
     const raw = body.legacy_agent_id.trim();
-    if (raw && !AG_ID_RE.test(raw)) {
+    if (raw && !isPlausibleMistralAgentExternalId(raw)) {
       return NextResponse.json(
-        { error: "legacy_agent_id deve ser um id ag_ válido ou vazio." },
+        { error: "legacy_agent_id deve ser um id de agente Mistral válido ou vazio." },
         { status: 400 }
       );
     }

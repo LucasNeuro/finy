@@ -1717,6 +1717,8 @@ export default function ConversaThreadPage({
   async function sendCopilotAgentMessage() {
     const text = copilotAgentInput.trim();
     if (!text || !resolved?.id || !apiHeaders || copilotAgentLoading) return;
+    const historyBefore = copilotAgentMessages;
+    const includeTicketContext = copilotAgentConvId == null && historyBefore.length === 0;
     setCopilotAgentLoading(true);
     setCopilotAgentError(null);
     setCopilotAgentInput("");
@@ -1734,7 +1736,8 @@ export default function ConversaThreadPage({
           ticketConversationId: resolved.id,
           mistralConversationId: copilotAgentConvId,
           message: text,
-          includeTicketContext: copilotAgentConvId == null,
+          includeTicketContext,
+          copilotHistory: historyBefore,
         }),
       });
       const json = (await res.json().catch(() => ({}))) as {

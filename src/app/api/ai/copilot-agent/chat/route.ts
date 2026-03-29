@@ -2,13 +2,18 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { invokeCopilotEdge } from "@/lib/ai/copilot-edge";
+import { mistralChatCompletion } from "@/lib/ai/mistral-chat-completions";
 import { resolveCopilotAgent } from "@/lib/ai/resolve-copilot-agent";
 import {
   mistralConversationAppend,
   mistralConversationStart,
 } from "@/lib/ai/mistral-conversations";
 import { getCopilotModuleEnabledForCompany } from "@/lib/company/copilot-module";
-import { getServerAiApiKey, SERVER_AI_KEY_ENV_HINT } from "@/lib/ai/server-api-key";
+import {
+  getServerAiApiKey,
+  getServerAiKeySource,
+  SERVER_AI_KEY_ENV_HINT,
+} from "@/lib/ai/server-api-key";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
@@ -24,6 +29,10 @@ const FETCH_LIMIT = 120;
 const TAIL = 50;
 const MAX_LINE = 400;
 const MAX_TRANSCRIPT = 12000;
+const MAX_COPILOT_HISTORY_MSGS = 30;
+
+const DEFAULT_CHAT_SYSTEM =
+  "Você é um copiloto em português brasileiro. Ajude o atendente com sugestões; o cliente não lê suas respostas.";
 
 type MsgRow = {
   direction: string;
@@ -37,6 +46,21 @@ function truncate(s: string, max: number): string {
   const t = s.replace(/\s+/g, " ").trim();
   if (t.length <= max) return t;
   return `${t.slice(0, max)}…`;
+}
+
+function normalizeCopilotHistory(raw: unknown): { role: "user" | "assistant"; content: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { role: "user" | "assistant"; content: string }[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== "object") continue;
+    const role = (x as { role?: string }).role;
+    const content = (x as { content?: string }).content;
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string") continue;
+    const c = content.trim();
+    if (!c) continue;
+    out.push({ role, content: c });
+  }
+  return out.slice(-MAX_COPILOT_HISTORY_MSGS);
 }
 
 function formatLine(m: MsgRow): string {
@@ -94,6 +118,7 @@ export async function POST(request: Request) {
     mistralConversationId?: string | null;
     message?: string;
     includeTicketContext?: boolean;
+    copilotHistory?: unknown;
   };
   try {
     body = await request.json();
@@ -115,8 +140,11 @@ export async function POST(request: Request) {
     typeof body.mistralConversationId === "string" && body.mistralConversationId.startsWith("conv_")
       ? body.mistralConversationId.trim()
       : null;
+  const copilotHistory = normalizeCopilotHistory(body.copilotHistory);
   const includeTicket =
-    body.includeTicketContext !== false && mistralConversationId === null;
+    body.includeTicketContext !== false &&
+    mistralConversationId === null &&
+    copilotHistory.length === 0;
 
   const supabase = await createClient();
   const { data: conv, error: convErr } = await supabase
@@ -139,7 +167,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "Nenhum agente configurado para esta conexão/fila. Cadastre em Configurações → Copiloto, use o JSON legado ou defina COPILOT_AGENT_ID / MISTRAL_COPILOT_AGENT_ID no servidor.",
+          "Nenhum agente cobre esta conversa (conexão + fila). Em Copiloto → Agentes e filas, crie ou edite um agente com a mesma conexão e fila deste atendimento, ou use \"Qualquer\" nos dois para valer em todos. Alternativa: variáveis COPILOT_AGENT_ID / MISTRAL_COPILOT_AGENT_ID no servidor (fallback global).",
       },
       { status: 400 }
     );
@@ -214,7 +242,7 @@ export async function POST(request: Request) {
     payload = block;
   }
 
-  if (useCopilotEdge) {
+  if (useCopilotEdge && agent.mode === "mistral_agent") {
     try {
       const edgeOut = await invokeCopilotEdge({
         ticketConversationId,
@@ -251,6 +279,29 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (agent.mode === "chat_completions") {
+      const system =
+        agent.systemInstructions.trim().length > 0
+          ? agent.systemInstructions.trim()
+          : DEFAULT_CHAT_SYSTEM;
+      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+        { role: "system", content: system },
+        ...copilotHistory.map((m) => ({ role: m.role, content: m.content })),
+        { role: "user", content: includeTicket ? payload : message },
+      ];
+      const reply = await mistralChatCompletion({
+        apiKey,
+        baseUrl: AI_BASE_URL,
+        model: agent.completionModel,
+        messages: chatMessages,
+      });
+      return NextResponse.json({
+        mistralConversationId: null,
+        reply,
+        copilotMode: "chat_completions" as const,
+      });
+    }
+
     if (mistralConversationId) {
       const out = await mistralConversationAppend({
         apiKey,
@@ -277,6 +328,16 @@ export async function POST(request: Request) {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Erro no provedor de IA do copiloto";
-    return NextResponse.json({ error: msg }, { status: 502 });
+    const body: {
+      error: string;
+      dev?: { keySource: string; keyLength: number };
+    } = { error: msg };
+    if (process.env.NODE_ENV === "development") {
+      body.dev = {
+        keySource: getServerAiKeySource(),
+        keyLength: apiKey.length,
+      };
+    }
+    return NextResponse.json(body, { status: 502 });
   }
 }

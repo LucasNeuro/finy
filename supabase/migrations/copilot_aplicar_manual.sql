@@ -34,6 +34,19 @@ CREATE INDEX IF NOT EXISTS company_copilot_agents_company_active_idx
   ON public.company_copilot_agents (company_id)
   WHERE is_active = true;
 
+-- --- 20260328000001_company_copilot_chat_completions.sql (chat + prompt, sem Agents API) ---
+ALTER TABLE public.company_copilot_agents
+  ALTER COLUMN external_agent_id DROP NOT NULL;
+
+ALTER TABLE public.company_copilot_agents
+  ADD COLUMN IF NOT EXISTS provider_kind text NOT NULL DEFAULT 'mistral_agent';
+
+ALTER TABLE public.company_copilot_agents
+  ADD COLUMN IF NOT EXISTS system_instructions text NOT NULL DEFAULT ''::text;
+
+ALTER TABLE public.company_copilot_agents
+  ADD COLUMN IF NOT EXISTS completion_model text NOT NULL DEFAULT 'mistral-small-latest'::text;
+
 -- --- 20260327000005_copilot_module_and_role_permissions.sql ---
 UPDATE public.companies
 SET enabled_modules = COALESCE(enabled_modules, '{}'::jsonb) || jsonb_build_object('copilot', true)

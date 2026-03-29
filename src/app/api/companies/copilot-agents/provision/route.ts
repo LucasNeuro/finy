@@ -1,24 +1,13 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
-import {
-  getCopilotMistralKeyDiagnostics,
-  getMistralPlatformApiKey,
-  MISTRAL_PLATFORM_KEY_HINT,
-} from "@/lib/ai/server-api-key";
-import { mistralAgentCreate } from "@/lib/ai/mistral-conversations";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
-
-const AI_BASE_URL =
-  process.env.AI_BASE_URL?.replace(/\/+$/, "") ||
-  process.env.MISTRAL_BASE_URL?.replace(/\/+$/, "") ||
-  "https://api.mistral.ai/v1";
 
 const DEFAULT_MODEL = "mistral-medium-latest";
 
 /**
- * POST: cria o agente na Mistral e grava uma linha em company_copilot_agents (vincula à conexão/fila).
+ * POST: grava regra em company_copilot_agents (prompt + modelo) para /v1/chat/completions — sem criar agente na API Mistral.
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
@@ -30,14 +19,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: permErr.error }, { status: permErr.status });
   }
 
-  const apiKey = getMistralPlatformApiKey();
-  if (!apiKey) {
-    return NextResponse.json({ error: MISTRAL_PLATFORM_KEY_HINT }, { status: 503 });
-  }
-
   let body: {
     name?: string;
-    description?: string;
     instructions?: string;
     model?: string;
     channel_id?: string | null;
@@ -52,15 +35,8 @@ export async function POST(request: Request) {
   }
 
   const name = typeof body.name === "string" ? body.name.trim().slice(0, 200) : "";
-  const description = typeof body.description === "string" ? body.description.trim() : "";
   if (!name) {
     return NextResponse.json({ error: "Nome é obrigatório." }, { status: 400 });
-  }
-  if (!description) {
-    return NextResponse.json(
-      { error: "Descrição é obrigatória (uso interno na API da Mistral)." },
-      { status: 400 }
-    );
   }
 
   const model =
@@ -89,34 +65,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Fila inválida para esta empresa." }, { status: 400 });
   }
 
-  let created: { id: string; version?: number };
-  try {
-    created = await mistralAgentCreate({
-      apiKey,
-      baseUrl: AI_BASE_URL,
-      name,
-      description,
-      instructions: instructions.trim() || undefined,
-      model,
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Falha ao criar agente na Mistral";
-    const payload: {
-      error: string;
-      dev?: { platformKeySource: string; chatTargetIsMistral: boolean };
-    } = { error: msg };
-    if (process.env.NODE_ENV === "development") {
-      const d = getCopilotMistralKeyDiagnostics();
-      payload.dev = { platformKeySource: d.platformKeySource, chatTargetIsMistral: d.chatTargetIsMistral };
-    }
-    return NextResponse.json(payload, { status: 502 });
-  }
-
-  const agentVersion =
-    typeof created.version === "number" && Number.isFinite(created.version)
-      ? Math.max(0, Math.floor(created.version))
-      : 0;
-
   const { data: sortRows, error: sortErr } = await admin
     .from("company_copilot_agents")
     .select("sort_order")
@@ -138,16 +86,19 @@ export async function POST(request: Request) {
     .insert({
       company_id: companyId,
       name,
-      external_agent_id: created.id,
-      agent_version: agentVersion,
+      external_agent_id: null,
+      agent_version: 0,
       prompt_extra,
       channel_id,
       queue_id,
       is_active,
       sort_order: nextSort,
+      provider_kind: "chat_completions",
+      system_instructions: instructions,
+      completion_model: model,
     })
     .select(
-      "id, name, external_agent_id, agent_version, prompt_extra, channel_id, queue_id, is_active, sort_order"
+      "id, name, external_agent_id, agent_version, prompt_extra, channel_id, queue_id, is_active, sort_order, provider_kind, system_instructions, completion_model"
     )
     .maybeSingle();
 
@@ -157,7 +108,7 @@ export async function POST(request: Request) {
         error: insErr.message,
         hint:
           insErr.message?.includes("company_copilot_agents") || insErr.code === "42P01"
-            ? "Execute a migração Supabase que cria a tabela company_copilot_agents (supabase db push ou SQL da pasta migrations)."
+            ? "Execute a migração Supabase que cria/atualiza company_copilot_agents (supabase db push ou SQL em migrations)."
             : undefined,
       },
       { status: 500 }
@@ -167,6 +118,5 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     agent: inserted,
-    mistral: { id: created.id, version: agentVersion },
   });
 }

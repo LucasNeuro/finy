@@ -15,22 +15,15 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import type { CompanyCopilotAgentRow } from "@/app/api/companies/copilot-agents/route";
+import { isPlausibleMistralAgentExternalId } from "@/lib/ai/copilot-mistral-config";
 import { queryKeys } from "@/lib/query-keys";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const COPILOT_PAGE_SIZE = 5;
 
-type CopilotAgentRow = {
-  id: string;
-  name: string;
-  external_agent_id: string;
-  agent_version: number;
-  prompt_extra: string;
-  channel_id: string | null;
-  queue_id: string | null;
-  is_active: boolean;
-};
+type CopilotAgentRow = CompanyCopilotAgentRow;
 
 type ChannelOpt = { id: string; name: string };
 type QueueOpt = { id: string; name: string };
@@ -43,6 +36,9 @@ type Draft = {
   channel_id: string | null;
   queue_id: string | null;
   is_active: boolean;
+  provider_kind: "mistral_agent" | "chat_completions";
+  system_instructions: string;
+  completion_model: string;
 };
 
 function slugFromPath(pathname: string | null): string {
@@ -60,18 +56,24 @@ function emptyDraft(): Draft {
     channel_id: null,
     queue_id: null,
     is_active: true,
+    provider_kind: "chat_completions",
+    system_instructions: "",
+    completion_model: "mistral-medium-latest",
   };
 }
 
 function rowToDraft(r: CopilotAgentRow): Draft {
   return {
     name: r.name,
-    external_agent_id: r.external_agent_id,
+    external_agent_id: r.external_agent_id ?? "",
     agent_version: r.agent_version,
     prompt_extra: r.prompt_extra,
     channel_id: r.channel_id,
     queue_id: r.queue_id,
     is_active: r.is_active,
+    provider_kind: r.provider_kind === "chat_completions" ? "chat_completions" : "mistral_agent",
+    system_instructions: r.system_instructions ?? "",
+    completion_model: r.completion_model?.trim() ? r.completion_model : "mistral-small-latest",
   };
 }
 
@@ -121,9 +123,6 @@ export default function CopilotoPage() {
 
   const [pageIndex, setPageIndex] = useState(0);
 
-  const [createDescription, setCreateDescription] = useState(
-    "Assistente interno para atendentes no painel."
-  );
   const [createInstructions, setCreateInstructions] = useState(
     "Você é um copiloto em português brasileiro. Ajude o atendente com sugestões; o cliente não lê suas respostas."
   );
@@ -143,11 +142,23 @@ export default function CopilotoPage() {
         error?: string;
         agents?: CopilotAgentRow[];
       };
+      const normalizeAgent = (a: CopilotAgentRow): CopilotAgentRow => ({
+        ...a,
+        provider_kind: a.provider_kind === "chat_completions" ? "chat_completions" : "mistral_agent",
+        external_agent_id: a.external_agent_id ?? "",
+        system_instructions: typeof a.system_instructions === "string" ? a.system_instructions : "",
+        completion_model:
+          typeof a.completion_model === "string" && a.completion_model.trim()
+            ? a.completion_model
+            : "mistral-small-latest",
+      });
       if (!agRes.ok) {
         setLoadError(typeof agJson.error === "string" ? agJson.error : "Falha ao carregar agentes.");
         setAgents([]);
       } else {
-        setAgents(Array.isArray(agJson.agents) ? agJson.agents : []);
+        setAgents(
+          Array.isArray(agJson.agents) ? agJson.agents.map((a) => normalizeAgent(a)) : []
+        );
       }
 
       if (chRes.ok) {
@@ -197,6 +208,8 @@ export default function CopilotoPage() {
       (a) =>
         a.name.toLowerCase().includes(t) ||
         a.external_agent_id.toLowerCase().includes(t) ||
+        a.completion_model.toLowerCase().includes(t) ||
+        a.system_instructions.toLowerCase().includes(t) ||
         channelLabel(a.channel_id).toLowerCase().includes(t) ||
         queueLabel(a.queue_id).toLowerCase().includes(t)
     );
@@ -234,6 +247,9 @@ export default function CopilotoPage() {
           channel_id: a.channel_id,
           queue_id: a.queue_id,
           is_active: a.is_active,
+          provider_kind: a.provider_kind,
+          system_instructions: a.system_instructions,
+          completion_model: a.completion_model,
         })),
       }),
     });
@@ -262,45 +278,40 @@ export default function CopilotoPage() {
   }
 
   async function savePanel() {
-    const agId = draft.external_agent_id.trim();
-    if (!agId.startsWith("ag_")) {
-      setPanelError("Informe um ID de agente válido (começa com ag_).");
-      return;
+    if (!editingId) return;
+    const isChat = draft.provider_kind === "chat_completions";
+    if (isChat) {
+      if (!draft.completion_model.trim()) {
+        setPanelError("Informe o modelo (ex.: mistral-small-latest).");
+        return;
+      }
+    } else {
+      const agId = draft.external_agent_id.trim();
+      if (!isPlausibleMistralAgentExternalId(agId)) {
+        setPanelError("Informe o ID do agente devolvido pela Mistral (criação via painel ou API).");
+        return;
+      }
     }
     setPanelSaving(true);
     setPanelError("");
     try {
-      let next: CopilotAgentRow[];
-      if (editingId) {
-        next = agents.map((a) =>
-          a.id === editingId
-            ? {
-                ...a,
-                name: draft.name.trim() || "Copiloto",
-                external_agent_id: agId,
-                agent_version: draft.agent_version,
-                prompt_extra: draft.prompt_extra,
-                channel_id: draft.channel_id,
-                queue_id: draft.queue_id,
-                is_active: draft.is_active,
-              }
-            : a
-        );
-      } else {
-        next = [
-          ...agents,
-          {
-            id: `local-${crypto.randomUUID()}`,
-            name: draft.name.trim() || "Copiloto",
-            external_agent_id: agId,
-            agent_version: draft.agent_version,
-            prompt_extra: draft.prompt_extra,
-            channel_id: draft.channel_id,
-            queue_id: draft.queue_id,
-            is_active: draft.is_active,
-          },
-        ];
-      }
+      const next = agents.map((a) =>
+        a.id === editingId
+          ? {
+              ...a,
+              name: draft.name.trim() || "Copiloto",
+              external_agent_id: isChat ? "" : draft.external_agent_id.trim(),
+              agent_version: draft.agent_version,
+              prompt_extra: draft.prompt_extra,
+              channel_id: draft.channel_id,
+              queue_id: draft.queue_id,
+              is_active: draft.is_active,
+              provider_kind: draft.provider_kind,
+              system_instructions: isChat ? draft.system_instructions : "",
+              completion_model: isChat ? draft.completion_model.trim() : "mistral-small-latest",
+            }
+          : a
+      );
       const ok = await persistAll(next);
       if (ok) setPanelOpen(false);
     } finally {
@@ -321,10 +332,6 @@ export default function CopilotoPage() {
       setPanelError("Informe o nome do agente.");
       return;
     }
-    if (!createDescription.trim()) {
-      setPanelError("Descrição é obrigatória para criar no provedor.");
-      return;
-    }
     setProvisioning(true);
     setPanelError("");
     try {
@@ -334,7 +341,6 @@ export default function CopilotoPage() {
         headers: { "Content-Type": "application/json", ...apiHeaders },
         body: JSON.stringify({
           name: draft.name.trim(),
-          description: createDescription.trim(),
           instructions: createInstructions.trim(),
           model: createModel.trim() || "mistral-medium-latest",
           channel_id: draft.channel_id,
@@ -358,7 +364,10 @@ export default function CopilotoPage() {
         setPanelError(full);
         return;
       }
-      setFeedback({ type: "success", message: "Agente criado no provedor e vinculado à conexão/fila." });
+      setFeedback({
+        type: "success",
+        message: "Regra criada. O copiloto usa chat/completions (prompt + modelo) neste escopo.",
+      });
       setPanelOpen(false);
       await load();
     } catch {
@@ -473,7 +482,7 @@ export default function CopilotoPage() {
           <Bot className="mx-auto h-12 w-12 text-[#94A3B8]" />
           <p className="mt-2 text-[#64748B]">Nenhum agente cadastrado.</p>
           <p className="mt-1 text-xs text-[#94A3B8]">
-            Crie pelo botão Novo agente — o id no provedor é gerado automaticamente ao vincular.
+            Crie uma regra com instruções e modelo; não é necessário criar agente no painel da Mistral.
           </p>
           <button
             type="button"
@@ -510,7 +519,7 @@ export default function CopilotoPage() {
                     Onde vale
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                    Agente (id)
+                    Modo / ID
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">
                     v
@@ -550,12 +559,21 @@ export default function CopilotoPage() {
                         </div>
                       </td>
                       <td className="max-w-[28rem] px-4 py-3 align-top">
-                        <code className="block max-w-full overflow-x-auto whitespace-nowrap text-xs font-mono text-[#334155] [scrollbar-width:thin]">
-                          {a.external_agent_id}
-                        </code>
+                        {a.provider_kind === "chat_completions" ? (
+                          <div className="flex flex-col gap-0.5 text-xs text-[#334155]">
+                            <span className="font-medium text-[#475569]">Chat (prompt)</span>
+                            <code className="block max-w-full overflow-x-auto whitespace-nowrap font-mono text-[11px] text-[#64748B] [scrollbar-width:thin]">
+                              {a.completion_model}
+                            </code>
+                          </div>
+                        ) : (
+                          <code className="block max-w-full overflow-x-auto whitespace-nowrap text-xs font-mono text-[#334155] [scrollbar-width:thin]">
+                            {a.external_agent_id || "—"}
+                          </code>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center tabular-nums text-sm text-[#475569] align-top">
-                        {a.agent_version}
+                        {a.provider_kind === "chat_completions" ? "—" : a.agent_version}
                       </td>
                       <td className="px-4 py-3 text-center align-top">
                         <span
@@ -636,6 +654,11 @@ export default function CopilotoPage() {
 
           {editingId ? (
             <>
+              <p className="text-xs text-[#64748B]">
+                {draft.provider_kind === "chat_completions"
+                  ? "Esta regra usa apenas /v1/chat/completions (prompt + modelo) com a mesma chave de IA do servidor."
+                  : "Modo legado: agente remoto na Mistral (Conversations API). Novas regras usam só chat/completions."}
+              </p>
               <label className="block text-xs font-medium text-[#475569]">
                 Nome (interno)
                 <input
@@ -644,37 +667,61 @@ export default function CopilotoPage() {
                   className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm"
                 />
               </label>
-              <label className="block text-xs font-medium text-[#475569]">
-                ID do agente no provedor
-                <input
-                  value={draft.external_agent_id}
-                  onChange={(e) => setDraft((d) => ({ ...d, external_agent_id: e.target.value }))}
-                  placeholder="ag_…"
-                  className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm font-mono"
-                />
-              </label>
-              <label className="block text-xs font-medium text-[#475569]">
-                Versão
-                <input
-                  type="number"
-                  min={0}
-                  value={draft.agent_version}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, agent_version: parseInt(e.target.value, 10) || 0 }))
-                  }
-                  className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm"
-                />
-              </label>
+              {draft.provider_kind === "chat_completions" ? (
+                <>
+                  <label className="block text-xs font-medium text-[#475569]">
+                    Instruções (system)
+                    <textarea
+                      value={draft.system_instructions}
+                      onChange={(e) => setDraft((d) => ({ ...d, system_instructions: e.target.value }))}
+                      rows={4}
+                      className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-[#475569]">
+                    Modelo
+                    <input
+                      value={draft.completion_model}
+                      onChange={(e) => setDraft((d) => ({ ...d, completion_model: e.target.value }))}
+                      placeholder="mistral-small-latest"
+                      className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm font-mono"
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="block text-xs font-medium text-[#475569]">
+                    ID do agente no provedor
+                    <input
+                      value={draft.external_agent_id}
+                      onChange={(e) => setDraft((d) => ({ ...d, external_agent_id: e.target.value }))}
+                      placeholder="ID devolvido pela Mistral"
+                      className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm font-mono"
+                    />
+                  </label>
+                  <label className="block text-xs font-medium text-[#475569]">
+                    Versão
+                    <input
+                      type="number"
+                      min={0}
+                      value={draft.agent_version}
+                      onChange={(e) =>
+                        setDraft((d) => ({ ...d, agent_version: parseInt(e.target.value, 10) || 0 }))
+                      }
+                      className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm"
+                    />
+                  </label>
+                </>
+              )}
             </>
           ) : (
             <>
               <p className="text-xs text-[#64748B]">
-                Preencha nome, descrição e instruções; escolha conexão/fila. Um clique cria o agente no provedor e já
-                grava a regra na lista — sem copiar <code className="font-mono text-[#475569]">ag_…</code> no painel
-                externo.
+                Grava uma regra com instruções e modelo. Na conversa, o copiloto chama /v1/chat/completions — sem criar
+                agente no painel da Mistral. Use a mesma chave válida que em Corrigir texto / test:mistral.
               </p>
               <label className="block text-xs font-medium text-[#475569]">
-                Nome (lista e provedor)
+                Nome (lista)
                 <input
                   value={draft.name}
                   onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
@@ -682,16 +729,7 @@ export default function CopilotoPage() {
                 />
               </label>
               <label className="block text-xs font-medium text-[#475569]">
-                Descrição (obrigatória na API do provedor)
-                <input
-                  value={createDescription}
-                  onChange={(e) => setCreateDescription(e.target.value)}
-                  placeholder="Ex.: Assistente interno para atendentes"
-                  className="mt-1 w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="block text-xs font-medium text-[#475569]">
-                Instruções do agente (system)
+                Instruções (system)
                 <textarea
                   value={createInstructions}
                   onChange={(e) => setCreateInstructions(e.target.value)}
@@ -759,7 +797,7 @@ export default function CopilotoPage() {
             Agente ativo
           </label>
           <label className="block text-xs font-medium text-[#475569]">
-            Instruções extras (primeira mensagem do fio)
+            Instruções extras (só no 1.º turno, com o contexto do ticket)
             <textarea
               value={draft.prompt_extra}
               onChange={(e) => setDraft((d) => ({ ...d, prompt_extra: e.target.value }))}
@@ -772,11 +810,11 @@ export default function CopilotoPage() {
             <button
               type="button"
               onClick={() => void provisionAndBind()}
-              disabled={provisioning || !draft.name.trim() || !createDescription.trim()}
+              disabled={provisioning || !draft.name.trim()}
               className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-clicvend-orange px-4 py-2.5 text-sm font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-50"
             >
               {provisioning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Criar no provedor e vincular
+              Salvar regra
             </button>
           ) : null}
 
