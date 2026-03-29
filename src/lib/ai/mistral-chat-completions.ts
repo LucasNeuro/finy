@@ -1,5 +1,14 @@
 import { mistralApiV1Base } from "@/lib/ai/mistral-conversations";
 
+/** Render define RENDER=true; Vercel define VERCEL=1 — útil se NODE_ENV não for "production". */
+function isDeployedServer(): boolean {
+  return (
+    process.env.NODE_ENV === "production" ||
+    process.env.RENDER === "true" ||
+    process.env.VERCEL === "1"
+  );
+}
+
 type ChatMsg = { role: "system" | "user" | "assistant"; content: string };
 
 function parseErr(data: { detail?: unknown; message?: string }, status: number): string {
@@ -42,11 +51,10 @@ export async function mistralChatCompletion(params: {
   if (!res.ok) {
     const raw = parseErr(data, res.status);
     if (res.status === 401 || res.status === 403 || /unauthorized/i.test(raw)) {
-      const prodHint =
-        process.env.NODE_ENV === "production"
-          ? "Em produção (ex.: Render), defina MISTRAL_API_KEY ou AI_API_KEY no painel Environment do serviço — não usa o .env da sua máquina. " +
-            "Se as duas variáveis existirem, AI_API_KEY tem prioridade. Guarde e faça redeploy. "
-          : "Reinicie o npm run dev após editar o .env. Teste: npm run test:mistral. ";
+      const prodHint = isDeployedServer()
+        ? "No servidor em produção (Render/Vercel): abra Environment do serviço e defina MISTRAL_API_KEY ou AI_API_KEY com a chave de console.mistral.ai — o .env do PC não vale aqui. " +
+          "Se existirem as duas variáveis, AI_API_KEY tem prioridade (remova a errada). Guarde e redeploy. "
+        : "Reinicie o npm run dev após editar o .env. Teste: npm run test:mistral. ";
       throw new Error(
         `Chave Mistral recusada (chat completions). Detalhe: ${raw}. ` +
           `Use uma chave válida de console.mistral.ai. ` +
