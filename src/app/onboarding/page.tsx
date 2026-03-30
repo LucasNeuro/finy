@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ClicVendLogo } from "@/components/ClicVendLogo";
@@ -80,6 +80,8 @@ export default function OnboardingPage() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  /** Evita reaplicar e-mail da Receita/OpenCNPJ no campo de login após o usuário limpar ou editar. */
+  const userEmailTouchedRef = useRef(false);
 
   const supabase = createClient();
 
@@ -87,13 +89,11 @@ export default function OnboardingPage() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setAuthChecked(true);
       setIsLoggedIn(!!user);
-      if (user && company.email) setUserEmail((e) => e || company.email);
+      if (user && company.email && !userEmailTouchedRef.current) {
+        setUserEmail((prev) => prev || company.email);
+      }
     });
   }, [company.email]);
-
-  useEffect(() => {
-    if (authChecked && company.email && !userEmail) setUserEmail(company.email);
-  }, [authChecked, company.email, userEmail]);
 
   const fetchCnpj = async () => {
     const digits = company.cnpj.replace(/\D/g, "");
@@ -139,11 +139,13 @@ export default function OnboardingPage() {
         municipio: data.municipio ?? "",
         opencnpj_raw: data,
       });
-      if (!userEmail) setUserEmail(data.email ?? "");
+      if (!userEmailTouchedRef.current) {
+        setUserEmail(data.email ?? "");
+      }
     } catch {
-      setError("Erro ao buscar CEP");
+      setError("Erro ao buscar CNPJ");
     } finally {
-      setLoadingCep(false);
+      setLoadingCnpj(false);
     }
   };
 
@@ -437,7 +439,10 @@ export default function OnboardingPage() {
                 <input
                   type="email"
                   value={userEmail}
-                  onChange={(e) => setUserEmail(e.target.value)}
+                  onChange={(e) => {
+                    userEmailTouchedRef.current = true;
+                    setUserEmail(e.target.value);
+                  }}
                   placeholder="seu@empresa.com.br"
                   className={inputClass}
                   autoComplete="email"

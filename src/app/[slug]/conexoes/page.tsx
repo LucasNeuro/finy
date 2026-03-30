@@ -227,27 +227,6 @@ export default function ConexoesPage() {
     }
   };
 
-  const handleConnect = async (ch: Channel) => {
-    setActionLoading(ch.id);
-    try {
-      const r = await fetch("/api/uazapi/instance/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(slug ? { "X-Company-Slug": slug } : {}) },
-        body: JSON.stringify({ channel_id: ch.id }),
-        credentials: "include",
-      });
-      const data = await r.json();
-      if (r.ok) {
-        setChannelStatuses((prev) => ({ ...prev, [ch.id]: "connecting" }));
-        if (data.connected) fetchChannels();
-      }
-    } catch {
-      // ignore
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const handleDisconnect = async (ch: Channel) => {
     setActionLoading(ch.id);
     try {
@@ -688,16 +667,6 @@ export default function ConexoesPage() {
                             </span>
                           ) : (
                             <>
-                              {status !== "connected" && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleConnect(ch)}
-                                  title="Conectar"
-                                  className="rounded-lg p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-clicvend-blue transition-colors"
-                                >
-                                  <Link2 className="h-5 w-5" />
-                                </button>
-                              )}
                               {status === "connected" && (
                                 <button
                                   type="button"
