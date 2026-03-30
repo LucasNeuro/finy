@@ -23,6 +23,8 @@ type OnboardingBody = {
   queue_names?: string[];
   user_email?: string;
   user_password?: string;
+  /** WhatsApp do proprietário (apenas dígitos) — recuperação de senha por WhatsApp. */
+  owner_whatsapp?: string;
 };
 
 function str(v: unknown): string | undefined {
@@ -31,6 +33,13 @@ function str(v: unknown): string | undefined {
 
 function toDigits(s: string): string {
   return s.replace(/\D/g, "");
+}
+
+function ownerPhoneOrNull(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const d = toDigits(v);
+  if (d.length < 10 || d.length > 15) return null;
+  return d;
 }
 
 export async function POST(request: Request) {
@@ -70,6 +79,17 @@ export async function POST(request: Request) {
       );
     }
     userId = newUser.user.id;
+  }
+
+  const ownerPhone = ownerPhoneOrNull(body?.owner_whatsapp);
+  if (!ownerPhone) {
+    return NextResponse.json(
+      {
+        error:
+          "Informe o WhatsApp do administrador (DDD + número), apenas dígitos, entre 10 e 15 caracteres. Usamos para enviar o código de recuperação de senha.",
+      },
+      { status: 400 }
+    );
   }
 
   const name = str(body?.name) ?? "";
@@ -135,13 +155,15 @@ export async function POST(request: Request) {
   }
 
   // Primeiro usuário da empresa (cadastro/onboarding) é sempre proprietário (is_owner = true).
-  const profileEmail = user ? (user.email ?? str(body?.user_email)) : str(body?.user_email);
+  const profileEmailRaw = user ? (user.email ?? str(body?.user_email)) : str(body?.user_email);
+  const profileEmail = profileEmailRaw ? profileEmailRaw.toLowerCase() : undefined;
   const { error: profileError } = await admin.from("profiles").insert({
     user_id: userId,
     company_id: company.id,
     role: "admin",
     is_owner: true,
-    ...(profileEmail && { email: profileEmail }),
+    ...(profileEmail && { email: profileEmail as string }),
+    phone: ownerPhone,
   });
   if (profileError) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });

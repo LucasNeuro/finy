@@ -35,7 +35,7 @@ export default function SuperAdminPage() {
   const [updating, setUpdating] = useState<string | null>(null);
   const [sideOverOpen, setSideOverOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  const [sideOverTab, setSideOverTab] = useState<"boletos" | "config" | "implantacao">("boletos");
+  const [sideOverTab, setSideOverTab] = useState<"boletos" | "config" | "implantacao" | "modulos">("boletos");
 
   async function fetchCompanies() {
     setLoading(true);
@@ -89,7 +89,7 @@ export default function SuperAdminPage() {
 
   function openDetail(
     c: Company,
-    tab: "boletos" | "config" | "implantacao" = "config"
+    tab: "boletos" | "config" | "implantacao" | "modulos" = "config"
   ) {
     setSelectedCompany(c);
     setSideOverTab(tab);

@@ -16,7 +16,9 @@ export async function GET() {
 
   const { data: companies, error } = await supabase
     .from("companies")
-    .select("id, name, slug, is_active, billing_status, billing_notes, billing_updated_at, billing_plan, created_at, updated_at")
+    .select(
+      "id, name, slug, is_active, billing_status, billing_notes, billing_updated_at, billing_plan, created_at, updated_at, enabled_modules, multicalculo_seguros_enabled"
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -58,6 +60,8 @@ export async function GET() {
     billing_plan: c.billing_plan ?? "basic",
     created_at: c.created_at,
     updated_at: c.updated_at,
+    enabled_modules: c.enabled_modules ?? null,
+    multicalculo_seguros_enabled: c.multicalculo_seguros_enabled === true,
     implantations_this_year_total_cents: impl.totalCents,
     implantations_this_year_count: impl.count,
     };

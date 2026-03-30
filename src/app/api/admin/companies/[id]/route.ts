@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { verifyPlatformOwnerAuth } from "@/lib/admin-auth";
+import {
+  DEFAULT_ENABLED_MODULES,
+  normalizeEnabledModules,
+} from "@/lib/company/enabled-modules";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 /**
  * PATCH /api/admin/companies/[id]
- * Atualiza empresa: is_active, billing_status, billing_notes.
+ * Atualiza empresa: is_active, billing, enabled_modules, multicalculo_seguros_enabled.
  */
 export async function PATCH(
   request: Request,
@@ -20,7 +24,14 @@ export async function PATCH(
     return NextResponse.json({ error: "ID obrigatório" }, { status: 400 });
   }
 
-  let body: { is_active?: boolean; billing_status?: string; billing_notes?: string; billing_plan?: string };
+  let body: {
+    is_active?: boolean;
+    billing_status?: string;
+    billing_notes?: string;
+    billing_plan?: string;
+    enabled_modules?: Record<string, boolean>;
+    multicalculo_seguros_enabled?: boolean;
+  };
   try {
     body = await request.json();
   } catch {
@@ -57,11 +68,33 @@ export async function PATCH(
     }
   }
 
+  if (typeof body.multicalculo_seguros_enabled === "boolean") {
+    updates.multicalculo_seguros_enabled = body.multicalculo_seguros_enabled;
+  }
+
+  if (body.enabled_modules !== undefined && body.enabled_modules !== null && typeof body.enabled_modules === "object") {
+    const { data: existing } = await supabase
+      .from("companies")
+      .select("enabled_modules")
+      .eq("id", id)
+      .single();
+    const current = normalizeEnabledModules(existing?.enabled_modules);
+    const next = { ...current };
+    const allowed = new Set(Object.keys(DEFAULT_ENABLED_MODULES));
+    for (const [k, v] of Object.entries(body.enabled_modules)) {
+      if (!allowed.has(k) || typeof v !== "boolean") continue;
+      next[k] = v;
+    }
+    updates.enabled_modules = next;
+  }
+
   const { data, error } = await supabase
     .from("companies")
     .update(updates)
     .eq("id", id)
-    .select("id, name, slug, is_active, billing_status, billing_notes, billing_updated_at, billing_plan")
+    .select(
+      "id, name, slug, is_active, billing_status, billing_notes, billing_updated_at, billing_plan, enabled_modules, multicalculo_seguros_enabled"
+    )
     .single();
 
   if (error) {

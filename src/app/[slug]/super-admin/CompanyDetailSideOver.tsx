@@ -14,7 +14,12 @@ import {
   FileDown,
   Copy,
   Settings,
+  LayoutGrid,
 } from "lucide-react";
+import {
+  COMPANY_MODULE_LABELS,
+  normalizeEnabledModules,
+} from "@/lib/company/enabled-modules";
 
 type Invoice = {
   id: string;
@@ -39,6 +44,8 @@ export type Company = {
   billing_plan: string;
   created_at: string;
   updated_at: string;
+  enabled_modules?: unknown;
+  multicalculo_seguros_enabled?: boolean;
 
   // Implantação(s) do ano atual para compor métricas do dashboard.
   implantations_this_year_total_cents?: number;
@@ -157,7 +164,11 @@ export function CompanyDetailSideOver({
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoicesError, setInvoicesError] = useState<string | null>(null);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"boletos" | "config" | "implantacao">("boletos");
+  const [activeTab, setActiveTab] = useState<"boletos" | "config" | "implantacao" | "modulos">("boletos");
+
+  const [modulesDraft, setModulesDraft] = useState<Record<string, boolean>>(() => normalizeEnabledModules(null));
+  const [multicalculoDraft, setMulticalculoDraft] = useState(false);
+  const [savingModules, setSavingModules] = useState(false);
 
   const [implantValue, setImplantValue] = useState<number>(0);
   const [implantValueDisplay, setImplantValueDisplay] = useState<string>(formatBRL(0));
@@ -186,6 +197,10 @@ export function CompanyDetailSideOver({
       setBillingStatus(company.billing_status ?? "active");
       setBillingPlan(company.billing_plan ?? "basic");
       setBillingNotes(company.billing_notes ?? "");
+      const n = normalizeEnabledModules(company.enabled_modules);
+      const colMulti = company.multicalculo_seguros_enabled === true;
+      setMulticalculoDraft(colMulti);
+      setModulesDraft({ ...n, multicalculo: colMulti });
 
       // Defaults para a cobrança de implantação (valores iniciais).
       setImplantValue(PLAN_VALUES[(company.billing_plan as string) ?? "basic"] ?? 350);
@@ -388,6 +403,38 @@ export function CompanyDetailSideOver({
     }
   }
 
+  async function handleSaveModules() {
+    if (!company) return;
+    setSavingModules(true);
+    try {
+      const enabled_modules = { ...modulesDraft, multicalculo: multicalculoDraft };
+      const res = await fetch(`/api/admin/companies/${company.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled_modules,
+          multicalculo_seguros_enabled: multicalculoDraft,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const updated = data.company as Company | undefined;
+        if (updated) {
+          onSaved?.(updated);
+        } else {
+          onSaved?.({
+            ...company,
+            enabled_modules,
+            multicalculo_seguros_enabled: multicalculoDraft,
+          });
+        }
+      }
+    } finally {
+      setSavingModules(false);
+    }
+  }
+
   async function handleToggleActive() {
     if (!company) return;
     setToggling(true);
@@ -413,6 +460,83 @@ export function CompanyDetailSideOver({
     billingStatus !== (company.billing_status ?? "active") ||
     billingPlan !== (company.billing_plan ?? "basic") ||
     (billingNotes.trim() || "") !== (company.billing_notes ?? "");
+
+  const normalizedCompanyModules = normalizeEnabledModules(company.enabled_modules);
+  const colMulti = company.multicalculo_seguros_enabled === true;
+  const baselineModules = { ...normalizedCompanyModules, multicalculo: colMulti };
+  const modulesDirty =
+    multicalculoDraft !== colMulti ||
+    COMPANY_MODULE_LABELS.some((row) => modulesDraft[row.key] !== baselineModules[row.key]) ||
+    modulesDraft.multicalculo !== baselineModules.multicalculo;
+
+  const tabModulos = (
+    <div className="space-y-5">
+      <p className="text-sm text-[#64748B]">
+        Ative ou desative módulos do menu desta empresa. Alterações valem após salvar — usuários podem precisar atualizar a
+        página.
+      </p>
+
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input
+            type="checkbox"
+            checked={multicalculoDraft}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setMulticalculoDraft(v);
+              setModulesDraft((prev) => ({ ...prev, multicalculo: v }));
+            }}
+            className="mt-1 h-4 w-4 rounded border-[#E2E8F0] text-emerald-600 focus:ring-emerald-500"
+          />
+          <span>
+            <span className="font-medium text-[#1E293B]">Seguros — Multicalculo</span>
+            <span className="mt-0.5 block text-xs text-[#64748B]">
+              Habilita a aba Multicalculo e integrações de seguros. Sincroniza com o flag <code className="rounded bg-white px-1">multicalculo_seguros_enabled</code> e o módulo <code className="rounded bg-white px-1">multicalculo</code> no JSON.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {COMPANY_MODULE_LABELS.map((row) => (
+          <label
+            key={row.key}
+            className="flex cursor-pointer items-start gap-3 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3 transition-colors hover:bg-[#F1F5F9]"
+          >
+            <input
+              type="checkbox"
+              checked={modulesDraft[row.key] !== false}
+              onChange={(e) =>
+                setModulesDraft((prev) => ({
+                  ...prev,
+                  [row.key]: e.target.checked,
+                }))
+              }
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#E2E8F0] text-emerald-600 focus:ring-emerald-500"
+            />
+            <span className="min-w-0">
+              <span className="font-medium text-[#1E293B]">{row.label}</span>
+              {row.description ? <span className="mt-0.5 block text-xs text-[#64748B]">{row.description}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {modulesDirty && (
+        <div className="flex justify-end pt-2">
+          <button
+            type="button"
+            onClick={handleSaveModules}
+            disabled={savingModules}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          >
+            {savingModules ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Salvar módulos
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   const tabBoletos = (
     <div className="space-y-4">
@@ -802,6 +926,18 @@ export function CompanyDetailSideOver({
       <div className="flex border-b border-[#E2E8F0]">
         <button
           type="button"
+          onClick={() => setActiveTab("modulos")}
+          className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+            activeTab === "modulos"
+              ? "border-b-2 border-emerald-600 text-emerald-600"
+              : "text-[#64748B] hover:text-[#1E293B]"
+          }`}
+        >
+          <LayoutGrid className="h-4 w-4" />
+          Módulos
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab("config")}
           className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
             activeTab === "config"
@@ -838,7 +974,13 @@ export function CompanyDetailSideOver({
         </button>
       </div>
       <div className="mt-4">
-        {activeTab === "boletos" ? tabBoletos : activeTab === "implantacao" ? tabImplantacao : tabConfig}
+        {activeTab === "boletos"
+          ? tabBoletos
+          : activeTab === "implantacao"
+            ? tabImplantacao
+            : activeTab === "modulos"
+              ? tabModulos
+              : tabConfig}
       </div>
     </SideOver>
   );

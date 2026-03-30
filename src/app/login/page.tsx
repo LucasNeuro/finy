@@ -85,6 +85,12 @@ function LoginForm() {
           {error && <p className="text-sm font-medium text-[#EF4444]">{error}</p>}
           {success && <p className="text-sm font-medium text-emerald-600 text-center animate-pulse">Login realizado com sucesso! Redirecionando...</p>}
 
+          <p className="text-center text-sm">
+            <Link href="/recuperar-senha" className="font-medium text-[#34B097] hover:underline">
+              Esqueci minha senha
+            </Link>
+          </p>
+
           <button
             type="submit"
             disabled={!isValid || loading || success}

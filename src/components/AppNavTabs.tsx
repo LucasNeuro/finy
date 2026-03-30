@@ -36,29 +36,22 @@ const platformOwnerFetcher = (url: string) =>
 const swrOpts = { revalidateOnFocus: false, dedupingInterval: 60_000 };
 
 const ALL_TABS = [
-  // Atendimento / Conversas
-  { href: "/conversas", label: "Conversas", icon: MessageSquare, requires: "inbox.read" as const },
-  { href: "/tickets", label: "Tickets", icon: Ticket, requires: "tickets.view" as const },
-  // Conexões
-  { href: "/conexoes", label: "Conexões", icon: Plug, requires: "channels.view" as const },
-  // Filas
-  { href: "/filas", label: "Filas", icon: Inbox, requires: "queues.view" as const },
-  // CRM Comercial
-  { href: "/crm", label: "CRM", icon: ChartLine, requires: "crm.view" as const },
-  // Contatos
-  { href: "/contatos", label: "Contatos", icon: Users, requires: "contacts.view" as const },
-  // Respostas rápidas
-  { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap, requires: "quickreplies.view" as const },
-  // Tags
-  { href: "/tags", label: "Tags", icon: Tag, requires: "tags.view" as const },
-  // Campanhas
-  { href: "/campanhas", label: "Campanhas", icon: Megaphone, requires: "campaigns.view" as const },
-  { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.view" as const },
+  { href: "/conversas", label: "Conversas", icon: MessageSquare, requires: "inbox.read" as const, module: "conversas" as const },
+  { href: "/tickets", label: "Tickets", icon: Ticket, requires: "tickets.view" as const, module: "tickets" as const },
+  { href: "/conexoes", label: "Conexões", icon: Plug, requires: "channels.view" as const, module: "conexoes" as const },
+  { href: "/filas", label: "Filas", icon: Inbox, requires: "queues.view" as const, module: "filas" as const },
+  { href: "/crm", label: "CRM", icon: ChartLine, requires: "crm.view" as const, module: "crm" as const },
+  { href: "/contatos", label: "Contatos", icon: Users, requires: "contacts.view" as const, module: "contatos" as const },
+  { href: "/respostas-rapidas", label: "Respostas Rápidas", icon: Zap, requires: "quickreplies.view" as const, module: "respostas_rapidas" as const },
+  { href: "/tags", label: "Tags", icon: Tag, requires: "tags.view" as const, module: "tags" as const },
+  { href: "/campanhas", label: "Campanhas", icon: Megaphone, requires: "campaigns.view" as const, module: "campanhas" as const },
+  { href: "/cargos-usuarios", label: "Cargos e usuários", icon: UserCog, requires: "users.view" as const, module: "cargos_usuarios" as const },
   {
     href: "/copiloto",
     label: "Copiloto",
     icon: Bot,
     requires: "copilot.manage" as const,
+    module: "copilot" as const,
     featureFlag: "copilot_module_enabled" as const,
   },
   {
@@ -66,10 +59,11 @@ const ALL_TABS = [
     label: "Multicálculo",
     icon: ShieldCheck,
     requires: "insurance_multicalculo.view" as const,
+    module: "multicalculo" as const,
     featureFlag: "multicalculo_seguros_enabled" as const,
   },
-  { href: "/perfil", label: "Perfil", icon: Settings, requires: "profile.view" as const },
-  { href: "/super-admin", label: "Super Admin", icon: Shield, requires: "platformOwner" as const },
+  { href: "/perfil", label: "Perfil", icon: Settings, requires: "profile.view" as const, module: "perfil" as const },
+  { href: "/super-admin", label: "Super Admin", icon: Shield, requires: "platformOwner" as const, module: "super_admin" as const },
 ];
 
 export function AppNavTabs() {
@@ -83,6 +77,7 @@ export function AppNavTabs() {
     permissions?: string[];
     multicalculo_seguros_enabled?: boolean;
     copilot_module_enabled?: boolean;
+    modules?: Record<string, boolean>;
   }>(base ? [PERMISSIONS_KEY, slug] : null, ([url]) => fetcher(url, slug), swrOpts);
   const { data: platformOwnerData } = useSWR<{ isPlatformOwner?: boolean }>(
     base ? PLATFORM_OWNER_KEY : null,
@@ -93,9 +88,11 @@ export function AppNavTabs() {
   const multicalculoEnabled = data?.multicalculo_seguros_enabled === true;
   const copilotModuleEnabled = data?.copilot_module_enabled !== false;
   const isPlatformOwner = platformOwnerData?.isPlatformOwner === true;
+  const modules = data?.modules ?? {};
 
   const tabs = useMemo(() => {
     return ALL_TABS.filter((t) => {
+      if ("module" in t && t.module && modules[t.module] === false) return false;
       if (!("requires" in t) || !t.requires) return true;
       if (t.requires === "platformOwner") return isPlatformOwner;
       if ("featureFlag" in t && t.featureFlag === "multicalculo_seguros_enabled" && !multicalculoEnabled) {
@@ -115,7 +112,7 @@ export function AppNavTabs() {
       }
       return permissions.includes(t.requires);
     });
-  }, [permissions, isPlatformOwner, multicalculoEnabled, copilotModuleEnabled]);
+  }, [permissions, isPlatformOwner, multicalculoEnabled, copilotModuleEnabled, modules]);
 
   if (!base) return null;
 

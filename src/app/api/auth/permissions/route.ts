@@ -2,6 +2,7 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getProfileForCompany } from "@/lib/auth/get-profile";
 import { getAllPermissionKeys } from "@/lib/auth/permissions";
 import { isCopilotEnabledInModules } from "@/lib/company/copilot-module";
+import { normalizeEnabledModules } from "@/lib/company/enabled-modules";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
@@ -21,10 +22,12 @@ export async function GET(request: Request) {
       user_id: null,
       multicalculo_seguros_enabled: false,
       copilot_module_enabled: true,
+      modules: normalizeEnabledModules(null),
     });
   }
   let multicalculoEnabled = false;
   let copilotModuleEnabled = true;
+  let modules = normalizeEnabledModules(null);
   try {
     const admin = createServiceRoleClient();
     const { data } = await admin
@@ -32,11 +35,13 @@ export async function GET(request: Request) {
       .select("multicalculo_seguros_enabled, enabled_modules")
       .eq("id", companyId)
       .single();
-    multicalculoEnabled = data?.multicalculo_seguros_enabled === true;
+    modules = normalizeEnabledModules(data?.enabled_modules);
+    multicalculoEnabled = data?.multicalculo_seguros_enabled === true && modules.multicalculo !== false;
     copilotModuleEnabled = isCopilotEnabledInModules(data?.enabled_modules);
   } catch {
     multicalculoEnabled = false;
     copilotModuleEnabled = true;
+    modules = normalizeEnabledModules(null);
   }
   const profile = await getProfileForCompany(companyId);
   if (!profile) {
@@ -47,6 +52,7 @@ export async function GET(request: Request) {
       user_id: null,
       multicalculo_seguros_enabled: multicalculoEnabled,
       copilot_module_enabled: copilotModuleEnabled,
+      modules,
     });
   }
   const isOwnerOrAdmin = profile.is_owner || (profile.role === "admin" && !profile.role_id);
@@ -58,6 +64,7 @@ export async function GET(request: Request) {
       user_id: profile.user_id,
       multicalculo_seguros_enabled: multicalculoEnabled,
       copilot_module_enabled: copilotModuleEnabled,
+      modules,
     });
   }
   const perms = profile.roles?.permissions ?? [];
@@ -70,5 +77,6 @@ export async function GET(request: Request) {
     user_id: profile.user_id,
     multicalculo_seguros_enabled: multicalculoEnabled,
     copilot_module_enabled: copilotModuleEnabled,
+    modules,
   });
 }
