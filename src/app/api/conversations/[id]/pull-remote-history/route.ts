@@ -74,7 +74,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const supabase = createServiceRoleClient();
-  const { inserted, uazapiError } = await insertHistoryMessagesFromUazapiForConversation(
+  const { inserted, uazapiError, resolvedChatJid } = await insertHistoryMessagesFromUazapiForConversation(
     supabase,
     resolved.token,
     conversationId,
@@ -86,12 +86,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, inserted: 0, error: uazapiError }, { status: 502 });
   }
 
+  if (resolvedChatJid?.trim()) {
+    const prev = waChatid.trim().toLowerCase();
+    if (resolvedChatJid.trim().toLowerCase() !== prev) {
+      await supabase
+        .from("conversations")
+        .update({
+          wa_chat_jid: resolvedChatJid.trim(),
+          external_id: resolvedChatJid.trim(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", conversationId)
+        .eq("company_id", companyId);
+    }
+  }
+
+  const jidWasCorrected =
+    !!resolvedChatJid?.trim() &&
+    resolvedChatJid.trim().toLowerCase() !== waChatid.trim().toLowerCase();
+
   if (inserted > 0) {
     await supabase
       .from("conversations")
       .update({ messages_snapshot: null, updated_at: new Date().toISOString() })
       .eq("id", conversationId)
       .eq("company_id", companyId);
+  }
+
+  if (inserted > 0 || jidWasCorrected) {
     await invalidateConversationDetail(conversationId, companyId);
     await invalidateConversationList(companyId);
   }
@@ -99,6 +121,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   return NextResponse.json({
     ok: true,
     inserted,
+    jid_corrected: jidWasCorrected || undefined,
     warning: uazapiError && inserted > 0 ? uazapiError : undefined,
   });
 }

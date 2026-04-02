@@ -1875,16 +1875,33 @@ export default function ConversaThreadPage({
         inserted?: number;
         error?: string;
         warning?: string;
+        jid_corrected?: boolean;
       };
       if (!pullRes.ok) {
         setError(pullData?.error ?? "Não foi possível buscar histórico no WhatsApp.");
         return;
       }
       if (!pullData.inserted || pullData.inserted <= 0) {
+        if (pullData.jid_corrected) {
+          const detailRes = await fetch(`/api/conversations/${id}?skip_cache=1`, {
+            credentials: "include",
+            headers: apiHeaders,
+          });
+          if (detailRes.ok) {
+            const detail = (await detailRes.json()) as ConversationDetail;
+            queryClient.setQueryData(queryKeys.conversation(id), detail);
+          } else {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
+          }
+          setError(
+            "O identificador do chat foi alinhado com a UAZAPI. Clique de novo no relógio para importar as mensagens."
+          );
+          return;
+        }
         setError(
           pullData?.warning
             ? String(pullData.warning)
-            : "Nenhuma mensagem nova importada. A UAZAPI só traz o que já está salvo no servidor dela (não copia automaticamente todo o histórico só do celular). Confira Conexões e o webhook com evento history; mensagens muito antigas podem ter sido removidas pela política da UAZ. Você pode clicar de novo no relógio."
+            : "Nenhuma mensagem nova importada. A UAZAPI só traz o que já está salvo no servidor dela (não copia automaticamente todo o histórico só do celular). Confira Conexões, UAZAPI_BASE_URL no servidor e o webhook com evento history; mensagens muito antigas podem ter sido removidas pela política da UAZ. Você pode clicar de novo no relógio."
         );
         return;
       }

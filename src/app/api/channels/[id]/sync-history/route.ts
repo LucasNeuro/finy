@@ -359,8 +359,18 @@ export async function POST(
         limit: MESSAGES_PAGE_SIZE,
         offset: msgOffset,
       });
+      const rawNext =
+        msgOk && msgData && typeof msgData.nextOffset === "number" && Number.isFinite(msgData.nextOffset)
+          ? msgData.nextOffset
+          : undefined;
       const messages = (msgOk && msgData?.messages ? msgData.messages : []) as UazapiMessage[];
-      if (messages.length === 0) break;
+      if (messages.length === 0) {
+        if (typeof rawNext === "number" && rawNext > msgOffset) {
+          msgOffset = rawNext;
+          continue;
+        }
+        break;
+      }
 
       for (const msg of messages) {
         if (chatMessagesInserted >= targetMessagesPerChat) break;
@@ -419,7 +429,13 @@ export async function POST(
       await flushMessages();
 
       if (chatMessagesInserted >= targetMessagesPerChat) break;
-      msgOffset += MESSAGES_PAGE_SIZE;
+      if (typeof rawNext === "number" && rawNext > msgOffset) {
+        msgOffset = rawNext;
+      } else if (msgData?.hasMore === false) {
+        break;
+      } else {
+        msgOffset += MESSAGES_PAGE_SIZE;
+      }
     }
 
     await flushMessages();

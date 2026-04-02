@@ -1345,22 +1345,33 @@ export type UazapiChat = {
 
 export async function findChats(
   token: string,
-  opts?: { limit?: number; offset?: number; sort?: string; wa_isGroup?: boolean }
-): Promise<{ ok: boolean; data?: { chats?: UazapiChat[] }; error?: string }> {
+  opts?: {
+    limit?: number;
+    offset?: number;
+    sort?: string;
+    wa_isGroup?: boolean;
+    /** Filtro UAZ (LIKE); útil para achar o wa_chatid canônico quando o JID no banco difere (@lid vs @s.whatsapp.net). */
+    wa_chatid?: string;
+  }
+): Promise<{ ok: boolean; data?: { chats?: UazapiChat[] }; error?: string; status?: number }> {
+  const body: Record<string, unknown> = {
+    limit: opts?.limit ?? 50,
+    offset: opts?.offset ?? 0,
+    sort: opts?.sort ?? "-wa_lastMsgTimestamp",
+  };
+  if (opts?.wa_isGroup !== undefined) body.wa_isGroup = opts.wa_isGroup;
+  if (opts?.wa_chatid?.trim()) body.wa_chatid = opts.wa_chatid.trim();
+
   const { data, ok, error, status } = await uazapiFetch<{ chats?: UazapiChat[] }>("/chat/find", {
     method: "POST",
     token,
-    body: {
-      limit: opts?.limit ?? 50,
-      offset: opts?.offset ?? 0,
-      sort: opts?.sort ?? "-wa_lastMsgTimestamp",
-      ...(opts?.wa_isGroup !== undefined && { wa_isGroup: opts.wa_isGroup }),
-    },
+    body,
   });
   return {
     ok,
     data,
     error: ok ? undefined : (error ?? `HTTP ${status}`),
+    status,
   };
 }
 
@@ -1378,12 +1389,26 @@ export type UazapiMessage = {
   [key: string]: unknown;
 };
 
+export type FindMessagesResponse = {
+  messages?: UazapiMessage[];
+  /** Alguns servidores UAZ enviam offset sugerido para a próxima página. */
+  nextOffset?: number;
+  hasMore?: boolean;
+  returnedMessages?: number;
+  [key: string]: unknown;
+};
+
 export async function findMessages(
   token: string,
   chatid: string,
   opts?: { limit?: number; offset?: number }
-): Promise<{ ok: boolean; data?: { messages?: UazapiMessage[] }; error?: string }> {
-  const { data, ok, error, status } = await uazapiFetch<{ messages?: UazapiMessage[] }>("/message/find", {
+): Promise<{
+  ok: boolean;
+  data?: FindMessagesResponse;
+  error?: string;
+  status: number;
+}> {
+  const { data, ok, error, status } = await uazapiFetch<FindMessagesResponse>("/message/find", {
     method: "POST",
     token,
     body: {
@@ -1396,6 +1421,7 @@ export async function findMessages(
     ok,
     data,
     error: ok ? undefined : (error ?? `HTTP ${status}`),
+    status,
   };
 }
 

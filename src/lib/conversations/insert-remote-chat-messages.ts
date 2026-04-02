@@ -1,7 +1,40 @@
-import { findMessages, type UazapiMessage } from "@/lib/uazapi/client";
+import { findChats, findMessages, type UazapiMessage } from "@/lib/uazapi/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uazapiMessageBelongsToChat } from "@/lib/conversations/uazapi-message-belongs-to-chat";
-import { normalizeWhatsAppJid, toCanonicalJid } from "@/lib/phone-canonical";
+import { normalizeWhatsAppJid, phoneDigitsOnly, toCanonicalJid } from "@/lib/phone-canonical";
+
+/**
+ * O JID salvo na conversa (@s.whatsapp.net) pode divergir do que a UAZ usa (@lid ou outro).
+ * Resolve o wa_chatid que realmente responde em /message/find.
+ */
+async function resolveChatidForUazMessageFind(token: string, canonicalWa: string): Promise<string> {
+  const probe = await findMessages(token, canonicalWa, { limit: 1, offset: 0 });
+  if (probe.ok && (probe.data?.messages?.length ?? 0) > 0) return canonicalWa;
+
+  if (canonicalWa.toLowerCase().endsWith("@g.us")) return canonicalWa;
+  if (!probe.ok && probe.status === 401) return canonicalWa;
+
+  const digits = phoneDigitsOnly(canonicalWa);
+  if (digits.length < 10) return canonicalWa;
+
+  const chatsRes = await findChats(token, {
+    limit: 40,
+    offset: 0,
+    sort: "-wa_lastMsgTimestamp",
+    wa_chatid: digits,
+  });
+  if (!chatsRes.ok || !chatsRes.data?.chats?.length) return canonicalWa;
+
+  const target = canonicalWa.toLowerCase();
+  for (const c of chatsRes.data.chats) {
+    const wc = String(c.wa_chatid ?? "").trim();
+    if (!wc) continue;
+    if (wc.toLowerCase() === target) return wc;
+    if (phoneDigitsOnly(wc) === digits) return wc;
+  }
+  const first = String(chatsRes.data.chats[0]?.wa_chatid ?? "").trim();
+  return first || canonicalWa;
+}
 
 const MESSAGES_PAGE_SIZE = 100;
 const MESSAGE_INSERT_BATCH = 40;
@@ -29,7 +62,7 @@ export async function insertHistoryMessagesFromUazapiForConversation(
   conversationId: string,
   waChatid: string,
   maxNewMessages: number
-): Promise<{ inserted: number; uazapiError?: string }> {
+): Promise<{ inserted: number; uazapiError?: string; resolvedChatJid?: string }> {
   const rawWa = waChatid.trim();
   if (!rawWa) return { inserted: 0, uazapiError: "JID do chat inválido" };
   const isGroup = rawWa.toLowerCase().endsWith("@g.us");
@@ -39,6 +72,8 @@ export async function insertHistoryMessagesFromUazapiForConversation(
       ? normalizeWhatsAppJid(rawWa)
       : toCanonicalJid(rawWa, false);
   if (!wa) return { inserted: 0, uazapiError: "JID do chat inválido" };
+
+  const chatidForFind = await resolveChatidForUazMessageFind(token, wa);
 
   const cap = Math.min(Math.max(maxNewMessages, 1), 1000);
 
@@ -78,7 +113,7 @@ export async function insertHistoryMessagesFromUazapiForConversation(
   let pagesFetched = 0;
   while (chatMessagesInserted < cap && pagesFetched < MAX_MESSAGE_FIND_PAGES) {
     pagesFetched += 1;
-    const { data: msgData, ok: msgOk, error: pageErr } = await findMessages(token, wa, {
+    const { data: msgData, ok: msgOk, error: pageErr } = await findMessages(token, chatidForFind, {
       limit: MESSAGES_PAGE_SIZE,
       offset: msgOffset,
     });
@@ -86,12 +121,24 @@ export async function insertHistoryMessagesFromUazapiForConversation(
       return { inserted: chatMessagesInserted, uazapiError: pageErr ?? "Falha ao buscar mensagens na UAZAPI" };
     }
 
+    const rawNext =
+      msgData && typeof msgData.nextOffset === "number" && Number.isFinite(msgData.nextOffset)
+        ? msgData.nextOffset
+        : undefined;
+    const explicitNoMore = msgData?.hasMore === false;
+
     const messages = (msgData?.messages ?? []) as UazapiMessage[];
-    if (messages.length === 0) break;
+    if (messages.length === 0) {
+      if (typeof rawNext === "number" && rawNext > msgOffset) {
+        msgOffset = rawNext;
+        continue;
+      }
+      break;
+    }
 
     for (const msg of messages) {
       if (chatMessagesInserted >= cap) break;
-      if (!uazapiMessageBelongsToChat(msg, wa)) continue;
+      if (!uazapiMessageBelongsToChat(msg, chatidForFind) && !uazapiMessageBelongsToChat(msg, wa)) continue;
 
       const fromMe = msg.fromMe === true;
       const bodyText = (msg.body ?? msg.text ?? "").toString().trim();
@@ -144,7 +191,14 @@ export async function insertHistoryMessagesFromUazapiForConversation(
     await flushMessages();
 
     if (chatMessagesInserted >= cap) break;
-    msgOffset += MESSAGES_PAGE_SIZE;
+
+    if (typeof rawNext === "number" && rawNext > msgOffset) {
+      msgOffset = rawNext;
+    } else if (explicitNoMore) {
+      break;
+    } else {
+      msgOffset += MESSAGES_PAGE_SIZE;
+    }
   }
 
   await flushMessages();
@@ -159,5 +213,8 @@ export async function insertHistoryMessagesFromUazapiForConversation(
       .eq("id", conversationId);
   }
 
-  return { inserted: chatMessagesInserted };
+  const resolvedChatJid =
+    chatidForFind.trim().toLowerCase() !== wa.trim().toLowerCase() ? chatidForFind : undefined;
+
+  return { inserted: chatMessagesInserted, resolvedChatJid };
 }
