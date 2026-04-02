@@ -1,9 +1,12 @@
 import { findMessages, type UazapiMessage } from "@/lib/uazapi/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uazapiMessageBelongsToChat } from "@/lib/conversations/uazapi-message-belongs-to-chat";
+import { normalizeWhatsAppJid, toCanonicalJid } from "@/lib/phone-canonical";
 
 const MESSAGES_PAGE_SIZE = 100;
 const MESSAGE_INSERT_BATCH = 40;
+/** Limite de páginas /message/find por conversa (evita loop se a API repetir resultados). */
+const MAX_MESSAGE_FIND_PAGES = 80;
 
 const mediaTypeMap: Record<string, string> = {
   image: "image",
@@ -27,7 +30,14 @@ export async function insertHistoryMessagesFromUazapiForConversation(
   waChatid: string,
   maxNewMessages: number
 ): Promise<{ inserted: number; uazapiError?: string }> {
-  const wa = waChatid.trim();
+  const rawWa = waChatid.trim();
+  if (!rawWa) return { inserted: 0, uazapiError: "JID do chat inválido" };
+  const isGroup = rawWa.toLowerCase().endsWith("@g.us");
+  const wa = isGroup
+    ? toCanonicalJid(rawWa, true)
+    : rawWa.includes("@")
+      ? normalizeWhatsAppJid(rawWa)
+      : toCanonicalJid(rawWa, false);
   if (!wa) return { inserted: 0, uazapiError: "JID do chat inválido" };
 
   const cap = Math.min(Math.max(maxNewMessages, 1), 1000);
@@ -65,7 +75,9 @@ export async function insertHistoryMessagesFromUazapiForConversation(
     }
   };
 
-  while (chatMessagesInserted < cap) {
+  let pagesFetched = 0;
+  while (chatMessagesInserted < cap && pagesFetched < MAX_MESSAGE_FIND_PAGES) {
+    pagesFetched += 1;
     const { data: msgData, ok: msgOk, error: pageErr } = await findMessages(token, wa, {
       limit: MESSAGES_PAGE_SIZE,
       offset: msgOffset,
@@ -132,7 +144,6 @@ export async function insertHistoryMessagesFromUazapiForConversation(
     await flushMessages();
 
     if (chatMessagesInserted >= cap) break;
-    if (messages.length < MESSAGES_PAGE_SIZE) break;
     msgOffset += MESSAGES_PAGE_SIZE;
   }
 

@@ -309,11 +309,13 @@ export default function ConexoesPage() {
         warning?: string;
         hint?: string;
         code?: string;
+        info?: string;
       };
       if (r.ok) {
         removeChannelFromUi(ch);
         const extra = errData.warning ? ` ${errData.warning}` : "";
-        setFeedback({ type: "success", message: `Conexão "${ch.name}" removida.${extra}` });
+        const infoExtra = errData.info ? ` ${errData.info}` : "";
+        setFeedback({ type: "success", message: `Conexão "${ch.name}" removida.${extra}${infoExtra}` });
       } else {
         const detail =
           typeof errData.error === "string" && errData.error.trim()

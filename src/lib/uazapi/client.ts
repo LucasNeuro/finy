@@ -74,10 +74,15 @@ async function uazapiFetch<T = unknown>(
     }
   }
   if (!res.ok) {
-    const errData = data as { error?: string } | undefined;
-    const errMsg =
-      (errData && typeof errData.error === "string" ? errData.error : text) ||
-      res.statusText;
+    const errData = data as { error?: string; message?: string } | undefined;
+    const fromJson =
+      (errData && typeof errData.error === "string" && errData.error.trim()
+        ? errData.error.trim()
+        : undefined) ??
+      (errData && typeof errData.message === "string" && errData.message.trim()
+        ? errData.message.trim()
+        : undefined);
+    const errMsg = fromJson || text || res.statusText;
     return { ok: false, status: res.status, error: errMsg, data };
   }
   return { ok: true, status: res.status, data };
@@ -363,11 +368,28 @@ export async function editQuickReply(
 }
 
 /**
+ * Resposta da UAZ indicando que a instância já não existe — DELETE pode ser tratado como sucesso (idempotente).
+ */
+export function isUazInstanceAlreadyAbsent(error: string | undefined, status: number): boolean {
+  if (status === 404) return true;
+  const e = (error ?? "").toLowerCase();
+  if (!e) return false;
+  return (
+    e.includes("channel not found") ||
+    e.includes("instance not found") ||
+    e.includes("instância não encontrada") ||
+    e.includes("instancia não encontrada") ||
+    e.includes("instancia nao encontrada")
+  );
+}
+
+/**
  * Deleta a instância da UAZAPI (remove do servidor).
  */
 export async function deleteInstance(token: string): Promise<{
   ok: boolean;
   error?: string;
+  status?: number;
 }> {
   const { ok, error, status } = await uazapiFetch("/instance", {
     method: "DELETE",
@@ -376,6 +398,7 @@ export async function deleteInstance(token: string): Promise<{
   return {
     ok,
     error: ok ? undefined : (error ?? `HTTP ${status}`),
+    status: ok ? undefined : status,
   };
 }
 

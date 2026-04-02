@@ -1,6 +1,6 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requireAdmin } from "@/lib/auth/get-profile";
-import { deleteInstance } from "@/lib/uazapi/client";
+import { deleteInstance, isUazInstanceAlreadyAbsent } from "@/lib/uazapi/client";
 import { invalidateUazInstanceWebhookCache } from "@/lib/redis/uaz-instance-webhook-cache";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -64,7 +64,10 @@ export async function DELETE(request: Request) {
   }
 
   const result = await deleteInstance(token);
-  if (!result.ok) {
+  const st = result.status ?? 0;
+  const absent = !result.ok && isUazInstanceAlreadyAbsent(result.error, st);
+
+  if (!result.ok && !absent) {
     return NextResponse.json(
       {
         error: result.error ?? "Failed to delete instance",
@@ -80,7 +83,10 @@ export async function DELETE(request: Request) {
   await supabase.from("channels").delete().eq("id", channelId).eq("company_id", companyId);
 
   return NextResponse.json({
-    response: "Instance deleted",
+    response: absent ? "Instance already absent on UAZAPI; channel removed locally" : "Instance deleted",
     channel_id: channelId,
+    ...(absent && {
+      info: "A UAZAPI respondeu que a instância já não existia (token antigo ou excluída no painel). O registro foi removido no Smart Vendas.",
+    }),
   });
 }

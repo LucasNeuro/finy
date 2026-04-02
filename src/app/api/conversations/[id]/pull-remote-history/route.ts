@@ -40,7 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const rawMax = Number(body.max_messages);
   const maxMessages =
-    Number.isFinite(rawMax) && rawMax > 0 ? Math.min(Math.floor(rawMax), 500) : 200;
+    Number.isFinite(rawMax) && rawMax > 0 ? Math.min(Math.floor(rawMax), 1000) : 500;
 
   const supabaseUser = await createClient();
   const { data: conversation, error: convError } = await supabaseUser

@@ -1826,7 +1826,7 @@ export default function ConversaThreadPage({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json", ...apiHeaders },
-          body: JSON.stringify({ max_messages: 200 }),
+          body: JSON.stringify({ max_messages: 1000 }),
         });
         const pullData = (await pullRes.json().catch(() => ({}))) as { inserted?: number; error?: string };
         if (!pullRes.ok) {
@@ -1858,7 +1858,7 @@ export default function ConversaThreadPage({
     }
   }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders, queryClient]);
 
-  /** Importa até 200 mensagens recentes da UAZAPI quando o histórico local está vazio (ou sob demanda pelo ícone no header). */
+  /** Importa mensagens da UAZAPI (/message/find paginado) até 1000 por clique no ícone de histórico ou botão vazio. */
   const pullWhatsAppHistory = useCallback(async () => {
     const id = resolved?.id;
     if (!id || pullingRemoteHistory) return;
@@ -1869,7 +1869,7 @@ export default function ConversaThreadPage({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ max_messages: 200 }),
+        body: JSON.stringify({ max_messages: 1000 }),
       });
       const pullData = (await pullRes.json().catch(() => ({}))) as {
         inserted?: number;
@@ -1884,7 +1884,7 @@ export default function ConversaThreadPage({
         setError(
           pullData?.warning
             ? String(pullData.warning)
-            : "Nenhuma mensagem nova encontrada na conexão (ou chat vazio no aparelho)."
+            : "Nenhuma mensagem nova importada. A UAZAPI só traz o que já está salvo no servidor dela (não copia automaticamente todo o histórico só do celular). Confira Conexões e o webhook com evento history; mensagens muito antigas podem ter sido removidas pela política da UAZ. Você pode clicar de novo no relógio."
         );
         return;
       }
@@ -2696,8 +2696,8 @@ export default function ConversaThreadPage({
               onClick={() => void pullWhatsAppHistory()}
               disabled={pullingRemoteHistory}
               className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] disabled:opacity-50"
-              aria-label="Importar mensagens recentes do WhatsApp"
-              title="Importar até 200 mensagens recentes do WhatsApp"
+              aria-label="Importar mensagens do WhatsApp (servidor UAZ)"
+              title="Busca mensagens deste chat na UAZAPI, grava no sistema e atualiza a tela (até 1000 por clique, várias páginas)."
             >
               {pullingRemoteHistory ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <History className="h-4 w-4" aria-hidden />}
             </button>
@@ -2910,7 +2910,7 @@ export default function ConversaThreadPage({
                       )}
                     </button>
                     <p className="max-w-sm text-xs text-[#94A3B8]">
-                      Traz até as 200 mensagens mais recentes deste chat pela conexão do canal.
+                      Traz mensagens deste chat que a UAZAPI já tem no servidor (até 1000 por vez). O que só existir no celular depende da sincronização/histórico da UAZ.
                     </p>
                   </div>
                 )}

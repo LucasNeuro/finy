@@ -197,6 +197,7 @@ export async function POST(
   const MAX_MESSAGES_PER_INSTANCE = 15_000;
   const MESSAGES_PAGE_SIZE = 100;
   const MESSAGE_INSERT_BATCH = 40;
+  const MAX_MESSAGE_FIND_PAGES_PER_CHAT = 80;
   let conversationsCreated = 0;
   let messagesInserted = 0;
 
@@ -327,6 +328,7 @@ export async function POST(
     let msgOffset = 0;
     let latestSentAt = 0;
     let chatMessagesInserted = 0;
+    let msgPagesForChat = 0;
     const pendingInserts: Record<string, unknown>[] = [];
 
     const flushMessages = async () => {
@@ -347,7 +349,12 @@ export async function POST(
       }
     };
 
-    while (messagesInserted < MAX_MESSAGES_PER_INSTANCE && chatMessagesInserted < targetMessagesPerChat) {
+    while (
+      messagesInserted < MAX_MESSAGES_PER_INSTANCE &&
+      chatMessagesInserted < targetMessagesPerChat &&
+      msgPagesForChat < MAX_MESSAGE_FIND_PAGES_PER_CHAT
+    ) {
+      msgPagesForChat += 1;
       const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, {
         limit: MESSAGES_PAGE_SIZE,
         offset: msgOffset,
@@ -412,7 +419,6 @@ export async function POST(
       await flushMessages();
 
       if (chatMessagesInserted >= targetMessagesPerChat) break;
-      if (messages.length < MESSAGES_PAGE_SIZE) break;
       msgOffset += MESSAGES_PAGE_SIZE;
     }
 
