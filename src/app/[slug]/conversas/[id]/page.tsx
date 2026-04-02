@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot, History } from "lucide-react";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
 import { SideOver } from "@/components/SideOver";
@@ -1858,6 +1858,51 @@ export default function ConversaThreadPage({
     }
   }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders, queryClient]);
 
+  /** Importa até 200 mensagens recentes da UAZAPI quando o histórico local está vazio (ou sob demanda pelo ícone no header). */
+  const pullWhatsAppHistory = useCallback(async () => {
+    const id = resolved?.id;
+    if (!id || pullingRemoteHistory) return;
+    setPullingRemoteHistory(true);
+    setError(null);
+    try {
+      const pullRes = await fetch(`/api/conversations/${id}/pull-remote-history`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...apiHeaders },
+        body: JSON.stringify({ max_messages: 200 }),
+      });
+      const pullData = (await pullRes.json().catch(() => ({}))) as {
+        inserted?: number;
+        error?: string;
+        warning?: string;
+      };
+      if (!pullRes.ok) {
+        setError(pullData?.error ?? "Não foi possível buscar histórico no WhatsApp.");
+        return;
+      }
+      if (!pullData.inserted || pullData.inserted <= 0) {
+        setError(
+          pullData?.warning
+            ? String(pullData.warning)
+            : "Nenhuma mensagem nova encontrada na conexão (ou chat vazio no aparelho)."
+        );
+        return;
+      }
+      const detailRes = await fetch(`/api/conversations/${id}?skip_cache=1`, {
+        credentials: "include",
+        headers: apiHeaders,
+      });
+      if (detailRes.ok) {
+        const detail = (await detailRes.json()) as ConversationDetail;
+        queryClient.setQueryData(queryKeys.conversation(id), detail);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
+      }
+    } finally {
+      setPullingRemoteHistory(false);
+    }
+  }, [resolved?.id, pullingRemoteHistory, apiHeaders, queryClient]);
+
   // Não atribuir ao abrir: atribuição só pelo botão "+" no minicard da lista.
 
   // Foto do contato vem do banco (contact_avatar_url). Só chamamos chat-details quando o usuário
@@ -2645,6 +2690,18 @@ export default function ConversaThreadPage({
           >
             <Search className="h-4 w-4" />
           </button>
+          {conv?.channel_id && !isLoading && (
+            <button
+              type="button"
+              onClick={() => void pullWhatsAppHistory()}
+              disabled={pullingRemoteHistory}
+              className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] disabled:opacity-50"
+              aria-label="Importar mensagens recentes do WhatsApp"
+              title="Importar até 200 mensagens recentes do WhatsApp"
+            >
+              {pullingRemoteHistory ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <History className="h-4 w-4" aria-hidden />}
+            </button>
+          )}
           {canTransfer && (
             <button
               type="button"
@@ -2831,6 +2888,32 @@ export default function ConversaThreadPage({
               </>
             ) : (
               <>
+                {mergedMessages.length === 0 && conv?.channel_id && (
+                  <div className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center">
+                    <p className="text-sm text-[#64748B]">Nenhuma mensagem carregada ainda.</p>
+                    <button
+                      type="button"
+                      onClick={() => void pullWhatsAppHistory()}
+                      disabled={pullingRemoteHistory}
+                      className="inline-flex items-center gap-2 rounded-lg border border-clicvend-orange/40 bg-white px-4 py-2 text-sm font-medium text-clicvend-orange shadow-sm hover:bg-clicvend-orange/5 disabled:opacity-50"
+                    >
+                      {pullingRemoteHistory ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                          Buscando no WhatsApp…
+                        </>
+                      ) : (
+                        <>
+                          <History className="h-4 w-4" aria-hidden />
+                          Importar mensagens do WhatsApp
+                        </>
+                      )}
+                    </button>
+                    <p className="max-w-sm text-xs text-[#94A3B8]">
+                      Traz até as 200 mensagens mais recentes deste chat pela conexão do canal.
+                    </p>
+                  </div>
+                )}
                 {(conv?.messages?.length ?? 0) > 0 && hasMoreOlderMessages && (
                   <div className="flex flex-col items-center gap-1 py-2">
                     <button
