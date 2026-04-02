@@ -3,6 +3,42 @@ import { getInstanceStatus } from "@/lib/uazapi/client";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+function flagTrue(v: unknown): boolean {
+  return v === true || v === "true" || v === 1 || v === "1";
+}
+
+/** UAZAPI pode devolver connected/loggedIn, state open, ou só jid quando a sessão está ativa. */
+function inferUazConnected(
+  statusObj: Record<string, unknown> | undefined,
+  instanceObj: Record<string, unknown> | undefined,
+  jid: unknown
+): { connected: boolean; loggedIn: boolean } {
+  if (flagTrue(statusObj?.connected) || flagTrue(statusObj?.loggedIn) || flagTrue(instanceObj?.connected)) {
+    return { connected: true, loggedIn: true };
+  }
+  const state = String(statusObj?.state ?? instanceObj?.state ?? statusObj?.status ?? instanceObj?.status ?? "")
+    .toLowerCase()
+    .trim();
+  if (["open", "connected", "loggedin", "authenticated", "online"].includes(state)) {
+    return { connected: true, loggedIn: true };
+  }
+  const phone = asRecord(statusObj?.phone) ?? asRecord(instanceObj?.phone);
+  if (phone && (flagTrue(phone.wa_connected) || flagTrue(phone.connected))) {
+    return { connected: true, loggedIn: true };
+  }
+  if (typeof jid === "string" && jid.includes("@s.whatsapp.net")) {
+    return { connected: true, loggedIn: true };
+  }
+  if (typeof jid === "string" && jid.includes("@lid")) {
+    return { connected: true, loggedIn: true };
+  }
+  return { connected: false, loggedIn: false };
+}
+
 /**
  * GET /api/uazapi/instance/status?token=xxx
  * GET /api/uazapi/instance/status?channel_id=xxx
@@ -45,20 +81,25 @@ export async function GET(request: Request) {
     );
   }
 
-  // Número WhatsApp conectado (jid ex: 5511999999999@s.whatsapp.net)
-  const jid = result.status?.jid;
+  // Número WhatsApp conectado (jid ex: 5511999999999@s.whatsapp.net ou @lid)
+  const statusRec = asRecord(result.status) ?? {};
+  const instanceRec = asRecord(result.instance) ?? {};
+  const jidRaw = statusRec.jid ?? instanceRec.jid;
+  const jidStr = typeof jidRaw === "string" ? jidRaw.trim() : "";
   const connectedNumber =
-    typeof jid === "string" && jid
-      ? jid.replace(/@s\.whatsapp\.net$/i, "").trim() || undefined
+    jidStr && jidStr.toLowerCase().endsWith("@s.whatsapp.net")
+      ? jidStr.replace(/@s\.whatsapp\.net$/i, "").trim() || undefined
       : undefined;
+
+  const { connected, loggedIn } = inferUazConnected(statusRec, instanceRec, jidRaw);
 
   return NextResponse.json({
     instance: result.instance,
     status: result.status,
     qrcode: result.instance?.qrcode,
     paircode: result.instance?.paircode,
-    connected: result.status?.connected ?? !!connectedNumber,
-    loggedIn: result.status?.loggedIn ?? !!connectedNumber,
+    connected: connected || Boolean(connectedNumber),
+    loggedIn: loggedIn || Boolean(connectedNumber),
     connectedNumber: connectedNumber || undefined,
   });
 }

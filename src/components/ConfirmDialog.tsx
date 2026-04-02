@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 
-export type ConfirmVariant = "primary" | "danger";
+export type ConfirmVariant = "primary" | "danger" | "warning";
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -62,7 +62,9 @@ export function ConfirmDialog({
   const confirmClass =
     variant === "danger"
       ? "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500"
-      : "bg-clicvend-orange text-white hover:bg-clicvend-orange-dark focus:ring-clicvend-orange";
+      : variant === "warning"
+        ? "bg-amber-600 text-white hover:bg-amber-700 focus:ring-amber-500"
+        : "bg-clicvend-orange text-white hover:bg-clicvend-orange-dark focus:ring-clicvend-orange";
 
   return (
     <div
@@ -82,9 +84,11 @@ export function ConfirmDialog({
       <div className="relative w-full max-w-md rounded-xl bg-white shadow-xl border border-[#E2E8F0] overflow-hidden">
         <div className="p-6">
           <div className="flex gap-4">
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-              variant === "danger" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"
-            }`}>
+            <div
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                variant === "danger" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-700"
+              }`}
+            >
               <AlertTriangle className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">

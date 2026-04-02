@@ -1,14 +1,11 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requireAdmin } from "@/lib/auth/get-profile";
-import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { deleteInstance } from "@/lib/uazapi/client";
+import { invalidateUazInstanceWebhookCache } from "@/lib/redis/uaz-instance-webhook-cache";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
-/**
- * DELETE /api/uazapi/instance/delete?channel_id=xxx
- * Remove a instância da UAZAPI e o canal do banco.
- */
+
 export async function DELETE(request: Request) {
   const companyId = await getCompanyIdFromRequest(request);
   if (!companyId) {
@@ -25,20 +22,61 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "channel_id is required" }, { status: 400 });
   }
 
-  const resolved = await getChannelToken(channelId, companyId);
-  if (!resolved) {
+  const forceLocal =
+    searchParams.get("force_local") === "1" ||
+    searchParams.get("force_local")?.toLowerCase() === "true";
+
+  const supabase = await createClient();
+  const { data: row, error: rowErr } = await supabase
+    .from("channels")
+    .select("id, uazapi_instance_id, uazapi_token_encrypted")
+    .eq("id", channelId)
+    .eq("company_id", companyId)
+    .single();
+
+  if (rowErr || !row) {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const result = await deleteInstance(resolved.token);
+  const instanceIdForCache = String((row as { uazapi_instance_id?: string }).uazapi_instance_id ?? "").trim();
+  const token = (row as { uazapi_token_encrypted?: string | null }).uazapi_token_encrypted?.trim() ?? "";
+
+  if (forceLocal) {
+    if (instanceIdForCache) await invalidateUazInstanceWebhookCache(instanceIdForCache);
+    await supabase.from("channels").delete().eq("id", channelId).eq("company_id", companyId);
+    return NextResponse.json({
+      response: "Channel removed locally",
+      channel_id: channelId,
+      warning:
+        "Registro removido só no Smart Vendas. Se a instância ainda existir na UAZAPI, apague-a no painel da UAZ para encerrar o número de lá.",
+    });
+  }
+
+  if (!token) {
+    return NextResponse.json(
+      {
+        error:
+          "Este canal não tem token da UAZAPI. Use Remover só do sistema ou atualize o token. Você também pode chamar esta rota com ?force_local=1 (apenas admin).",
+        code: "missing_token",
+      },
+      { status: 400 }
+    );
+  }
+
+  const result = await deleteInstance(token);
   if (!result.ok) {
     return NextResponse.json(
-      { error: result.error ?? "Failed to delete instance" },
+      {
+        error: result.error ?? "Failed to delete instance",
+        code: "uazapi_delete_failed",
+        hint: "Se o token está inválido, use a opção para remover só o registro no Smart Vendas.",
+      },
       { status: 502 }
     );
   }
 
-  const supabase = await createClient();
+  if (instanceIdForCache) await invalidateUazInstanceWebhookCache(instanceIdForCache);
+
   await supabase.from("channels").delete().eq("id", channelId).eq("company_id", companyId);
 
   return NextResponse.json({

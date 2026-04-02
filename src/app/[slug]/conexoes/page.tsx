@@ -70,6 +70,8 @@ export default function ConexoesPage() {
   const [channelStats, setChannelStats] = useState<Record<string, { conversations_count: number; messages_count: number; open_conversations: number }>>({});
 
   const [deleteConfirmChannel, setDeleteConfirmChannel] = useState<Channel | null>(null);
+  /** Após falha ao apagar na UAZ: segundo passo para apagar só o registro em `channels`. */
+  const [deleteLocalOnlyChannel, setDeleteLocalOnlyChannel] = useState<Channel | null>(null);
   const [selectedChannelIds, setSelectedChannelIds] = useState<Set<string>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [bulkConfirm, setBulkConfirm] = useState<{ type: "disconnect" | "delete"; ids: string[] } | null>(null);
@@ -272,31 +274,94 @@ export default function ConexoesPage() {
     setDeleteConfirmChannel(ch);
   };
 
+  const removeChannelFromUi = (ch: Channel) => {
+    setChannels((prev) => prev.filter((c) => c.id !== ch.id));
+    setChannelStatuses((prev) => {
+      const next = { ...prev };
+      delete next[ch.id];
+      return next;
+    });
+    setChannelConnectedNumbers((prev) => {
+      const next = { ...prev };
+      delete next[ch.id];
+      return next;
+    });
+    setChannelStatusErrors((prev) => {
+      const next = { ...prev };
+      delete next[ch.id];
+      return next;
+    });
+  };
+
   const doDeleteChannel = async () => {
     const ch = deleteConfirmChannel;
     if (!ch) return;
     setDeleteConfirmChannel(null);
     setActionLoading(ch.id);
     try {
-      const r = await fetch(`/api/uazapi/instance/delete?channel_id=${encodeURIComponent(ch.id)}`, { method: "DELETE", credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined });
+      const r = await fetch(`/api/uazapi/instance/delete?channel_id=${encodeURIComponent(ch.id)}`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: slug ? { "X-Company-Slug": slug } : undefined,
+      });
+      const errData = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        warning?: string;
+        hint?: string;
+        code?: string;
+      };
       if (r.ok) {
-        setChannels((prev) => prev.filter((c) => c.id !== ch.id));
-        setChannelStatuses((prev) => {
-          const next = { ...prev };
-          delete next[ch.id];
-          return next;
-        });
-        setChannelConnectedNumbers((prev) => {
-          const next = { ...prev };
-          delete next[ch.id];
-          return next;
-        });
-        setFeedback({ type: "success", message: `Conexão "${ch.name}" excluída com sucesso.` });
+        removeChannelFromUi(ch);
+        const extra = errData.warning ? ` ${errData.warning}` : "";
+        setFeedback({ type: "success", message: `Conexão "${ch.name}" removida.${extra}` });
       } else {
-        setFeedback({ type: "error", message: "Não foi possível excluir a conexão." });
+        const detail =
+          typeof errData.error === "string" && errData.error.trim()
+            ? errData.error.trim()
+            : `HTTP ${r.status}`;
+        const hint = typeof errData.hint === "string" ? ` ${errData.hint}` : "";
+        setFeedback({
+          type: "error",
+          message: `Não foi possível excluir na UAZAPI: ${detail}.${hint}`,
+        });
+        setDeleteLocalOnlyChannel(ch);
       }
     } catch {
       setFeedback({ type: "error", message: "Erro de rede ao excluir conexão." });
+      setDeleteLocalOnlyChannel(ch);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const doDeleteChannelLocalOnly = async () => {
+    const ch = deleteLocalOnlyChannel;
+    if (!ch) return;
+    setDeleteLocalOnlyChannel(null);
+    setActionLoading(ch.id);
+    try {
+      const r = await fetch(
+        `/api/uazapi/instance/delete?channel_id=${encodeURIComponent(ch.id)}&force_local=1`,
+        { method: "DELETE", credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined }
+      );
+      const data = (await r.json().catch(() => ({}))) as { error?: string; warning?: string };
+      if (r.ok) {
+        removeChannelFromUi(ch);
+        setFeedback({
+          type: "success",
+          message:
+            typeof data.warning === "string"
+              ? data.warning
+              : `Registro "${ch.name}" removido do sistema. Verifique o painel UAZAPI se precisar apagar a instância lá.`,
+        });
+      } else {
+        setFeedback({
+          type: "error",
+          message: data.error ?? "Não foi possível remover o registro local.",
+        });
+      }
+    } catch {
+      setFeedback({ type: "error", message: "Erro de rede ao remover conexão." });
     } finally {
       setActionLoading(null);
     }
@@ -809,12 +874,27 @@ export default function ConexoesPage() {
         open={!!deleteConfirmChannel}
         onClose={() => setDeleteConfirmChannel(null)}
         title="Excluir conexão"
-        message={deleteConfirmChannel ? `Excluir a conexão "${deleteConfirmChannel.name}"? Esta ação não pode ser desfeita.` : ""}
+        message={deleteConfirmChannel ? `Excluir a conexão "${deleteConfirmChannel.name}"? Primeiro tentamos apagar na UAZAPI; em seguida o registro é removido do banco.` : ""}
         confirmLabel="Excluir"
         cancelLabel="Cancelar"
         variant="danger"
         onConfirm={doDeleteChannel}
         onCancel={() => setDeleteConfirmChannel(null)}
+      />
+      <ConfirmDialog
+        open={!!deleteLocalOnlyChannel}
+        onClose={() => setDeleteLocalOnlyChannel(null)}
+        title="Remover só do Smart Vendas?"
+        message={
+          deleteLocalOnlyChannel
+            ? `A UAZAPI não aceitou excluir a instância (token inválido ou instância já removida lá). Deseja remover apenas o registro da conexão "${deleteLocalOnlyChannel.name}" no sistema? As mensagens deixam de ser roteadas para esta empresa; se a instância ainda existir na UAZ, apague-a manualmente no painel da UAZ.`
+            : ""
+        }
+        confirmLabel="Remover do sistema"
+        cancelLabel="Cancelar"
+        variant="warning"
+        onConfirm={doDeleteChannelLocalOnly}
+        onCancel={() => setDeleteLocalOnlyChannel(null)}
       />
       <ConfirmDialog
         open={!!bulkConfirm}

@@ -9,6 +9,7 @@ import {
   toCanonicalJid,
 } from "@/lib/phone-canonical";
 import { getRedisClient } from "@/lib/redis/client";
+import { isUazInstanceWebhookRedisCacheEnabled } from "@/lib/redis/uaz-instance-webhook-cache";
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { isCommercialQueue, getCommercialContactOwner } from "@/lib/queue/commercial";
 import { getNextAgentForQueue } from "@/lib/queue/round-robin";
@@ -517,8 +518,10 @@ async function processOneMessage(
     type CachedChannel = { id: string; company_id: string; queue_id: string | null };
     let channel: CachedChannel | null = null;
 
-    // Cache Redis aqui só para o fluxo de atendimento (evitar hit no banco a cada mensagem). Telas de Conexões/canais não usam Redis.
-    const redis = await getRedisClient();
+    // Cache opcional: mapeia instance → { channel id, company_id, queue_id }. Não guarda token nem status.
+    // Desligar com USE_REDIS_UAZ_INSTANCE_CACHE=false para ler canal só no Supabase (menos “camadas” de estado).
+    const useInstanceCache = isUazInstanceWebhookRedisCacheEnabled();
+    const redis = useInstanceCache ? await getRedisClient() : null;
     const redisNs = (process.env.REDIS_NAMESPACE?.trim() || process.env.NODE_ENV || "dev").replace(/\s+/g, "_");
     const cacheKeyV2 = `${redisNs}:uaz:instance:v2:${instanceId}`;
     const cacheKeyLegacy = `uaz:instance:${instanceId}`;
@@ -530,6 +533,22 @@ async function processOneMessage(
           channel = JSON.parse(cached) as CachedChannel;
         } catch {
           channel = null;
+        }
+      }
+    }
+
+    if (channel) {
+      const { data: stillThere } = await supabase
+        .from("channels")
+        .select("id")
+        .eq("id", channel.id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (!stillThere?.id) {
+        channel = null;
+        if (redis) {
+          await redis.del(cacheKeyV2).catch(() => {});
+          await redis.del(cacheKeyLegacy).catch(() => {});
         }
       }
     }
