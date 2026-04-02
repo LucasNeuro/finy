@@ -26,6 +26,13 @@ function codesEqual(storedHex: string, attemptHex: string): boolean {
  * Body: { email, code (6 dígitos), new_password }
  */
 export async function POST(request: Request) {
+  if (process.env.ENABLE_OWNER_WHATSAPP_PASSWORD_RESET !== "true") {
+    return NextResponse.json(
+      { error: "Recuperação de senha por WhatsApp está temporariamente desativada." },
+      { status: 503 }
+    );
+  }
+
   let body: { email?: string; code?: string; new_password?: string };
   try {
     body = await request.json();

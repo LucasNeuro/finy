@@ -23,7 +23,7 @@ type OnboardingBody = {
   queue_names?: string[];
   user_email?: string;
   user_password?: string;
-  /** WhatsApp do proprietário (apenas dígitos) — recuperação de senha por WhatsApp. */
+  /** Opcional: WhatsApp do proprietário (apenas dígitos); reservado para fluxos futuros. */
   owner_whatsapp?: string;
 };
 
@@ -82,15 +82,6 @@ export async function POST(request: Request) {
   }
 
   const ownerPhone = ownerPhoneOrNull(body?.owner_whatsapp);
-  if (!ownerPhone) {
-    return NextResponse.json(
-      {
-        error:
-          "Informe o WhatsApp do administrador (DDD + número), apenas dígitos, entre 10 e 15 caracteres. Usamos para enviar o código de recuperação de senha.",
-      },
-      { status: 400 }
-    );
-  }
 
   const name = str(body?.name) ?? "";
   const slugRaw = str(body?.slug);
@@ -163,7 +154,7 @@ export async function POST(request: Request) {
     role: "admin",
     is_owner: true,
     ...(profileEmail && { email: profileEmail as string }),
-    phone: ownerPhone,
+    ...(ownerPhone && { phone: ownerPhone }),
   });
   if (profileError) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });

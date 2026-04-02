@@ -21,6 +21,13 @@ function str(v: unknown): string | undefined {
  * Requer FINY_PASSWORD_RESET_UAZAPI_TOKEN (instância UAZ da plataforma para disparo).
  */
 export async function POST(request: Request) {
+  if (process.env.ENABLE_OWNER_WHATSAPP_PASSWORD_RESET !== "true") {
+    return NextResponse.json(
+      { error: "Recuperação de senha por WhatsApp está temporariamente desativada." },
+      { status: 503 }
+    );
+  }
+
   let body: { email?: string };
   try {
     body = await request.json();

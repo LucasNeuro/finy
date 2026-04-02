@@ -70,7 +70,6 @@ export default function OnboardingPage() {
   const [userEmail, setUserEmail] = useState("");
   const [userPassword, setUserPassword] = useState("");
   const [userPasswordConfirm, setUserPasswordConfirm] = useState("");
-  const [ownerWhatsapp, setOwnerWhatsapp] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -214,7 +213,6 @@ export default function OnboardingPage() {
           municipio: company.municipio || undefined,
           opencnpj_raw: company.opencnpj_raw,
           queue_names: sectors.filter((s) => s.trim()).length ? sectors.filter((s) => s.trim()) : ["Padrão"],
-          owner_whatsapp: ownerWhatsapp.replace(/\D/g, ""),
           ...(!isLoggedIn && {
             user_email: userEmail.trim(),
             user_password: userPassword,
@@ -451,21 +449,6 @@ export default function OnboardingPage() {
                 />
                 <p className="mt-1 text-xs text-[#64748B]">Este será o acesso do administrador da empresa.</p>
               </div>
-              <div className="col-span-2 md:col-span-4">
-                <label className={labelClass}>WhatsApp do administrador *</label>
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  value={ownerWhatsapp}
-                  onChange={(e) => setOwnerWhatsapp(e.target.value.replace(/[^\d+()\s-]/g, ""))}
-                  placeholder="DDD + número (ex.: 11 98765-4321)"
-                  className={inputClass}
-                  autoComplete="tel"
-                />
-                <p className="mt-1 text-xs text-[#64748B]">
-                  Usamos este número para enviar o código se você esquecer a senha. Deve ser o WhatsApp que você usa no celular.
-                </p>
-              </div>
               {!isLoggedIn && (
                 <>
                   <div className="col-span-2">
@@ -647,13 +630,6 @@ export default function OnboardingPage() {
               <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
                 <h3 className="text-xs font-bold uppercase tracking-wide text-[#64748B] mb-3">Acesso</h3>
                 <p><span className="text-[#64748B]">E-mail (admin):</span> {userEmail || "—"}</p>
-                <p>
-                  <span className="text-[#64748B]">WhatsApp (recuperação de senha):</span>{" "}
-                  {(() => {
-                    const d = ownerWhatsapp.replace(/\D/g, "");
-                    return d.length >= 10 ? d : "—";
-                  })()}
-                </p>
               </div>
               {(company.logradouro || company.cep || company.municipio) && (
                 <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-4">
@@ -695,10 +671,6 @@ export default function OnboardingPage() {
                   (step === 1 && (!company.name.trim() || !company.slug.trim())) ||
                   (step === 2 &&
                     (!userEmail.trim() ||
-                      (() => {
-                        const d = ownerWhatsapp.replace(/\D/g, "");
-                        return d.length < 10 || d.length > 15;
-                      })() ||
                       (!isLoggedIn && (userPassword.length < 6 || userPassword !== userPasswordConfirm))))
                 }
                 className={btnPrimary + " sm:ml-auto"}
