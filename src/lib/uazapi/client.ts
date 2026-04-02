@@ -1251,6 +1251,15 @@ export async function getWebhook(token: string): Promise<{
   };
 }
 
+/** Eventos padrão do webhook UAZ: history permite sincronizar histórico no servidor UAZ (e o botão relógio /message/find enxergar mensagens antigas). */
+export const UAZ_WEBHOOK_DEFAULT_EVENTS = [
+  "messages",
+  "connection",
+  "history",
+  "messages_update",
+  "chats",
+] as const;
+
 /**
  * Configura webhook da instância (recomendado: excludeMessages: ["wasSentByApi"]).
  */
@@ -1264,7 +1273,7 @@ export async function setWebhook(
     token,
     body: {
       url: url.replace(/\/$/, ""),
-      events: options.events ?? ["messages", "connection"],
+      events: options.events ?? [...UAZ_WEBHOOK_DEFAULT_EVENTS],
       excludeMessages: options.excludeMessages ?? ["wasSentByApi"],
     },
   });
@@ -1298,7 +1307,7 @@ export async function setGlobalWebhook(
     admin: true,
     body: {
       url: webhookUrl.replace(/\/$/, ""),
-      events: options.events ?? ["messages", "connection"],
+      events: options.events ?? [...UAZ_WEBHOOK_DEFAULT_EVENTS],
       excludeMessages: options.excludeMessages ?? ["wasSentByApi"],
     },
   });

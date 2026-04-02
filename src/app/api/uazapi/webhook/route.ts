@@ -1,5 +1,5 @@
 import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
-import { setWebhook } from "@/lib/uazapi/client";
+import { setWebhook, UAZ_WEBHOOK_DEFAULT_EVENTS } from "@/lib/uazapi/client";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
   const webhookUrl = `${protocol}://${host}/api/webhook/uazapi`;
 
   const result = await setWebhook(token, webhookUrl, {
-    events: ["messages", "connection"],
+    events: [...UAZ_WEBHOOK_DEFAULT_EVENTS],
     excludeMessages: ["wasSentByApi"],
   });
 

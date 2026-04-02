@@ -1,5 +1,5 @@
 import { getCompanyIdFromCookie } from "@/lib/auth/get-company";
-import { setGlobalWebhook, getGlobalWebhook } from "@/lib/uazapi/client";
+import { setGlobalWebhook, getGlobalWebhook, UAZ_WEBHOOK_DEFAULT_EVENTS } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
 /**
@@ -35,6 +35,9 @@ export async function GET() {
  * - Senão usa {NEXT_PUBLIC_APP_URL ou origin}/api/webhook/uazapi (Next.js).
  *
  * Configure uma vez; novas conexões não precisam chamar setWebhook por instância.
+ *
+ * Eventos incluem `history` para a UAZ enviar histórico ao webhook (necessário para mensagens antigas
+ * aparecerem no servidor UAZ e no botão de importar do chat).
  */
 export async function POST(request: Request) {
   const companyId = await getCompanyIdFromCookie();
@@ -58,7 +61,7 @@ export async function POST(request: Request) {
   }
 
   const result = await setGlobalWebhook(webhookUrl, {
-    events: ["messages", "connection"],
+    events: [...UAZ_WEBHOOK_DEFAULT_EVENTS],
     excludeMessages: ["wasSentByApi"],
   });
 
