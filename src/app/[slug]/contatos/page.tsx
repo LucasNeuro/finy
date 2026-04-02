@@ -12,7 +12,7 @@ import {
   flexRender,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload, Megaphone, ShieldCheck, History, Send } from "lucide-react";
+import { RefreshCw, Users, MessageCircle, Loader2, Plug, Eye, Trash2, ChevronLeft, ChevronRight, Ban, Unlock, X, User, Settings, Copy, Plus, Upload, Megaphone, ShieldCheck, Send } from "lucide-react";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SideOver } from "@/components/SideOver";
@@ -707,8 +707,6 @@ export default function ContatosPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState<number>(0);
-  /** Importação de chats + mensagens antigas (sync-history), por canal. */
-  const [syncingHistoryChannelId, setSyncingHistoryChannelId] = useState<string | null>(null);
   const [clearingAgenda, setClearingAgenda] = useState<string | null>(null);
   const [filterChannelId, setFilterChannelId] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"contacts" | "groups" | "blocked" | "communities">("contacts");
@@ -1078,51 +1076,6 @@ export default function ContatosPage() {
     } finally {
       setSyncing(null);
       setSyncProgress(0);
-    }
-  };
-
-  /** Conversas + mensagens antigas na uazapi; cria contatos 1:1 e conversas que ainda não existem (create_missing). */
-  const handleSyncHistory = async (channelId: string) => {
-    if (syncingHistoryChannelId !== null || syncing !== null || clearingAgenda !== null) return;
-    const label = channels.find((c) => c.id === channelId)?.name ?? channelId.slice(0, 8);
-    if (
-      !window.confirm(
-        `Importar conversas antigas da conexão "${label}"?\n\n` +
-          "• Lista todos os chats que a uazapi retornar (várias páginas).\n" +
-          "• Até 200 mensagens por conversa no chat.\n" +
-          "• Contatos individuais entram na lista de contatos junto com a conversa.\n\n" +
-          "Pode levar alguns minutos. Depois confira em Conversas."
-      )
-    ) {
-      return;
-    }
-    setSyncingHistoryChannelId(channelId);
-    try {
-      const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/sync-history`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...(apiHeaders ?? {}) },
-        body: JSON.stringify({ create_missing: true, messages_per_chat: 200 }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setAlertMessage((data as { error?: string })?.error ?? "Falha ao importar histórico de conversas");
-        return;
-      }
-      const d = data as {
-        chats_processed?: number;
-        conversations_created?: number;
-        messages_processed?: number;
-      };
-      setAlertMessage(
-        `Histórico importado (${label}): ${d.chats_processed ?? 0} chat(s), ${d.conversations_created ?? 0} conversa(s) nova(s), ${d.messages_processed ?? 0} mensagem(ns). Abra Conversas para ver.`
-      );
-      await Promise.all([mutateContacts(), mutateGroups(), mutateCommunities()]);
-      fetchChannels();
-    } catch {
-      setAlertMessage("Erro de rede ao importar histórico");
-    } finally {
-      setSyncingHistoryChannelId(null);
     }
   };
 
@@ -2016,7 +1969,7 @@ export default function ContatosPage() {
                 key={ch.id}
                 type="button"
                 onClick={() => handleSync(ch.id)}
-                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
+                disabled={syncing !== null || clearingAgenda !== null}
                 className="relative shrink-0 max-w-[120px] overflow-hidden rounded-md bg-clicvend-orange px-2 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
                 title={
                   syncing === ch.id
@@ -2042,25 +1995,6 @@ export default function ContatosPage() {
                 )}
               </button>
             ))}
-            {channels.map((ch) => (
-              <button
-                key={`hist-${ch.id}`}
-                type="button"
-                onClick={() => handleSyncHistory(ch.id)}
-                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
-                className="relative shrink-0 max-w-[128px] overflow-hidden rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                title={`Importar conversas antigas (até 200 mensagens por chat) e atualizar contatos 1:1: ${ch.name}`}
-              >
-                <span className="relative z-10 flex items-center justify-center gap-1 truncate">
-                  {syncingHistoryChannelId === ch.id ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                  ) : (
-                    <History className="h-3.5 w-3.5 shrink-0 text-slate-600" />
-                  )}
-                  <span className="truncate">{ch.name}</span>
-                </span>
-              </button>
-            ))}
             {filterChannelId && (
               <button
                 type="button"
@@ -2075,7 +2009,7 @@ export default function ContatosPage() {
                     },
                   });
                 }}
-                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
+                disabled={syncing !== null || clearingAgenda !== null}
                 className="shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60"
                 title="Limpar lista desta conexão e sincronizar de novo (remove duplicatas)"
               >
@@ -2086,7 +2020,7 @@ export default function ContatosPage() {
               <button
                 type="button"
                 onClick={() => handleClearLocalContacts(filterChannelId)}
-                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
+                disabled={syncing !== null || clearingAgenda !== null}
                 className="shrink-0 rounded-md border border-red-300 bg-red-50 px-2 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-60"
                 title="Limpa apenas os contatos locais desta conexão (não apaga agenda do telefone)."
               >
@@ -2097,7 +2031,7 @@ export default function ContatosPage() {
               <button
                 type="button"
                 onClick={() => handleClearPhoneAgenda(filterChannelId)}
-                disabled={syncing !== null || syncingHistoryChannelId !== null || clearingAgenda !== null}
+                disabled={syncing !== null || clearingAgenda !== null}
                 className="shrink-0 rounded-md border border-[#7F1D1D] bg-[#FEE2E2] px-2 py-1.5 text-xs font-medium text-[#7F1D1D] hover:bg-[#FECACA] disabled:opacity-60"
                 title="Ação destrutiva: apaga contatos da agenda no telefone conectado."
               >

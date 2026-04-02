@@ -1,6 +1,6 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getProfileForCompany } from "@/lib/auth/get-profile";
-import { getAllPermissionKeys } from "@/lib/auth/permissions";
+import { getAllPermissionKeys, PERMISSIONS } from "@/lib/auth/permissions";
 import { isCopilotEnabledInModules } from "@/lib/company/copilot-module";
 import { normalizeEnabledModules } from "@/lib/company/enabled-modules";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -57,8 +57,11 @@ export async function GET(request: Request) {
   }
   const isOwnerOrAdmin = profile.is_owner || (profile.role === "admin" && !profile.role_id);
   if (isOwnerOrAdmin) {
+    const ownerAdminPerms = getAllPermissionKeys().filter(
+      (k) => k !== PERMISSIONS.inbox.mute_new_message_sound
+    );
     return NextResponse.json({
-      permissions: getAllPermissionKeys(),
+      permissions: ownerAdminPerms,
       inbox_see_all: true,
       company_id: companyId,
       user_id: profile.user_id,

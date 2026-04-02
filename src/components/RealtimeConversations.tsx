@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
@@ -88,6 +88,10 @@ export function RealtimeConversations() {
 
   const companyId = (permissionsData as { company_id?: string } | undefined)?.company_id ?? null;
   const currentUserId = (permissionsData as { user_id?: string } | undefined)?.user_id ?? null;
+  const muteIncomingSound = useMemo(() => {
+    const list = (permissionsData as { permissions?: string[] } | undefined)?.permissions;
+    return Array.isArray(list) && list.includes("inbox.mute_new_message_sound");
+  }, [permissionsData]);
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
 
   // Desbloqueia áudio no primeiro clique + pede permissão de notificação uma vez (sem UI no sino).
@@ -166,7 +170,7 @@ export function RealtimeConversations() {
           const isUnassignedNew = assignedTo == null || assignedTo === "";
 
           if (isRecentMessage && isOtherConversation && (isMyConversation || isUnassignedNew)) {
-            playNewMessageSound();
+            if (!muteIncomingSound) playNewMessageSound();
             if (id && slug && getDesktopNotifyEnabled()) {
               const displayName =
                 (newRow?.customer_name && String(newRow.customer_name).trim()) ||
@@ -223,7 +227,7 @@ export function RealtimeConversations() {
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [slug, companyId, currentUserId, queryClient, doInvalidate, openConversationId]);
+  }, [slug, companyId, currentUserId, queryClient, doInvalidate, openConversationId, muteIncomingSound]);
 
   return null;
 }

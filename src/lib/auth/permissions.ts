@@ -18,6 +18,8 @@ export const PERMISSIONS = {
     show_new_notifications: "inbox.show_new_notifications",
     /** Ocultar sino de notificações de novos no header (quando marcado, o sino não aparece) */
     hide_new_notifications: "inbox.hide_new_notifications",
+    /** Sem beep/arquivo de som ao chegar mensagem nova (mantém sino, lista e notificação nativa do navegador, se ativas) */
+    mute_new_message_sound: "inbox.mute_new_message_sound",
     /** Ações no módulo Tickets: ver todos, reatribuir, mudar status (visão Kanban gerencial) */
     manage_tickets: "inbox.manage_tickets",
   },
@@ -83,6 +85,7 @@ const ALL_PERMISSION_KEYS: PermissionKey[] = [
   PERMISSIONS.inbox.export,
   PERMISSIONS.inbox.show_new_notifications,
   PERMISSIONS.inbox.hide_new_notifications,
+  PERMISSIONS.inbox.mute_new_message_sound,
   PERMISSIONS.inbox.manage_tickets,
   PERMISSIONS.tickets.view,
   PERMISSIONS.channels.view,
@@ -132,6 +135,7 @@ export const PERMISSION_GROUPS: { label: string; keys: PermissionKey[] }[] = [
       PERMISSIONS.inbox.export,
       PERMISSIONS.inbox.show_new_notifications,
       PERMISSIONS.inbox.hide_new_notifications,
+      PERMISSIONS.inbox.mute_new_message_sound,
     ],
   },
   {
@@ -204,6 +208,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   [PERMISSIONS.inbox.export]: "Ação: exportar conversas",
   [PERMISSIONS.inbox.show_new_notifications]: "Ver notificações de novos (sino no header)",
   [PERMISSIONS.inbox.hide_new_notifications]: "Ocultar notificações de novos (sino no header)",
+  [PERMISSIONS.inbox.mute_new_message_sound]: "Silenciar apenas o som (beep) de mensagem nova",
   [PERMISSIONS.inbox.manage_tickets]: "Ações no Tickets: ver todos os tickets, reatribuir, mudar status (arrastar, modal)",
   [PERMISSIONS.tickets.view]: "Acesso: ver módulo Tickets (quadro Kanban por status)",
   [PERMISSIONS.channels.view]: "Acesso: ver Conexões",

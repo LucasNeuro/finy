@@ -63,6 +63,8 @@ export default function ConexoesPage() {
   const [configChannelName, setConfigChannelName] = useState("");
   const [configChannelQueueId, setConfigChannelQueueId] = useState<string | null>(null);
   const [channelStatuses, setChannelStatuses] = useState<Record<string, ChannelStatus>>({});
+  /** Motivo quando status é "error" (ex.: token inválido) — exibido no tooltip. */
+  const [channelStatusErrors, setChannelStatusErrors] = useState<Record<string, string>>({});
   const [channelConnectedNumbers, setChannelConnectedNumbers] = useState<Record<string, string>>({});
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [channelStats, setChannelStats] = useState<Record<string, { conversations_count: number; messages_count: number; open_conversations: number }>>({});
@@ -88,6 +90,11 @@ export default function ConexoesPage() {
       const r = await fetch(`/api/uazapi/instance/status?channel_id=${encodeURIComponent(chId)}`, { credentials: "include", headers: slug ? { "X-Company-Slug": slug } : undefined });
       const data = await r.json();
       if (r.ok) {
+        setChannelStatusErrors((prev) => {
+          const next = { ...prev };
+          delete next[chId];
+          return next;
+        });
         const s: ChannelStatus = data.connected || data.loggedIn ? "connected" : data.qrcode || data.paircode ? "connecting" : "disconnected";
         setChannelStatuses((prev) => ({ ...prev, [chId]: s }));
         if (data.connectedNumber) {
@@ -101,9 +108,18 @@ export default function ConexoesPage() {
         }
         return data;
       } else {
+        const errMsg =
+          typeof data?.error === "string" && data.error.trim()
+            ? data.error.trim()
+            : `Não foi possível ler o status (HTTP ${r.status}).`;
+        setChannelStatusErrors((prev) => ({ ...prev, [chId]: errMsg }));
         setChannelStatuses((prev) => ({ ...prev, [chId]: "error" }));
       }
     } catch {
+      setChannelStatusErrors((prev) => ({
+        ...prev,
+        [chId]: "Falha de rede ao consultar a UAZAPI.",
+      }));
       setChannelStatuses((prev) => ({ ...prev, [chId]: "error" }));
     }
     return null;
@@ -643,7 +659,16 @@ export default function ConexoesPage() {
                         {ch.queue_id ? (queues.find((q) => q.id === ch.queue_id)?.name ?? "—") : "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(status)}`}>
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(status)}`}
+                          title={
+                            status === "error" && channelStatusErrors[ch.id]
+                              ? channelStatusErrors[ch.id]
+                              : status === "disconnected"
+                                ? "Sessão WhatsApp não está ativa nesta instância. Abra Configurar e conecte de novo (QR)."
+                                : undefined
+                          }
+                        >
                           {status === "connected" ? (
                             <Wifi className="h-3.5 w-3.5" />
                           ) : status === "connecting" ? (

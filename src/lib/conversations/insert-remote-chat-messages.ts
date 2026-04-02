@@ -1,5 +1,6 @@
 import { findMessages, type UazapiMessage } from "@/lib/uazapi/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { uazapiMessageBelongsToChat } from "@/lib/conversations/uazapi-message-belongs-to-chat";
 
 const MESSAGES_PAGE_SIZE = 100;
 const MESSAGE_INSERT_BATCH = 40;
@@ -78,6 +79,7 @@ export async function insertHistoryMessagesFromUazapiForConversation(
 
     for (const msg of messages) {
       if (chatMessagesInserted >= cap) break;
+      if (!uazapiMessageBelongsToChat(msg, wa)) continue;
 
       const fromMe = msg.fromMe === true;
       const bodyText = (msg.body ?? msg.text ?? "").toString().trim();

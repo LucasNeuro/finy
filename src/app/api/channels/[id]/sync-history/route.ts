@@ -7,6 +7,7 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { toCanonicalJid } from "@/lib/phone-canonical";
 import { findChats, findMessages, type UazapiChat, type UazapiMessage } from "@/lib/uazapi/client";
+import { uazapiMessageBelongsToChat } from "@/lib/conversations/uazapi-message-belongs-to-chat";
 import { NextResponse } from "next/server";
 
 /** Vercel / plataformas com limite — sync pode levar vários minutos. */
@@ -356,6 +357,7 @@ export async function POST(
 
       for (const msg of messages) {
         if (chatMessagesInserted >= targetMessagesPerChat) break;
+        if (!uazapiMessageBelongsToChat(msg, waChatid)) continue;
         const fromMe = msg.fromMe === true;
         const bodyText = (msg.body ?? msg.text ?? "").toString().trim();
         const rawType = (msg.type ?? msg.mediaType ?? "") as string;
