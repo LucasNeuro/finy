@@ -13,7 +13,9 @@ import { isUazInstanceWebhookRedisCacheEnabled } from "@/lib/redis/uaz-instance-
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { isCommercialQueue, getCommercialContactOwner } from "@/lib/queue/commercial";
 import { getNextAgentForQueue } from "@/lib/queue/round-robin";
+import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
 import { parseLooseTimeToMs, UAZ_MIN_MESSAGE_TIME_MS } from "@/lib/uazapi/message-timestamp";
+import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { NextResponse } from "next/server";
 
 /**
@@ -172,26 +174,33 @@ function triggerSyncHistoryForInstance(instanceId: string): void {
   if (now - last < SYNC_DEBOUNCE_MS) return;
   lastSyncTriggerByInstance.set(instanceId, now);
 
-  const baseUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
-  const secret = process.env.INTERNAL_SYNC_SECRET;
-  if (!baseUrl || !secret) return;
-
   void (async () => {
     try {
       const supabase = createServiceRoleClient();
       const { data: ch } = await supabase
         .from("channels")
-        .select("id")
+        .select("id, company_id")
         .eq("uazapi_instance_id", instanceId)
         .eq("is_active", true)
         .single();
-      const channelId = (ch as { id?: string } | null)?.id;
-      if (!channelId) return;
+      const row = ch as { id?: string; company_id?: string } | null;
+      const channelId = row?.id;
+      const companyId = row?.company_id;
+      if (!channelId || !companyId) return;
 
-      const url = `${baseUrl.replace(/\/$/, "")}/api/channels/${channelId}/sync-history`;
-      await fetch(url, {
-        method: "POST",
-        headers: { "X-Internal-Sync-Secret": secret, "Content-Type": "application/json" },
+      const resolved = await getChannelToken(channelId, companyId);
+      if (!resolved) return;
+
+      const envDefault = Number(process.env.SYNC_HISTORY_MAX_MESSAGES_PER_CHAT);
+      const defaultPerChat =
+        Number.isFinite(envDefault) && envDefault > 0 ? Math.min(8000, Math.floor(envDefault)) : 4000;
+
+      await runSyncChannelHistory({
+        channelId,
+        companyId,
+        token: resolved.token,
+        createMissingConversations: false,
+        targetMessagesPerChat: defaultPerChat,
       });
     } catch {
       // ignorar erros; sync pode ser refeito manualmente na tela de Conexões

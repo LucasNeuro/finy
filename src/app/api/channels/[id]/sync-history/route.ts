@@ -1,13 +1,9 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
-import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
-import { insertHistoryMessagesFromUazapiForConversation } from "@/lib/conversations/insert-remote-chat-messages";
-import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
+import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
-import { toCanonicalJid } from "@/lib/phone-canonical";
-import { findChats, type UazapiChat } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
 /** Vercel / plataformas com limite — sync pode levar vários minutos. */
@@ -18,8 +14,7 @@ export const maxDuration = 300;
  * Sincroniza histórico de mensagens via UAZAPI (lista de chats e mensagens por chat).
  * Por padrão só preenche conversas que já existem. Com body { create_missing: true } ou
  * ?create_missing=1, cria conversa/contato faltante e importa até messages_per_chat (default alto, max 8000).
- * Atualiza channel_groups para grupos mesmo quando não cria conversa.
- * Auth: usuário com channels.manage, ou chamada interna com X-Internal-Sync-Secret.
+ * Auth: usuário com channels.manage, ou chamada interna com X-Internal-Sync-Secret (cron / integrações externas).
  */
 export async function POST(
   request: Request,
@@ -63,8 +58,6 @@ export async function POST(
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const token = resolved.token;
-  const supabase = createServiceRoleClient();
   let body: Record<string, unknown> = {};
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -86,272 +79,23 @@ export async function POST(
       ? Math.min(Math.max(Math.floor(targetMessagesPerChatRaw), 1), 8000)
       : 4000;
 
-  /** uazapi devolve chats paginados. */
-  const CHAT_PAGE_SIZE = 100;
-  const MAX_CHAT_PAGES = 50;
-  const chats: UazapiChat[] = [];
-  let chatsError: string | undefined;
-  for (let page = 0; page < MAX_CHAT_PAGES; page++) {
-    const { data: chatsData, ok: chatsOk, error: pageErr } = await findChats(token, {
-      limit: CHAT_PAGE_SIZE,
-      offset: page * CHAT_PAGE_SIZE,
-      sort: "-wa_lastMsgTimestamp",
-    });
-    if (!chatsOk) {
-      chatsError = pageErr;
-      break;
-    }
-    const batch = (chatsData?.chats ?? []) as UazapiChat[];
-    if (batch.length === 0) break;
-    chats.push(...batch);
-    if (batch.length < CHAT_PAGE_SIZE) break;
-  }
+  const result = await runSyncChannelHistory({
+    channelId,
+    companyId: companyId!,
+    token: resolved.token,
+    createMissingConversations,
+    targetMessagesPerChat,
+  });
 
-  if (chats.length === 0) {
-    return NextResponse.json({
-      ok: true,
-      chats_processed: 0,
-      messages_processed: 0,
-      error: chatsError ?? undefined,
-    });
-  }
-
-  const { data: channelRow } = await supabase
-    .from("channels")
-    .select("id, company_id")
-    .eq("id", channelId)
-    .eq("company_id", companyId)
-    .single();
-  if (!channelRow) {
+  if (!result.ok && result.error === "Channel not found") {
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  const { data: cqData } = await supabase
-    .from("channel_queues")
-    .select("queue_id, is_default")
-    .eq("channel_id", channelId)
-    .order("is_default", { ascending: false });
-  const cqList = (cqData ?? []) as { queue_id: string; is_default: boolean }[];
-  const queueIds = cqList.map((cq) => cq.queue_id);
-  let queues = [] as {
-    id: string;
-    kind: string;
-    business_hours?: BusinessHoursItem[] | null;
-    special_dates?: SpecialDateItem[] | null;
-  }[];
-  if (queueIds.length > 0) {
-    const { data: queuesData } = await supabase
-      .from("queues")
-      .select("id, kind, business_hours, special_dates")
-      .in("id", queueIds);
-    queues = (queuesData ?? []) as typeof queues;
-  }
-
-  const queueHoursAt = new Date();
-
-  const { data: convRows } = await supabase
-    .from("conversations")
-    .select("id, external_id, kind")
-    .eq("channel_id", channelId);
-  const conversationIdByKey = new Map<string, string>();
-  for (const row of convRows ?? []) {
-    const r = row as { id: string; external_id?: string | null; kind?: string | null };
-    if (!r.external_id || (r.kind !== "group" && r.kind !== "ticket")) continue;
-    conversationIdByKey.set(`${r.external_id}\t${r.kind}`, r.id);
-  }
-
-  const convKey = (externalId: string, kind: "group" | "ticket") => `${externalId}\t${kind}`;
-
-  function pickQueueId(isGroup: boolean): string | null {
-    let queueId: string | null = null;
-    if (isGroup) {
-      const gq = cqList.find((cq) => queues.find((q) => q.id === cq.queue_id && q.kind === "group"));
-      if (gq) queueId = gq.queue_id;
-    } else {
-      const ticketCqList = cqList.filter((cq) => {
-        const q = queues.find((r) => r.id === cq.queue_id);
-        return q && (q.kind === "ticket" || !q.kind);
-      });
-      for (const cq of ticketCqList) {
-        const q = queues.find((r) => r.id === cq.queue_id);
-        if (
-          q &&
-          isQueueOpen(
-            {
-              business_hours: (q.business_hours ?? []) as BusinessHoursItem[],
-              special_dates: (q.special_dates ?? []) as SpecialDateItem[],
-            },
-            queueHoursAt
-          )
-        ) {
-          queueId = cq.queue_id;
-          break;
-        }
-      }
-      if (!queueId && ticketCqList.length > 0) queueId = ticketCqList[0].queue_id;
-      if (!queueId && cqList.length > 0) queueId = cqList[0].queue_id;
-    }
-    return queueId;
-  }
-
-  const MAX_MESSAGES_PER_INSTANCE = 15_000;
-  let conversationsCreated = 0;
-  let messagesInserted = 0;
-  /** Conversas que receberam mensagens — limpar messages_snapshot para o GET carregar do Postgres (ordenado). */
-  const touchedConversationIds = new Set<string>();
-
-  for (const chat of chats) {
-    if (messagesInserted >= MAX_MESSAGES_PER_INSTANCE) break;
-
-    const waChatid = (chat.wa_chatid ?? "").toString().trim();
-    if (!waChatid) continue;
-
-    const isGroup = chat.wa_isGroup === true || waChatid.endsWith("@g.us");
-    const canonicalChatId = toCanonicalJid(waChatid, isGroup) || waChatid;
-    const kind: "group" | "ticket" = isGroup ? "group" : "ticket";
-    const queueId = pickQueueId(isGroup);
-
-    let conversationId: string | null = conversationIdByKey.get(convKey(canonicalChatId, kind)) ?? null;
-
-    if (!conversationId) {
-      if (isGroup) {
-        await supabase.from("channel_groups").upsert(
-          {
-            channel_id: channelId,
-            company_id: companyId,
-            jid: waChatid,
-            name: (chat.wa_name ?? chat.wa_contactName ?? null) ?? null,
-            synced_at: new Date().toISOString(),
-          },
-          { onConflict: "channel_id,jid" }
-        );
-      }
-
-      if (!createMissingConversations) {
-        continue;
-      }
-
-      if (isGroup) {
-        if (!queueId) continue;
-        const { data: insertedConv } = await supabase
-          .from("conversations")
-          .insert({
-            company_id: companyId,
-            channel_id: channelId,
-            external_id: canonicalChatId,
-            wa_chat_jid: canonicalChatId,
-            kind: "group",
-            is_group: true,
-            customer_phone: canonicalChatId,
-            customer_name: (chat.wa_name ?? chat.wa_contactName ?? "Grupo") as string,
-            queue_id: queueId,
-            status: "open",
-            assigned_to: null,
-            last_message_at: new Date().toISOString(),
-          })
-          .select("id")
-          .single();
-        const newGroupConvId = insertedConv?.id;
-        if (!newGroupConvId) continue;
-        conversationId = newGroupConvId;
-        conversationIdByKey.set(convKey(canonicalChatId, kind), newGroupConvId);
-        conversationsCreated++;
-      } else {
-        const digits = waChatid.replace(/@.*$/, "").replace(/\D/g, "");
-        const displayPhone = digits || null;
-        await supabase.from("channel_contacts").upsert(
-          {
-            channel_id: channelId,
-            company_id: companyId,
-            jid: canonicalChatId,
-            phone: displayPhone,
-            contact_name: ((chat.wa_name ?? chat.wa_contactName ?? null) as string | null) ?? null,
-            first_name: ((chat.wa_contactName ?? chat.wa_name ?? null) as string | null) ?? null,
-            synced_at: new Date().toISOString(),
-          },
-          { onConflict: "channel_id,jid", ignoreDuplicates: false }
-        );
-        if (!queueId) continue;
-        const { data: insertedConv } = await supabase
-          .from("conversations")
-          .insert({
-            company_id: companyId,
-            channel_id: channelId,
-            external_id: canonicalChatId,
-            wa_chat_jid: canonicalChatId,
-            kind: "ticket",
-            is_group: false,
-            customer_phone: displayPhone,
-            customer_name: (chat.wa_name ?? chat.wa_contactName ?? null) as string | null,
-            queue_id: queueId,
-            assigned_to: null,
-            status: "open",
-            last_message_at: new Date().toISOString(),
-          })
-          .select("id")
-          .single();
-        const newTicketConvId = insertedConv?.id;
-        if (!newTicketConvId) continue;
-        conversationId = newTicketConvId;
-        conversationIdByKey.set(convKey(canonicalChatId, kind), newTicketConvId);
-        conversationsCreated++;
-      }
-    }
-
-    if (!conversationId) continue;
-
-    const budget = Math.min(targetMessagesPerChat, MAX_MESSAGES_PER_INSTANCE - messagesInserted);
-    if (budget < 1) continue;
-
-    const { inserted, resolvedChatJid } = await insertHistoryMessagesFromUazapiForConversation(
-      supabase,
-      token,
-      conversationId,
-      waChatid,
-      budget
-    );
-
-    if (resolvedChatJid?.trim()) {
-      const next = resolvedChatJid.trim();
-      if (next.toLowerCase() !== waChatid.trim().toLowerCase()) {
-        await supabase
-          .from("conversations")
-          .update({
-            wa_chat_jid: next,
-            external_id: next,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", conversationId)
-          .eq("company_id", companyId!);
-      }
-    }
-
-    if (inserted > 0) {
-      touchedConversationIds.add(conversationId);
-    }
-    messagesInserted += inserted;
-  }
-
-  if (touchedConversationIds.size > 0) {
-    const ids = [...touchedConversationIds];
-    const CHUNK = 150;
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      const slice = ids.slice(i, i + CHUNK);
-      await supabase
-        .from("conversations")
-        .update({ messages_snapshot: null, updated_at: new Date().toISOString() })
-        .eq("company_id", companyId!)
-        .in("id", slice);
-      await Promise.all(slice.map((convId) => invalidateConversationDetail(convId, companyId!)));
-    }
-  }
-
-  await invalidateConversationList(companyId);
   return NextResponse.json({
-    ok: true,
-    chats_processed: chats.length,
-    conversations_created: conversationsCreated,
-    messages_processed: messagesInserted,
-    error: chatsError ?? undefined,
+    ok: result.ok,
+    chats_processed: result.chats_processed,
+    conversations_created: result.conversations_created,
+    messages_processed: result.messages_processed,
+    error: result.error,
   });
 }

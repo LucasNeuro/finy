@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { syncCommercialLeadsAfterChannelContactsSync } from "@/lib/crm/sync-commercial-leads-from-contacts";
+import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { listGroups, getChatDetails, getGroupInfo, findChats, extractContactNameFromDetails } from "@/lib/uazapi/client";
@@ -45,14 +46,6 @@ function normalizeContactJid(jid: string): string {
 }
 
 type ProgressCallback = (progress: number, data?: { contacts_synced?: number; groups_synced?: number; avatars_synced?: number; error?: string }) => void;
-
-type SyncHistoryResult = {
-  ok?: boolean;
-  chats_processed?: number;
-  conversations_created?: number;
-  messages_processed?: number;
-  error?: string;
-};
 
 type SyncContactsResult = {
   ok: boolean;
@@ -181,8 +174,8 @@ async function runSync(
   clearFirst = false,
   syncHistory = true,
   createMissing = true,
-  messagesPerChat = 1000,
-  request?: Request
+  messagesPerChat = 4000,
+  _request?: Request
 ): Promise<SyncContactsResult> {
   const supabase = await createClient();
   if (clearFirst) {
@@ -437,33 +430,21 @@ async function runSync(
   let historySync: SyncContactsResult["history_sync"] = { enabled: syncHistory };
   if (syncHistory) {
     try {
-      const internalSecret = process.env.INTERNAL_SYNC_SECRET?.trim();
-      const origin = request ? new URL(request.url).origin : process.env.APP_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim() || "";
-      if (!origin) {
-        historySync = { enabled: true, ok: false, error: "APP_URL/NEXT_PUBLIC_APP_URL ausente para acionar sync-history" };
-      } else if (!internalSecret) {
-        historySync = { enabled: true, ok: false, error: "INTERNAL_SYNC_SECRET ausente para acionar sync-history" };
-      } else {
-        const historyUrl = `${origin}/api/channels/${channelId}/sync-history?create_missing=${createMissing ? "1" : "0"}&messages_per_chat=${messagesPerChat}`;
-        const historyRes = await fetch(historyUrl, {
-          method: "POST",
-          headers: {
-            "X-Internal-Sync-Secret": internalSecret,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ create_missing: createMissing, messages_per_chat: messagesPerChat }),
-          cache: "no-store",
-        });
-        const historyData = (await historyRes.json().catch(() => ({}))) as SyncHistoryResult;
-        historySync = {
-          enabled: true,
-          ok: historyRes.ok && historyData?.ok !== false,
-          chats_processed: historyData?.chats_processed,
-          conversations_created: historyData?.conversations_created,
-          messages_processed: historyData?.messages_processed,
-          error: !historyRes.ok ? historyData?.error ?? "Falha ao sincronizar histórico de mensagens" : historyData?.error,
-        };
-      }
+      const historyData = await runSyncChannelHistory({
+        channelId,
+        companyId,
+        token,
+        createMissingConversations: createMissing,
+        targetMessagesPerChat: messagesPerChat,
+      });
+      historySync = {
+        enabled: true,
+        ok: historyData.ok,
+        chats_processed: historyData.chats_processed,
+        conversations_created: historyData.conversations_created,
+        messages_processed: historyData.messages_processed,
+        error: historyData.error,
+      };
     } catch (err) {
       historySync = {
         enabled: true,
