@@ -235,10 +235,14 @@ export async function POST(
 
   const token = channel.uazapi_token_encrypted;
   const isGroup = !!conversation.is_group;
+  const waJid = typeof conversation.wa_chat_jid === "string" ? conversation.wa_chat_jid.trim() : "";
+  // Mesmo chat no WhatsApp que o celular: preferir JID do tópico quando existir (alinha com webhooks PN/LID).
   const number =
-    isGroup && conversation.wa_chat_jid
-      ? conversation.wa_chat_jid
-      : normalizePhoneForSend(conversation.customer_phone, isGroup);
+    isGroup && waJid
+      ? waJid
+      : !isGroup && waJid.toLowerCase().endsWith("@s.whatsapp.net")
+        ? waJid
+        : normalizePhoneForSend(conversation.customer_phone, isGroup);
 
   // Envio não usa Redis (conversa veio do Supabase). Erro "number is not on WhatsApp" = resposta da UAZAPI/WhatsApp (número inexistente ou inacessível).
   let result: { ok: boolean; error?: string };

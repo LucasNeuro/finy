@@ -13,6 +13,7 @@ import { isUazInstanceWebhookRedisCacheEnabled } from "@/lib/redis/uaz-instance-
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { isCommercialQueue, getCommercialContactOwner } from "@/lib/queue/commercial";
 import { getNextAgentForQueue } from "@/lib/queue/round-robin";
+import { parseLooseTimeToMs, UAZ_MIN_MESSAGE_TIME_MS } from "@/lib/uazapi/message-timestamp";
 import { NextResponse } from "next/server";
 
 /**
@@ -475,10 +476,12 @@ async function processOneMessage(
   const caption = (data.caption ?? data.text ?? data.body ?? data.content ?? "") as string;
   const textContent = (data.text ?? data.body ?? data.content ?? "") as string;
   const content = textContent || caption || (inferredType && mediaUrl ? `[${inferredType}]` : "") || (inferredType ? `[${inferredType}]` : "");
-  const rawTs = data.timestamp ?? data.sent_at;
+  const dataRec = data as Record<string, unknown>;
+  const rawTs = data.timestamp ?? data.sent_at ?? dataRec["t"] ?? dataRec["messageTimestamp"];
+  const tsMs = parseLooseTimeToMs(rawTs);
   const sentAt =
-    rawTs != null && (typeof rawTs === "number" || typeof rawTs === "string")
-      ? new Date(typeof rawTs === "number" ? rawTs * 1000 : rawTs).toISOString()
+    Number.isFinite(tsMs) && tsMs > UAZ_MIN_MESSAGE_TIME_MS
+      ? new Date(tsMs).toISOString()
       : new Date().toISOString();
 
   console.log("[WEBHOOK] processOneMessage:", { 
@@ -855,6 +858,20 @@ async function processOneMessage(
       .limit(1)
       .maybeSingle();
     if (byExternal) existingTicket = byExternal;
+    // external_id antigo (ex.: LID) pode divergir; wa_chat_jid costuma bater com o chat canônico do PN.
+    if (!existingTicket) {
+      const { data: byWaChat } = await supabase
+        .from("conversations")
+        .select("id, status")
+        .eq("channel_id", channelId)
+        .eq("wa_chat_jid", canonicalExternalId)
+        .eq("kind", "ticket")
+        .neq("status", "closed")
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (byWaChat) existingTicket = byWaChat;
+    }
     if (!existingTicket && canonicalDigits) {
       const { data: byPhone } = await supabase
         .from("conversations")
@@ -884,8 +901,92 @@ async function processOneMessage(
           .maybeSingle();
         if (byPhoneAlt) existingTicket = byPhoneAlt;
       }
+      // Legado: só DDD+número sem 55
+      if (!existingTicket && !canonicalDigits.startsWith("55") && canonicalDigits.length >= 10) {
+        const { data: byPhone55 } = await supabase
+          .from("conversations")
+          .select("id, status")
+          .eq("channel_id", channelId)
+          .eq("company_id", companyId)
+          .eq("customer_phone", `55${canonicalDigits}`)
+          .eq("kind", "ticket")
+          .neq("status", "closed")
+          .order("last_message_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (byPhone55) existingTicket = byPhone55;
+      }
     }
-    // Só reutilizamos conversas abertas (closed já excluído no filtro acima); se não houver, criamos novo chamado.
+    // Mesmo JID/telefone em chamado encerrado: reutilizar para não duplicar quando o cliente volta a falar (ou eco celular vs painel).
+    if (!existingTicket) {
+      const { data: closedByExternal } = await supabase
+        .from("conversations")
+        .select("id, status")
+        .eq("channel_id", channelId)
+        .eq("external_id", canonicalExternalId)
+        .eq("kind", "ticket")
+        .eq("status", "closed")
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (closedByExternal) existingTicket = closedByExternal;
+    }
+    if (!existingTicket) {
+      const { data: closedByWaChat } = await supabase
+        .from("conversations")
+        .select("id, status")
+        .eq("channel_id", channelId)
+        .eq("wa_chat_jid", canonicalExternalId)
+        .eq("kind", "ticket")
+        .eq("status", "closed")
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (closedByWaChat) existingTicket = closedByWaChat;
+    }
+    if (!existingTicket && canonicalDigits) {
+      const { data: closedByPhone } = await supabase
+        .from("conversations")
+        .select("id, status")
+        .eq("channel_id", channelId)
+        .eq("company_id", companyId)
+        .eq("customer_phone", canonicalDigits)
+        .eq("kind", "ticket")
+        .eq("status", "closed")
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (closedByPhone) existingTicket = closedByPhone;
+      if (!existingTicket && canonicalDigits.length === 12 && canonicalDigits.startsWith("55")) {
+        const without55 = canonicalDigits.slice(2);
+        const { data: closedByPhoneAlt } = await supabase
+          .from("conversations")
+          .select("id, status")
+          .eq("channel_id", channelId)
+          .eq("company_id", companyId)
+          .eq("customer_phone", without55)
+          .eq("kind", "ticket")
+          .eq("status", "closed")
+          .order("last_message_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (closedByPhoneAlt) existingTicket = closedByPhoneAlt;
+      }
+      if (!existingTicket && !canonicalDigits.startsWith("55") && canonicalDigits.length >= 10) {
+        const { data: closedByPhone55 } = await supabase
+          .from("conversations")
+          .select("id, status")
+          .eq("channel_id", channelId)
+          .eq("company_id", companyId)
+          .eq("customer_phone", `55${canonicalDigits}`)
+          .eq("kind", "ticket")
+          .eq("status", "closed")
+          .order("last_message_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (closedByPhone55) existingTicket = closedByPhone55;
+      }
+    }
 
     if (isHistoryEvent && !existingTicket) {
       return true;
@@ -1009,6 +1110,8 @@ async function processOneMessage(
     let conversationId: string;
     if (existingTicket) {
       conversationId = existingTicket.id;
+      const reopenFromClosed =
+        String(existingTicket.status ?? "").toLowerCase() === "closed" && !isHistoryEvent;
       if (messageExternalId) {
         const { data: existingMsg } = await supabase
           .from("messages")
@@ -1030,9 +1133,10 @@ async function processOneMessage(
           external_id: canonicalExternalId,
           customer_phone: (canonicalDigits ?? displayPhone) || undefined,
           ...(customerName && customerName.trim() && { customer_name: customerName.trim() }),
+          ...(reopenFromClosed ? { status: "open" as const } : {}),
         })
         .eq("id", conversationId);
-      console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId });
+      console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId, reopenFromClosed });
       if (externalId !== canonicalExternalId) {
         await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("jid", externalId);
       }

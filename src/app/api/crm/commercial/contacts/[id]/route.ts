@@ -49,13 +49,42 @@ export async function PATCH(
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
   }
 
-  const body = (await request.json()) as { notes?: string };
+  const body = (await request.json()) as {
+    notes?: string;
+    lead_score?: number | null;
+    estimated_value_cents?: number | null;
+  };
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (body.notes !== undefined) updates.notes = body.notes ?? null;
+  if (body.lead_score !== undefined) {
+    if (body.lead_score === null) {
+      updates.lead_score = null;
+    } else {
+      const n = Number(body.lead_score);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        return NextResponse.json({ error: "lead_score deve ser entre 0 e 100" }, { status: 400 });
+      }
+      updates.lead_score = Math.round(n);
+    }
+  }
+  if (body.estimated_value_cents !== undefined) {
+    if (body.estimated_value_cents === null) {
+      updates.estimated_value_cents = null;
+    } else {
+      const v = Number(body.estimated_value_cents);
+      if (!Number.isFinite(v) || v < 0) {
+        return NextResponse.json({ error: "estimated_value_cents inválido" }, { status: 400 });
+      }
+      updates.estimated_value_cents = Math.round(v);
+    }
+  }
 
   const { data, error } = await supabase
     .from("commercial_contact_owners")
-    .update({ notes: body.notes ?? null, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq("id", id)
-    .select("id, phone_canonical, queue_id, channel_id, source, notes, updated_at")
+    .select("id, phone_canonical, queue_id, channel_id, source, notes, lead_score, estimated_value_cents, updated_at")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,6 +1,6 @@
- "use client";
+"use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
@@ -35,6 +35,10 @@ export function FocusModeTabs() {
   const base = slug ? `/${slug}` : "";
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
 
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
   const { data, isLoading } = useQuery({
     queryKey: ["inbox", "focus", "mine", slug] as const,
     queryFn: async () => {
@@ -52,30 +56,28 @@ export function FocusModeTabs() {
   });
 
   const list = data?.data ?? [];
-  if (list.length === 0 && !isLoading) return null;
 
-  const tabsScrollRef = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-
-  const checkTabsScroll = () => {
+  const checkTabsScroll = useCallback(() => {
     const container = tabsScrollRef.current;
     if (!container) return;
     const hasScroll = container.scrollWidth > container.clientWidth;
     setCanScrollLeft(hasScroll && container.scrollLeft > 1);
     setCanScrollRight(hasScroll && container.scrollLeft < container.scrollWidth - container.clientWidth - 1);
-  };
+  }, []);
 
-  const scrollTabs = (direction: "left" | "right") => {
-    const container = tabsScrollRef.current;
-    if (!container) return;
-    const scrollAmount = container.clientWidth * 0.8;
-    container.scrollBy({
-      left: direction === "left" ? -scrollAmount : scrollAmount,
-      behavior: "smooth",
-    });
-    setTimeout(checkTabsScroll, 250);
-  };
+  const scrollTabs = useCallback(
+    (direction: "left" | "right") => {
+      const container = tabsScrollRef.current;
+      if (!container) return;
+      const scrollAmount = container.clientWidth * 0.8;
+      container.scrollBy({
+        left: direction === "left" ? -scrollAmount : scrollAmount,
+        behavior: "smooth",
+      });
+      setTimeout(checkTabsScroll, 250);
+    },
+    [checkTabsScroll]
+  );
 
   useEffect(() => {
     const container = tabsScrollRef.current;
@@ -88,7 +90,9 @@ export function FocusModeTabs() {
       container.removeEventListener("scroll", checkTabsScroll);
       window.removeEventListener("resize", checkTabsScroll);
     };
-  }, [slug, list.length]);
+  }, [slug, list.length, checkTabsScroll]);
+
+  if (list.length === 0 && !isLoading) return null;
 
   return (
     <div className="flex shrink-0 items-center gap-0 border-b border-[#E2E8F0] bg-white px-1 py-1.5">

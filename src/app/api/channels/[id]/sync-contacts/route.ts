@@ -2,6 +2,7 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
+import { syncCommercialLeadsAfterChannelContactsSync } from "@/lib/crm/sync-commercial-leads-from-contacts";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { listGroups, getChatDetails, getGroupInfo, findChats, extractContactNameFromDetails } from "@/lib/uazapi/client";
@@ -45,6 +46,31 @@ function normalizeContactJid(jid: string): string {
 
 type ProgressCallback = (progress: number, data?: { contacts_synced?: number; groups_synced?: number; avatars_synced?: number; error?: string }) => void;
 
+type SyncHistoryResult = {
+  ok?: boolean;
+  chats_processed?: number;
+  conversations_created?: number;
+  messages_processed?: number;
+  error?: string;
+};
+
+type SyncContactsResult = {
+  ok: boolean;
+  contacts_synced?: number;
+  groups_synced?: number;
+  avatars_synced?: number;
+  commercial_leads_synced?: number;
+  history_sync?: {
+    enabled: boolean;
+    ok?: boolean;
+    chats_processed?: number;
+    conversations_created?: number;
+    messages_processed?: number;
+    error?: string;
+  };
+  error?: string;
+};
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -52,6 +78,21 @@ export async function POST(
   const url = new URL(request.url);
   const streamProgress = url.searchParams.get("stream") === "1";
   const clearFirst = url.searchParams.get("clear") === "1";
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    body = {};
+  }
+  const syncHistory =
+    String(body.sync_history ?? url.searchParams.get("sync_history") ?? "1").toLowerCase() !== "false" &&
+    String(body.sync_history ?? url.searchParams.get("sync_history") ?? "1") !== "0";
+  const createMissing =
+    String(body.create_missing ?? url.searchParams.get("create_missing") ?? "1").toLowerCase() !== "false" &&
+    String(body.create_missing ?? url.searchParams.get("create_missing") ?? "1") !== "0";
+  const perChatRaw = Number(body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? 4000);
+  const messagesPerChat =
+    Number.isFinite(perChatRaw) && perChatRaw > 0 ? Math.min(Math.floor(perChatRaw), 8000) : 4000;
 
   try {
     const companyId = await getCompanyIdFromRequest(request);
@@ -74,7 +115,17 @@ export async function POST(
     }
 
     if (!streamProgress) {
-      const result = await runSync(resolved.token, channelId, companyId, () => {}, clearFirst);
+      const result = await runSync(
+        resolved.token,
+        channelId,
+        companyId,
+        () => {},
+        clearFirst,
+        syncHistory,
+        createMissing,
+        messagesPerChat,
+        request
+      );
       return NextResponse.json(result);
     }
 
@@ -86,7 +137,17 @@ export async function POST(
         };
         try {
           send({ progress: 0 });
-          const result = await runSync(resolved.token, channelId, companyId, (p) => send({ progress: p }), clearFirst);
+          const result = await runSync(
+            resolved.token,
+            channelId,
+            companyId,
+            (p) => send({ progress: p }),
+            clearFirst,
+            syncHistory,
+            createMissing,
+            messagesPerChat,
+            request
+          );
           send({ progress: 100, ...result });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Erro ao sincronizar";
@@ -117,8 +178,12 @@ async function runSync(
   channelId: string,
   companyId: string,
   onProgress: ProgressCallback,
-  clearFirst = false
-): Promise<{ ok: boolean; contacts_synced?: number; groups_synced?: number; avatars_synced?: number; error?: string }> {
+  clearFirst = false,
+  syncHistory = true,
+  createMissing = true,
+  messagesPerChat = 1000,
+  request?: Request
+): Promise<SyncContactsResult> {
   const supabase = await createClient();
   if (clearFirst) {
     await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("company_id", companyId);
@@ -242,10 +307,20 @@ async function runSync(
       (existingGroups ?? []).map((r) => normalizeGroupJid(r.jid)).filter(Boolean)
     );
 
-    const raw = groupsRes.data;
+    const raw = (groupsRes.data ?? []) as Array<{
+      JID?: string;
+      jid?: string;
+      Name?: string;
+      Topic?: string;
+      name?: string;
+      topic?: string;
+      subject?: string;
+      description?: string;
+      invite_link?: string;
+    }>;
     const seen = new Set<string>();
     const rows = raw
-      .map((g: { JID?: string; jid?: string; Name?: string; Topic?: string; name?: string; topic?: string; subject?: string; description?: string; invite_link?: string }) => {
+      .map((g) => {
         const rawJid = (typeof g.JID === "string" ? g.JID : typeof g.jid === "string" ? g.jid : "").trim();
         const jid = normalizeGroupJid(rawJid);
         if (!jid || seen.has(jid)) return null;
@@ -349,10 +424,61 @@ async function runSync(
     }
   }
 
+  let commercial_leads_synced = 0;
+  if (contactsCount > 0) {
+    try {
+      const res = await syncCommercialLeadsAfterChannelContactsSync({ companyId, channelId });
+      commercial_leads_synced = res.candidates;
+    } catch {
+      // ignore — carteira opcional / tabela ausente
+    }
+  }
+
+  let historySync: SyncContactsResult["history_sync"] = { enabled: syncHistory };
+  if (syncHistory) {
+    try {
+      const internalSecret = process.env.INTERNAL_SYNC_SECRET?.trim();
+      const origin = request ? new URL(request.url).origin : process.env.APP_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim() || "";
+      if (!origin) {
+        historySync = { enabled: true, ok: false, error: "APP_URL/NEXT_PUBLIC_APP_URL ausente para acionar sync-history" };
+      } else if (!internalSecret) {
+        historySync = { enabled: true, ok: false, error: "INTERNAL_SYNC_SECRET ausente para acionar sync-history" };
+      } else {
+        const historyUrl = `${origin}/api/channels/${channelId}/sync-history?create_missing=${createMissing ? "1" : "0"}&messages_per_chat=${messagesPerChat}`;
+        const historyRes = await fetch(historyUrl, {
+          method: "POST",
+          headers: {
+            "X-Internal-Sync-Secret": internalSecret,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ create_missing: createMissing, messages_per_chat: messagesPerChat }),
+          cache: "no-store",
+        });
+        const historyData = (await historyRes.json().catch(() => ({}))) as SyncHistoryResult;
+        historySync = {
+          enabled: true,
+          ok: historyRes.ok && historyData?.ok !== false,
+          chats_processed: historyData?.chats_processed,
+          conversations_created: historyData?.conversations_created,
+          messages_processed: historyData?.messages_processed,
+          error: !historyRes.ok ? historyData?.error ?? "Falha ao sincronizar histórico de mensagens" : historyData?.error,
+        };
+      }
+    } catch (err) {
+      historySync = {
+        enabled: true,
+        ok: false,
+        error: err instanceof Error ? err.message : "Falha ao sincronizar histórico de mensagens",
+      };
+    }
+  }
+
   return {
     ok: true,
     contacts_synced: contactsCount,
     groups_synced: groupsCount,
     avatars_synced: avatars_synced,
+    commercial_leads_synced,
+    history_sync: historySync,
   };
 }

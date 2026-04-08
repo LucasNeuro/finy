@@ -60,7 +60,7 @@ export async function GET(request: Request) {
   let query = supabase
     .from("commercial_contact_owners")
     .select(
-      "id, phone_canonical, queue_id, channel_id, owner_user_id, source, notes, created_at, updated_at",
+      "id, phone_canonical, queue_id, channel_id, owner_user_id, source, notes, lead_score, estimated_value_cents, created_at, updated_at",
       { count: "exact" }
     )
     .eq("company_id", companyId)
@@ -167,6 +167,8 @@ export async function GET(request: Request) {
     owner_user_id: string;
     source: string;
     notes: string | null;
+    lead_score?: number | null;
+    estimated_value_cents?: number | null;
     created_at: string;
     updated_at: string;
   }>;
@@ -195,6 +197,8 @@ export async function GET(request: Request) {
     channel_id: row.channel_id,
     source: row.source,
     notes: row.notes,
+    lead_score: row.lead_score ?? null,
+    estimated_value_cents: row.estimated_value_cents ?? null,
     created_at: row.created_at,
     owner: ownerMap.get(row.owner_user_id) ?? null,
   }));
@@ -215,6 +219,8 @@ export async function POST(request: Request) {
     phone: string;
     notes?: string;
     owner_user_id?: string; // gestor pode atribuir a outro consultor
+    lead_score?: number | null;
+    estimated_value_cents?: number | null;
   };
 
   if (!body.queue_id || !body.channel_id || !body.phone) {
@@ -248,22 +254,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Número de telefone inválido" }, { status: 400 });
   }
 
+  let leadScore: number | null = null;
+  if (body.lead_score !== undefined && body.lead_score !== null) {
+    const n = Number(body.lead_score);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      return NextResponse.json({ error: "lead_score deve ser entre 0 e 100" }, { status: 400 });
+    }
+    leadScore = Math.round(n);
+  }
+  let valueCents: number | null = null;
+  if (body.estimated_value_cents !== undefined && body.estimated_value_cents !== null) {
+    const v = Number(body.estimated_value_cents);
+    if (!Number.isFinite(v) || v < 0) {
+      return NextResponse.json({ error: "estimated_value_cents inválido" }, { status: 400 });
+    }
+    valueCents = Math.round(v);
+  }
+
+  const upsertPayload: Record<string, unknown> = {
+    company_id: companyId,
+    channel_id: body.channel_id,
+    queue_id: body.queue_id,
+    phone_canonical: canonical,
+    owner_user_id: ownerUserId,
+    source: "manual",
+    notes: body.notes ?? null,
+    updated_at: new Date().toISOString(),
+  };
+  if (leadScore !== null) upsertPayload.lead_score = leadScore;
+  if (valueCents !== null) upsertPayload.estimated_value_cents = valueCents;
+
   const { data, error } = await supabase
     .from("commercial_contact_owners")
-    .upsert(
-      {
-        company_id: companyId,
-        channel_id: body.channel_id,
-        queue_id: body.queue_id,
-        phone_canonical: canonical,
-        owner_user_id: ownerUserId,
-        source: "manual",
-        notes: body.notes ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "company_id,channel_id,phone_canonical" }
-    )
-    .select("id, phone_canonical, queue_id, channel_id, source, notes, created_at, updated_at")
+    .upsert(upsertPayload, { onConflict: "company_id,channel_id,phone_canonical" })
+    .select("id, phone_canonical, queue_id, channel_id, source, notes, lead_score, estimated_value_cents, created_at, updated_at")
     .single();
 
   if (error) {

@@ -33,6 +33,20 @@ type QueueConfigSideOverProps = {
   onSaved: (updated: Partial<Queue>) => void;
 };
 
+function getAttendantName(fullName?: string | null, email?: string | null, userId?: string): string {
+  const direct = String(fullName ?? "").trim();
+  if (direct) return direct;
+  const emailLocal = String(email ?? "").trim().split("@")[0] ?? "";
+  if (emailLocal) {
+    return emailLocal
+      .replace(/[._-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return userId ?? "Atendente";
+}
+
 export function QueueConfigSideOver({
   open,
   onClose,
@@ -395,9 +409,13 @@ export function QueueConfigSideOver({
                             onChange={() => toggleAssignment(u.user_id)}
                             className="h-4 w-4 rounded border-[#E2E8F0] text-clicvend-orange focus:ring-clicvend-orange"
                           />
-                          <label htmlFor={`assign-${u.user_id}`} className="flex-1 cursor-pointer text-sm">
-                            <span className="font-medium text-[#1E293B]">{u.full_name || u.email || u.user_id}</span>
-                            {u.email && u.full_name && <span className="ml-1 text-[#64748B]">({u.email})</span>}
+                          <label htmlFor={`assign-${u.user_id}`} className="flex-1 cursor-pointer">
+                            <div className="text-sm font-medium text-[#1E293B]">
+                              {getAttendantName(u.full_name, u.email, u.user_id)}
+                            </div>
+                            <div className="text-xs text-[#64748B]">
+                              {u.email?.trim() || "Sem e-mail cadastrado"}
+                            </div>
                           </label>
                         </li>
                       ))}

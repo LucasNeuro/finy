@@ -60,13 +60,14 @@ function playBeepFallback() {
 }
 
 /**
- * Escuta mudanças na tabela conversations via Supabase Realtime e invalida
- * lista e contagens (com debounce).
- * Na aba Meus: toca aviso sonoro quando entra mensagem em conversa atribuída ao agente
- * e invalida a lista na hora para o card da conversa subir (priorizar resposta).
+ * Escuta `conversations` (debounce) para invalidar listas/contagens.
+ * Aviso sonoro + notificação nativa: apenas em INSERT em `messages` com direction=in
+ * (evita bip ao enviar menu de consentimento, respostas do painel, etc.).
  *
- * No Supabase: ative a replicação da tabela `conversations` em
- * Database > Replication para que postgres_changes funcione.
+ * Som respeita inbox.mute_new_message_sound e inbox.hide_new_notifications.
+ * Notificação nativa só com Notification.permission === "granted".
+ *
+ * Supabase: replicação de `conversations` e `messages` para postgres_changes.
  */
 export function RealtimeConversations() {
   const pathname = usePathname();
@@ -92,7 +93,12 @@ export function RealtimeConversations() {
     const list = (permissionsData as { permissions?: string[] } | undefined)?.permissions;
     return Array.isArray(list) && list.includes("inbox.mute_new_message_sound");
   }, [permissionsData]);
+  const hideNewNotifications = useMemo(() => {
+    const list = (permissionsData as { permissions?: string[] } | undefined)?.permissions;
+    return Array.isArray(list) && list.includes("inbox.hide_new_notifications");
+  }, [permissionsData]);
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
+  const messagesChannelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(null);
 
   // Desbloqueia áudio no primeiro clique + pede permissão de notificação uma vez (sem UI no sino).
   useEffect(() => {
@@ -219,15 +225,89 @@ export function RealtimeConversations() {
 
     channelRef.current = channel;
 
+    const messagesChannel = supabase
+      .channel(`messages-incoming:${companyId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        (payload: {
+          new?: {
+            conversation_id?: string;
+            direction?: string;
+            sent_at?: string;
+            message_type?: string;
+          };
+        }) => {
+          const row = payload.new;
+          if (!row?.conversation_id || row.direction !== "in") return;
+          if (String(row.message_type ?? "").toLowerCase() === "internal_note") return;
+
+          const msgTime = row.sent_at ? new Date(row.sent_at).getTime() : 0;
+          if (!msgTime || Date.now() - msgTime > RECENT_MESSAGE_MS) return;
+          if (row.conversation_id === openConversationId) return;
+
+          void (async () => {
+            const { data: conv, error } = await supabase
+              .from("conversations")
+              .select("id, company_id, assigned_to, customer_name, customer_phone")
+              .eq("id", row.conversation_id!)
+              .maybeSingle();
+            if (error || !conv || String((conv as { company_id?: string }).company_id) !== companyId) return;
+
+            const assignedTo = (conv as { assigned_to?: string | null }).assigned_to ?? null;
+            const isMyConversation = Boolean(currentUserId && assignedTo === currentUserId);
+            const isUnassignedNew = assignedTo == null || assignedTo === "";
+            if (!isMyConversation && !isUnassignedNew) return;
+
+            const allowSound =
+              !muteIncomingSound && !hideNewNotifications && typeof window !== "undefined";
+            if (allowSound) playNewMessageSound();
+
+            if (slug && getDesktopNotifyEnabled() && !hideNewNotifications) {
+              const displayName =
+                (conv as { customer_name?: string | null }).customer_name?.trim() ||
+                (conv as { customer_phone?: string | null }).customer_phone?.trim() ||
+                "Nova mensagem";
+              const bodyHint = isUnassignedNew
+                ? `Novo na fila — abra o chat no ${BRAND_NAME}.`
+                : `Nova mensagem — abra o chat no ${BRAND_NAME}.`;
+              showIncomingChatDesktopNotification({
+                slug,
+                conversationId: row.conversation_id!,
+                title: displayName,
+                body: bodyHint,
+              });
+            }
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("clicvend:notifications-refresh"));
+            }
+          })();
+        }
+      )
+      .subscribe();
+
+    messagesChannelRef.current = messagesChannel;
+
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
       if (mineDebounceRef.current) clearTimeout(mineDebounceRef.current);
       debounceTimerRef.current = null;
       mineDebounceRef.current = null;
       supabase.removeChannel(channel);
+      supabase.removeChannel(messagesChannel);
       channelRef.current = null;
+      messagesChannelRef.current = null;
     };
-  }, [slug, companyId, currentUserId, queryClient, doInvalidate, openConversationId, muteIncomingSound]);
+  }, [
+    slug,
+    companyId,
+    currentUserId,
+    queryClient,
+    doInvalidate,
+    openConversationId,
+    muteIncomingSound,
+    hideNewNotifications,
+  ]);
 
   return null;
 }

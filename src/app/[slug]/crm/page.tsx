@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
@@ -16,6 +17,9 @@ import {
   Briefcase,
   CheckCircle2,
   UserMinus,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { SideOver } from "@/components/SideOver";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -50,6 +54,7 @@ type OverviewConsultant = {
 type OverviewBoard = {
   id: string;
   queue_id: string | null;
+  channel_id?: string | null;
   assigned_to: string | null;
   assigned_to_name: string | null;
   queue_name: string | null;
@@ -57,6 +62,9 @@ type OverviewBoard = {
   customer_name: string | null;
   customer_phone: string | null;
   last_message_at: string | null;
+  lead_score?: number | null;
+  estimated_value_cents?: number | null;
+  score_tier?: "hot" | "warm" | "cold" | null;
 };
 
 type OverviewResponse = {
@@ -104,6 +112,8 @@ type PortfolioContact = {
   channel_id: string;
   source: string;
   notes: string | null;
+  lead_score?: number | null;
+  estimated_value_cents?: number | null;
   created_at: string;
   owner: { id: string; full_name: string; email: string | null; avatar_url: string | null } | null;
 };
@@ -149,6 +159,52 @@ const statusLabelMap: Record<string, string> = {
   in_progress: "Em atendimento",
   closed: "Fechado",
 };
+
+type CrmKanbanCol = {
+  id: string;
+  key: string;
+  title: string;
+  color_hex: string;
+  is_closed: boolean;
+  sort_order: number;
+};
+
+function normalizeCrmStatus(raw: string): string {
+  const s = (raw || "").toLowerCase().trim();
+  if (s === "closed" || s === "fechado" || s === "resolvido") return "closed";
+  if (s === "waiting" || s === "pendente" || s === "pending") return "waiting";
+  if (s === "in_progress" || s === "atendimento" || s === "ongoing") return "in_progress";
+  if (s === "in_queue") return "in_queue";
+  if (s === "open") return "open";
+  return s || "open";
+}
+
+function effectiveCrmKanbanStatus(status: string, assigned_to: string | null): string {
+  const norm = normalizeCrmStatus(status);
+  if (norm === "closed") return "closed";
+  if (norm === "open" && assigned_to) return "in_progress";
+  if (norm === "in_queue") return "in_queue";
+  return norm;
+}
+
+function formatMoneyCents(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents)) return "—";
+  return (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function tierLabel(tier: "hot" | "warm" | "cold" | null | undefined): string {
+  if (tier === "hot") return "Quente";
+  if (tier === "warm") return "Morno";
+  if (tier === "cold") return "Frio";
+  return "—";
+}
+
+function tierChipClass(tier: "hot" | "warm" | "cold" | null | undefined): string {
+  if (tier === "hot") return "bg-red-100 text-red-800";
+  if (tier === "warm") return "bg-amber-100 text-amber-900";
+  if (tier === "cold") return "bg-slate-200 text-slate-700";
+  return "bg-slate-100 text-slate-500";
+}
 
 function getCompanySlug(pathname: string | null): string {
   const fromPath = pathname?.split("/").filter(Boolean)[0] ?? "";
@@ -210,12 +266,17 @@ export default function CrmCommercialPage() {
   const [linkedCommercialChannelQueueIds, setLinkedCommercialChannelQueueIds] = useState<Record<string, string[]>>({});
   const [portfolioPage, setPortfolioPage] = useState(0);
   const portfolioPageSize = 8;
-  const flowPageSize = 6;
   const distPageSize = 6;
   const perfPageSize = 8;
-  const [flowPage, setFlowPage] = useState(0);
   const [distPage, setDistPage] = useState(0);
   const [perfPage, setPerfPage] = useState(0);
+
+  const [crmDragOverColumn, setCrmDragOverColumn] = useState<string | null>(null);
+  const [crmDraggingId, setCrmDraggingId] = useState<string | null>(null);
+  const [crmOptimisticStatusById, setCrmOptimisticStatusById] = useState<Record<string, string>>({});
+  const [crmKanbanMessage, setCrmKanbanMessage] = useState("");
+  const [crmKanbanSaving, setCrmKanbanSaving] = useState(false);
+  const crmKanbanScrollRef = useRef<HTMLDivElement>(null);
 
   const canManage = overview?.can_manage ?? false;
   const selectedQueueId = queueId === "all" ? null : queueId;
@@ -229,6 +290,25 @@ export default function CrmCommercialPage() {
   });
   const permissions = Array.isArray(permissionsData?.permissions) ? permissionsData.permissions : [];
   const canAccessCrm = permissions.includes("crm.view") || permissions.includes("crm.manage");
+  const canDragCrmKanban =
+    permissions.includes("inbox.assign") ||
+    permissions.includes("inbox.manage_tickets") ||
+    permissions.includes("inbox.see_all");
+
+  const { data: crmQueueStatusData } = useQuery({
+    queryKey: ["crm-commercial", "ticket-statuses", slug, selectedQueueId],
+    queryFn: async () => {
+      const r = await fetch(
+        `/api/queues/${encodeURIComponent(selectedQueueId!)}/ticket-statuses`,
+        { credentials: "include", headers: apiHeaders }
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || "statuses");
+      return Array.isArray(d) ? d : [];
+    },
+    enabled: !!slug && !!selectedQueueId && activeTab === "fluxo" && !!apiHeaders,
+    staleTime: 60 * 1000,
+  });
 
   useEffect(() => {
     if (slug && permissionsData !== undefined && !canAccessCrm) {
@@ -407,10 +487,14 @@ export default function CrmCommercialPage() {
 
   useEffect(() => {
     setPortfolioPage(0);
-    setFlowPage(0);
     setDistPage(0);
     setPerfPage(0);
+    setCrmOptimisticStatusById({});
   }, [selectedQueueId]);
+
+  useEffect(() => {
+    setCrmKanbanMessage("");
+  }, [activeTab]);
 
   useEffect(() => {
     if (addContactOpen && !newChannelId && filteredChannels.length === 1) {
@@ -421,36 +505,115 @@ export default function CrmCommercialPage() {
     }
   }, [addContactOpen, filteredChannels, newChannelId]);
 
-  const groupedBoard = useMemo(() => {
-    const items = overview?.board ?? [];
-    const map = new Map<string, OverviewBoard[]>();
-    for (const card of items) {
-      const status = card.status || "open";
-      if (!map.has(status)) map.set(status, []);
-      map.get(status)!.push(card);
+  const crmKanbanColumns = useMemo((): CrmKanbanCol[] => {
+    if (selectedQueueId && Array.isArray(crmQueueStatusData) && crmQueueStatusData.length > 0) {
+      return (
+        crmQueueStatusData as {
+          id: string;
+          slug: string;
+          name: string;
+          color_hex?: string | null;
+          sort_order?: number;
+          is_closed?: boolean;
+        }[]
+      ).map((s, i) => ({
+        id: s.id,
+        key: s.slug,
+        title: s.name,
+        color_hex: (s.color_hex ?? "").trim() || "#64748B",
+        is_closed: !!s.is_closed,
+        sort_order: typeof s.sort_order === "number" ? s.sort_order : i,
+      }));
     }
-    return map;
-  }, [overview?.board]);
+    const ORDER = ["open", "in_queue", "waiting", "in_progress", "closed"];
+    const fromPipeline = new Set((overview?.pipeline ?? []).map((p) => p.status));
+    for (const b of overview?.board ?? []) fromPipeline.add(b.status);
+    const keys = [
+      ...ORDER.filter((k) => fromPipeline.has(k)),
+      ...[...fromPipeline].filter((k) => !ORDER.includes(k)).sort(),
+    ];
+    const useKeys = keys.length > 0 ? keys : ORDER;
+    return useKeys.map((key, i) => ({
+      id: "",
+      key,
+      title: statusLabelMap[key] ?? key,
+      color_hex:
+        key === "closed"
+          ? "#64748B"
+          : key === "in_progress"
+            ? "#8B5CF6"
+            : key === "in_queue"
+              ? "#F59E0B"
+              : key === "waiting"
+                ? "#0EA5E9"
+                : "#22C55E",
+      is_closed: key === "closed",
+      sort_order: i,
+    }));
+  }, [selectedQueueId, crmQueueStatusData, overview?.pipeline, overview?.board]);
 
-  const flowRows = useMemo(() => {
-    return (overview?.pipeline ?? []).map((item) => {
-      const leads = groupedBoard.get(item.status) ?? [];
-      const sample = leads
-        .slice(0, 3)
-        .map((lead) => lead.customer_name || lead.customer_phone || "Lead sem nome");
-      return {
-        status: item.status,
-        count: item.count,
-        sample,
-      };
+  const crmKanbanGrouped = useMemo(() => {
+    const grouped: Record<string, OverviewBoard[]> = {};
+    crmKanbanColumns.forEach((c) => {
+      grouped[c.key] = [];
     });
-  }, [overview?.pipeline, groupedBoard]);
+    for (const card of overview?.board ?? []) {
+      const baseKey = effectiveCrmKanbanStatus(
+        crmOptimisticStatusById[card.id] ?? card.status,
+        card.assigned_to
+      );
+      const key = baseKey === "in_queue" ? "open" : baseKey;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(card);
+    }
+    return crmKanbanColumns.map((c) => ({
+      ...c,
+      items: grouped[c.key] ?? [],
+    }));
+  }, [overview?.board, crmKanbanColumns, crmOptimisticStatusById]);
 
-  const flowPageCount = Math.max(1, Math.ceil(flowRows.length / flowPageSize));
-  const safeFlowPage = Math.min(flowPage, flowPageCount - 1);
-  const pagedFlowRows = flowRows.slice(
-    safeFlowPage * flowPageSize,
-    safeFlowPage * flowPageSize + flowPageSize
+  const patchCrmLeadStatus = useCallback(
+    async (conversationId: string, newStatusSlug: string) => {
+      setCrmKanbanSaving(true);
+      setCrmKanbanMessage("");
+      setCrmOptimisticStatusById((prev) => ({ ...prev, [conversationId]: newStatusSlug }));
+      try {
+        const r = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json", ...apiHeaders },
+          body: JSON.stringify({ status: newStatusSlug }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setCrmOptimisticStatusById((prev) => {
+            const next = { ...prev };
+            delete next[conversationId];
+            return next;
+          });
+          setCrmKanbanMessage(typeof d?.error === "string" ? d.error : "Não foi possível atualizar o status.");
+          return;
+        }
+        await Promise.all([loadOverview(), loadPerformance()]);
+        setTimeout(() => {
+          setCrmOptimisticStatusById((prev) => {
+            const next = { ...prev };
+            delete next[conversationId];
+            return next;
+          });
+        }, 500);
+      } catch {
+        setCrmOptimisticStatusById((prev) => {
+          const next = { ...prev };
+          delete next[conversationId];
+          return next;
+        });
+        setCrmKanbanMessage("Erro de rede ao atualizar status.");
+      } finally {
+        setCrmKanbanSaving(false);
+      }
+    },
+    [apiHeaders, loadOverview, loadPerformance]
   );
 
   const distAgents = roundRobin?.agents ?? [];
@@ -593,7 +756,7 @@ export default function CrmCommercialPage() {
     activeTab === "carteiras"
       ? overview?.consultants.length ?? 0
       : activeTab === "fluxo"
-        ? flowRows.length
+        ? overview?.board.length ?? 0
         : activeTab === "distribuicao"
           ? roundRobin?.agents.length ?? 0
           : performance?.consultants.length ?? 0;
@@ -602,7 +765,7 @@ export default function CrmCommercialPage() {
     activeTab === "carteiras"
       ? "consultor(es)"
       : activeTab === "fluxo"
-        ? "etapa(s)"
+        ? "lead(s) no quadro"
         : activeTab === "distribuicao"
           ? "consultor(es)"
           : "consultor(es)";
@@ -766,6 +929,8 @@ export default function CrmCommercialPage() {
                       <tr>
                         <th className="px-4 py-3">Telefone</th>
                         <th className="px-4 py-3">Origem</th>
+                        <th className="px-4 py-3">Score</th>
+                        <th className="px-4 py-3">Valor est.</th>
                         <th className="px-4 py-3">Notas</th>
                         <th className="px-4 py-3">Adicionado em</th>
                         <th className="px-4 py-3 text-right">Ações</th>
@@ -774,7 +939,7 @@ export default function CrmCommercialPage() {
                     <tbody>
                       {portfolioLoading && (
                         <tr>
-                          <td colSpan={5} className="px-4 py-8 text-center text-[#64748B]">
+                          <td colSpan={7} className="px-4 py-8 text-center text-[#64748B]">
                             Carregando carteira...
                           </td>
                         </tr>
@@ -790,10 +955,114 @@ export default function CrmCommercialPage() {
                                   ? "Manual"
                                   : c.source === "import"
                                     ? "Importação"
-                                    : c.source === "conversation_fallback"
-                                      ? "Carteira detectada"
-                                      : c.source}
+                                    : c.source === "contact_sync"
+                                      ? "Sync contatos"
+                                      : c.source === "conversation_fallback"
+                                        ? "Carteira detectada"
+                                        : c.source}
                             </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <span
+                                className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${tierChipClass(
+                                  c.lead_score != null
+                                    ? c.lead_score >= 70
+                                      ? "hot"
+                                      : c.lead_score >= 40
+                                        ? "warm"
+                                        : "cold"
+                                    : null
+                                )}`}
+                              >
+                                {c.lead_score != null
+                                  ? `${tierLabel(
+                                      c.lead_score >= 70 ? "hot" : c.lead_score >= 40 ? "warm" : "cold"
+                                    )} (${c.lead_score})`
+                                  : "Sem score"}
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                title="Score 0–100"
+                                defaultValue={c.lead_score ?? ""}
+                                key={`sc-${c.id}-${c.lead_score ?? "x"}`}
+                                disabled={c.source === "conversation_fallback" || portfolio?.readonly_fallback}
+                                className="w-20 rounded border border-[#E2E8F0] px-2 py-1 text-xs font-mono text-[#0F172A] disabled:opacity-50"
+                                onBlur={async (e) => {
+                                  if (c.source === "conversation_fallback" || portfolio?.readonly_fallback) return;
+                                  const raw = e.target.value.trim();
+                                  const next = raw === "" ? null : Math.min(100, Math.max(0, Math.round(Number(raw))));
+                                  if (next === null && (c.lead_score == null || c.lead_score === undefined)) return;
+                                  if (next !== null && next === c.lead_score) return;
+                                  try {
+                                    const r = await fetch(`/api/crm/commercial/contacts/${encodeURIComponent(c.id)}`, {
+                                      method: "PATCH",
+                                      credentials: "include",
+                                      headers: { "Content-Type": "application/json", ...apiHeaders },
+                                      body: JSON.stringify({ lead_score: next }),
+                                    });
+                                    if (!r.ok) {
+                                      const d = await r.json().catch(() => ({}));
+                                      setPortfolioMessage(d?.error || "Falha ao salvar score.");
+                                      return;
+                                    }
+                                    await loadPortfolio();
+                                  } catch {
+                                    setPortfolioMessage("Erro ao salvar score.");
+                                  }
+                                }}
+                              />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              title="Valor estimado em reais"
+                              placeholder="R$"
+                              defaultValue={
+                                c.estimated_value_cents != null
+                                  ? (c.estimated_value_cents / 100).toFixed(2).replace(".", ",")
+                                  : ""
+                              }
+                              key={`vl-${c.id}-${c.estimated_value_cents ?? "x"}`}
+                              disabled={c.source === "conversation_fallback" || portfolio?.readonly_fallback}
+                              className="w-28 rounded border border-[#E2E8F0] px-2 py-1 text-xs text-[#0F172A] disabled:opacity-50"
+                              onBlur={async (e) => {
+                                if (c.source === "conversation_fallback" || portfolio?.readonly_fallback) return;
+                                const raw = e.target.value.replace(/\s/g, "").replace(",", ".").trim();
+                                let cents: number | null = null;
+                                if (raw !== "") {
+                                  const n = Number(raw);
+                                  if (!Number.isFinite(n) || n < 0) {
+                                    setPortfolioMessage("Valor inválido.");
+                                    return;
+                                  }
+                                  cents = Math.round(n * 100);
+                                }
+                                if (cents === c.estimated_value_cents) return;
+                                if (cents === null && (c.estimated_value_cents == null || c.estimated_value_cents === undefined))
+                                  return;
+                                try {
+                                  const r = await fetch(`/api/crm/commercial/contacts/${encodeURIComponent(c.id)}`, {
+                                    method: "PATCH",
+                                    credentials: "include",
+                                    headers: { "Content-Type": "application/json", ...apiHeaders },
+                                    body: JSON.stringify({ estimated_value_cents: cents }),
+                                  });
+                                  if (!r.ok) {
+                                    const d = await r.json().catch(() => ({}));
+                                    setPortfolioMessage(d?.error || "Falha ao salvar valor.");
+                                    return;
+                                  }
+                                  await loadPortfolio();
+                                } catch {
+                                  setPortfolioMessage("Erro ao salvar valor.");
+                                }
+                              }}
+                            />
                           </td>
                           <td className="px-4 py-3 text-[#64748B]">{c.notes ?? "—"}</td>
                           <td className="px-4 py-3 text-[#64748B]">{formatDate(c.created_at)}</td>
@@ -821,7 +1090,7 @@ export default function CrmCommercialPage() {
                       ))}
                       {!portfolioLoading && (portfolio?.data ?? []).length === 0 && (
                         <tr>
-                          <td colSpan={5} className="px-4 py-8 text-center text-[#64748B]">
+                          <td colSpan={7} className="px-4 py-8 text-center text-[#64748B]">
                             Nenhum contato na carteira. Adicione manualmente ou aguarde a chegada de novos leads via round-robin.
                           </td>
                         </tr>
@@ -865,59 +1134,173 @@ export default function CrmCommercialPage() {
           )}
 
           {activeTab === "fluxo" && (
-            <div className="rounded-xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
-              <div className="max-h-[300px] overflow-auto">
-                <table className="w-full min-w-[900px]">
-                <thead>
-                  <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Etapa do fluxo
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Quantidade
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#64748B]">
-                      Últimos leads da etapa
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagedFlowRows.map((row) => (
-                    <tr
-                      key={row.status}
-                      className="border-b border-[#E2E8F0] last:border-0 transition-colors hover:bg-[#F8FAFC]"
-                    >
-                      <td className="px-4 py-3">
-                        <span className="inline-flex rounded-full bg-clicvend-orange/10 px-2.5 py-1 text-xs font-medium text-clicvend-orange">
-                          {statusLabelMap[row.status] ?? row.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center font-semibold text-[#1E293B]">{row.count}</td>
-                      <td className="px-4 py-3 text-sm text-[#64748B]">
-                        {row.sample.length > 0 ? row.sample.join(" · ") : "Sem leads nesta etapa"}
-                      </td>
-                    </tr>
-                  ))}
-                  {pagedFlowRows.length === 0 && (
-                    <tr>
-                      <td colSpan={3} className="px-4 py-8 text-center text-sm text-[#64748B]">
-                        Sem dados de fluxo para os filtros selecionados.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-                </table>
-              </div>
-              <div className="flex items-center justify-between border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2">
-                <p className="text-sm text-[#64748B]">
-                  Página <span className="font-medium text-[#1E293B]">{safeFlowPage + 1}</span> de{" "}
-                  <span className="font-medium text-[#1E293B]">{flowPageCount}</span> ({flowRows.length} etapa{flowRows.length === 1 ? "" : "s"})
+            <div className="rounded-xl border border-[#E2E8F0] bg-white p-4 shadow-sm">
+              {!selectedQueueId && (
+                <p className="mb-3 text-xs text-[#64748B]">
+                  Com <strong>Todas as filas</strong>, as colunas refletem os status encontrados no período. Escolha uma fila para alinhar ao mesmo Kanban de status configurado em Tickets.
                 </p>
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => setFlowPage((p) => Math.max(0, p - 1))} disabled={safeFlowPage === 0} className="inline-flex items-center rounded-lg border border-[#E2E8F0] px-2.5 py-1.5 text-sm text-[#475569] hover:bg-[#F8FAFC] disabled:opacity-50">Anterior</button>
-                  <button type="button" onClick={() => setFlowPage((p) => Math.min(flowPageCount - 1, p + 1))} disabled={safeFlowPage >= flowPageCount - 1} className="inline-flex items-center rounded-lg border border-[#E2E8F0] px-2.5 py-1.5 text-sm text-[#475569] hover:bg-[#F8FAFC] disabled:opacity-50">Próxima</button>
+              )}
+              {crmKanbanMessage && (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {crmKanbanMessage}
                 </div>
-              </div>
+              )}
+              {(overview?.board ?? []).length === 0 ? (
+                <div className="rounded-lg border border-dashed border-[#E2E8F0] bg-[#F8FAFC] px-4 py-10 text-center text-sm text-[#64748B]">
+                  Sem leads no quadro para os filtros selecionados.
+                </div>
+              ) : (
+                <div className="flex min-h-[420px] items-stretch gap-2">
+                  <button
+                    type="button"
+                    className="hidden shrink-0 self-center rounded border border-[#E2E8F0] bg-white p-2 text-[#64748B] hover:bg-[#F8FAFC] md:block"
+                    aria-label="Rolar para a esquerda"
+                    onClick={() =>
+                      crmKanbanScrollRef.current?.scrollBy({ left: -280, behavior: "smooth" })
+                    }
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <div
+                    ref={crmKanbanScrollRef}
+                    className="flex min-h-0 min-w-0 flex-1 gap-4 overflow-x-auto pb-2 [scrollbar-width:thin]"
+                  >
+                    {crmKanbanGrouped.map((col) => (
+                      <div
+                        key={col.key}
+                        className={`flex w-[280px] min-w-[280px] max-w-[280px] shrink-0 flex-col rounded-lg border-2 bg-[#F8FAFC] p-3 transition-colors ${
+                          crmDragOverColumn === col.key ? "border-clicvend-orange bg-clicvend-orange/5" : "border-transparent"
+                        }`}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          if (crmDraggingId) setCrmDragOverColumn(col.key);
+                        }}
+                        onDragLeave={() => setCrmDragOverColumn(null)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setCrmDragOverColumn(null);
+                          let payload: { ticketId?: string; fromStatus?: string } = {};
+                          try {
+                            payload = JSON.parse(e.dataTransfer.getData("text/plain") || "{}");
+                          } catch {
+                            payload = {};
+                          }
+                          const leadId = payload.ticketId || e.dataTransfer.getData("ticketId") || crmDraggingId || "";
+                          const fromStatus = payload.fromStatus || e.dataTransfer.getData("fromStatus") || "";
+                          if (leadId && fromStatus !== col.key) {
+                            void patchCrmLeadStatus(leadId, col.key);
+                          }
+                        }}
+                      >
+                        <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+                          <span
+                            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold uppercase text-white"
+                            style={{ backgroundColor: col.color_hex }}
+                          >
+                            {col.title}
+                          </span>
+                          <span className="rounded-full bg-[#E2E8F0] px-2.5 py-0.5 text-xs font-medium text-[#64748B]">
+                            {col.items.length}
+                          </span>
+                        </div>
+                        <div
+                          data-kanban-column-scroll="1"
+                          className="flex max-h-[min(68vh,520px)] min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden rounded-md"
+                        >
+                          {col.items.map((card) => {
+                            const displayName = card.customer_name || card.customer_phone || "Lead";
+                            const lastAt = card.last_message_at
+                              ? new Date(card.last_message_at).toLocaleString("pt-BR", {
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : null;
+                            const from = effectiveCrmKanbanStatus(
+                              crmOptimisticStatusById[card.id] ?? card.status,
+                              card.assigned_to
+                            );
+                            const fromKey = from === "in_queue" ? "open" : from;
+                            return (
+                              <div
+                                key={card.id}
+                                draggable={canDragCrmKanban && !crmKanbanSaving}
+                                onDragStart={(ev) => {
+                                  setCrmDraggingId(card.id);
+                                  ev.dataTransfer.setData(
+                                    "text/plain",
+                                    JSON.stringify({ kind: "crm-lead", ticketId: card.id, fromStatus: fromKey })
+                                  );
+                                  ev.dataTransfer.setData("ticketId", card.id);
+                                  ev.dataTransfer.setData("fromStatus", fromKey);
+                                  ev.dataTransfer.effectAllowed = "move";
+                                }}
+                                onDragEnd={() => setCrmDraggingId(null)}
+                                className={`flex flex-shrink-0 flex-col overflow-hidden rounded-md border border-[#E2E8F0] bg-white text-sm shadow-sm transition-all ${
+                                  canDragCrmKanban ? "cursor-grab active:cursor-grabbing" : ""
+                                } ${crmDraggingId === card.id ? "opacity-60 shadow-lg" : "hover:border-[#CBD5E1] hover:shadow-md"}`}
+                              >
+                                <div className="flex shrink-0 items-center justify-between gap-1 border-b border-[#F1F5F9] bg-[#FAFBFC] px-2 py-1.5">
+                                  <Link
+                                    href={slug ? `/${slug}/conversas/${card.id}` : "#"}
+                                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#0F172A]"
+                                    onClick={(ev) => ev.stopPropagation()}
+                                  >
+                                    <MessageSquare className="h-3.5 w-3.5" />
+                                    Abrir
+                                  </Link>
+                                </div>
+                                <Link
+                                  href={slug ? `/${slug}/conversas/${card.id}` : "#"}
+                                  className="flex min-w-0 flex-1 flex-col cursor-pointer p-3"
+                                >
+                                  <p className="truncate font-medium text-[#0F172A]" title={displayName}>
+                                    {displayName}
+                                  </p>
+                                  <p className="mt-0.5 text-[11px] text-[#64748B]">
+                                    {card.assigned_to_name ? `Consultor: ${card.assigned_to_name}` : "Sem responsável"}
+                                    {card.queue_name ? ` · ${card.queue_name}` : ""}
+                                  </p>
+                                  {card.score_tier && card.lead_score != null && (
+                                    <span
+                                      className={`mt-2 inline-flex w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${tierChipClass(card.score_tier)}`}
+                                    >
+                                      {tierLabel(card.score_tier)} · {card.lead_score}
+                                    </span>
+                                  )}
+                                  {card.estimated_value_cents != null && (
+                                    <p className="mt-1 text-[11px] font-medium text-[#0F172A]">
+                                      {formatMoneyCents(card.estimated_value_cents)}
+                                    </p>
+                                  )}
+                                  {lastAt && (
+                                    <p className="mt-2 text-[10px] text-[#94A3B8]">Últ. msg: {lastAt}</p>
+                                  )}
+                                </Link>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="hidden shrink-0 self-center rounded border border-[#E2E8F0] bg-white p-2 text-[#64748B] hover:bg-[#F8FAFC] md:block"
+                    aria-label="Rolar para a direita"
+                    onClick={() =>
+                      crmKanbanScrollRef.current?.scrollBy({ left: 280, behavior: "smooth" })
+                    }
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              <p className="mt-3 text-xs text-[#94A3B8]">
+                Exibindo até 150 conversas mais recentes. Arrastar um cartão para outra coluna atualiza o status (requer permissão de atribuir ou gerir tickets).
+              </p>
             </div>
           )}
 

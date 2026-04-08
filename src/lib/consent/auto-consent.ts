@@ -114,6 +114,17 @@ export async function sendAutoConsentIfNeeded(params: {
   name?: string | null;
   reason: ConsentTriggerReason;
 }): Promise<{ sent: boolean; skipped?: string; protocol?: string; error?: string }> {
+  /**
+   * Mensagem com botões SIM/NAO: fluxo LGPD/opt-in automático ao criar conversa / contato.
+   * Só envia se o contato ainda não tem opt_in/opt_out e ainda não recebeu pedido (opt_in_evidence).
+   * Desligar totalmente: CONSENT_AUTO_DISABLE=1 no .env do servidor.
+   */
+  const consentDisabled =
+    process.env.CONSENT_AUTO_DISABLE === "1" || process.env.CONSENT_AUTO_DISABLE === "true";
+  if (consentDisabled) {
+    return { sent: false, skipped: "consent_auto_disabled" };
+  }
+
   const digits = normalizeDigits(params.phoneOrJid);
   if (!digits) return { sent: false, skipped: "invalid_phone" };
 
@@ -142,8 +153,8 @@ export async function sendAutoConsentIfNeeded(params: {
   const protocol = buildProtocol();
   const now = new Date().toISOString();
   const text =
-    `Bem-vindo ao nosso atendimento. Protocolo ${protocol}. ` +
-    `Você autoriza receber comunicações e atualizações?`;
+    "Bem-vindo ao nosso atendimento. " +
+    "Você autoriza receber comunicações e atualizações?";
   const trackId = `consent_auto_${params.reason}_${Date.now()}`;
 
   const sendResult = await callUazSender(token, "/send/menu", {
@@ -153,7 +164,6 @@ export async function sendAutoConsentIfNeeded(params: {
       type: "button",
       text,
       choices: ["SIM|optin_yes", "NAO|optout_yes"],
-      footerText: `Protocolo ${protocol}`,
       readchat: true,
       async: true,
       track_source: "consent_auto",

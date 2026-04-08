@@ -143,6 +143,8 @@ export async function GET(request: Request) {
     .eq("channel_id", channelId)
     .eq("external_id", canonicalJid)
     .eq("kind", "ticket")
+    .order("last_message_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (existing?.id) {
@@ -159,14 +161,25 @@ export async function GET(request: Request) {
 
   // Mesmo contato pode existir com external_id antigo (ex.: LID). Buscar por customer_phone canônico para não duplicar.
   if (canonicalPhone && canonicalPhone !== "—" && canonicalPhone.replace(/\D/g, "").length >= 10) {
-    const { data: byPhone } = await supabase
-      .from("conversations")
-      .select("id, external_id, assigned_to")
-      .eq("company_id", companyId)
-      .eq("channel_id", channelId)
-      .eq("kind", "ticket")
-      .eq("customer_phone", canonicalPhone)
-      .maybeSingle();
+    const fetchByPhone = async (phoneVal: string) =>
+      supabase
+        .from("conversations")
+        .select("id, external_id, assigned_to")
+        .eq("company_id", companyId)
+        .eq("channel_id", channelId)
+        .eq("kind", "ticket")
+        .eq("customer_phone", phoneVal)
+        .order("last_message_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    let { data: byPhone } = await fetchByPhone(canonicalPhone);
+    if (!byPhone?.id && canonicalPhone.length === 13 && canonicalPhone.startsWith("55")) {
+      ({ data: byPhone } = await fetchByPhone(canonicalPhone.slice(2)));
+    }
+    if (!byPhone?.id && !canonicalPhone.startsWith("55")) {
+      ({ data: byPhone } = await fetchByPhone(`55${canonicalPhone}`));
+    }
     if (byPhone?.id) {
       const existingId = (byPhone as { id: string }).id;
       const currentExt = (byPhone as { external_id?: string }).external_id;

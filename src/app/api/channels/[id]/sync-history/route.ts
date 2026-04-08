@@ -2,12 +2,12 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
-import { invalidateConversationList } from "@/lib/redis/inbox-state";
+import { insertHistoryMessagesFromUazapiForConversation } from "@/lib/conversations/insert-remote-chat-messages";
+import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { toCanonicalJid } from "@/lib/phone-canonical";
-import { findChats, findMessages, type UazapiChat, type UazapiMessage } from "@/lib/uazapi/client";
-import { uazapiMessageBelongsToChat } from "@/lib/conversations/uazapi-message-belongs-to-chat";
+import { findChats, type UazapiChat } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
 
 /** Vercel / plataformas com limite — sync pode levar vários minutos. */
@@ -17,7 +17,7 @@ export const maxDuration = 300;
  * POST /api/channels/[id]/sync-history
  * Sincroniza histórico de mensagens via UAZAPI (lista de chats e mensagens por chat).
  * Por padrão só preenche conversas que já existem. Com body { create_missing: true } ou
- * ?create_missing=1, cria conversa/contato faltante e importa até messages_per_chat (default 200, max 1000).
+ * ?create_missing=1, cria conversa/contato faltante e importa até messages_per_chat (default alto, max 8000).
  * Atualiza channel_groups para grupos mesmo quando não cria conversa.
  * Auth: usuário com channels.manage, ou chamada interna com X-Internal-Sync-Secret.
  */
@@ -77,14 +77,14 @@ export async function POST(
     String(body.create_missing ?? url.searchParams.get("create_missing") ?? "") === "1";
   const envDefault = Number(process.env.SYNC_HISTORY_MAX_MESSAGES_PER_CHAT);
   const defaultPerChat =
-    Number.isFinite(envDefault) && envDefault > 0 ? Math.min(5000, Math.floor(envDefault)) : 200;
+    Number.isFinite(envDefault) && envDefault > 0 ? Math.min(8000, Math.floor(envDefault)) : 4000;
   const targetMessagesPerChatRaw = Number(
     body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? defaultPerChat
   );
   const targetMessagesPerChat =
     Number.isFinite(targetMessagesPerChatRaw) && targetMessagesPerChatRaw > 0
-      ? Math.min(Math.max(Math.floor(targetMessagesPerChatRaw), 1), 1000)
-      : 200;
+      ? Math.min(Math.max(Math.floor(targetMessagesPerChatRaw), 1), 8000)
+      : 4000;
 
   /** uazapi devolve chats paginados. */
   const CHAT_PAGE_SIZE = 100;
@@ -195,22 +195,10 @@ export async function POST(
   }
 
   const MAX_MESSAGES_PER_INSTANCE = 15_000;
-  const MESSAGES_PAGE_SIZE = 100;
-  const MESSAGE_INSERT_BATCH = 40;
-  const MAX_MESSAGE_FIND_PAGES_PER_CHAT = 80;
   let conversationsCreated = 0;
   let messagesInserted = 0;
-
-  const mediaTypeMap: Record<string, string> = {
-    image: "image",
-    video: "video",
-    audio: "audio",
-    myaudio: "audio",
-    ptt: "ptt",
-    ptv: "video",
-    document: "document",
-    sticker: "sticker",
-  };
+  /** Conversas que receberam mensagens — limpar messages_snapshot para o GET carregar do Postgres (ordenado). */
+  const touchedConversationIds = new Set<string>();
 
   for (const chat of chats) {
     if (messagesInserted >= MAX_MESSAGES_PER_INSTANCE) break;
@@ -312,142 +300,49 @@ export async function POST(
 
     if (!conversationId) continue;
 
-    const { data: existMsgRows } = await supabase
-      .from("messages")
-      .select("external_id, sent_at")
-      .eq("conversation_id", conversationId)
-      .limit(8000);
-    const seenExt = new Set<string>();
-    const seenSent = new Set<string>();
-    for (const r of existMsgRows ?? []) {
-      const row = r as { external_id?: string | null; sent_at?: string };
-      if (row.external_id) seenExt.add(row.external_id);
-      else if (row.sent_at) seenSent.add(row.sent_at);
-    }
+    const budget = Math.min(targetMessagesPerChat, MAX_MESSAGES_PER_INSTANCE - messagesInserted);
+    if (budget < 1) continue;
 
-    let msgOffset = 0;
-    let latestSentAt = 0;
-    let chatMessagesInserted = 0;
-    let msgPagesForChat = 0;
-    const pendingInserts: Record<string, unknown>[] = [];
+    const { inserted, resolvedChatJid } = await insertHistoryMessagesFromUazapiForConversation(
+      supabase,
+      token,
+      conversationId,
+      waChatid,
+      budget
+    );
 
-    const flushMessages = async () => {
-      if (pendingInserts.length === 0) return;
-      const batch = pendingInserts.splice(0, pendingInserts.length);
-      const { error: batchErr } = await supabase.from("messages").insert(batch);
-      if (!batchErr) {
-        messagesInserted += batch.length;
-        chatMessagesInserted += batch.length;
-        return;
-      }
-      for (const row of batch) {
-        const { error: oneErr } = await supabase.from("messages").insert(row);
-        if (!oneErr) {
-          messagesInserted++;
-          chatMessagesInserted++;
-        }
-      }
-    };
-
-    while (
-      messagesInserted < MAX_MESSAGES_PER_INSTANCE &&
-      chatMessagesInserted < targetMessagesPerChat &&
-      msgPagesForChat < MAX_MESSAGE_FIND_PAGES_PER_CHAT
-    ) {
-      msgPagesForChat += 1;
-      const { data: msgData, ok: msgOk } = await findMessages(token, waChatid, {
-        limit: MESSAGES_PAGE_SIZE,
-        offset: msgOffset,
-      });
-      const rawNext =
-        msgOk && msgData && typeof msgData.nextOffset === "number" && Number.isFinite(msgData.nextOffset)
-          ? msgData.nextOffset
-          : undefined;
-      const messages = (msgOk && msgData?.messages ? msgData.messages : []) as UazapiMessage[];
-      if (messages.length === 0) {
-        if (typeof rawNext === "number" && rawNext > msgOffset) {
-          msgOffset = rawNext;
-          continue;
-        }
-        break;
-      }
-
-      for (const msg of messages) {
-        if (chatMessagesInserted >= targetMessagesPerChat) break;
-        if (!uazapiMessageBelongsToChat(msg, waChatid)) continue;
-        const fromMe = msg.fromMe === true;
-        const bodyText = (msg.body ?? msg.text ?? "").toString().trim();
-        const rawType = (msg.type ?? msg.mediaType ?? "") as string;
-        const msgMediaUrl = (msg.mediaUrl ??
-          msg.file ??
-          msg.url ??
-          msg.image ??
-          msg.base64 ??
-          (msg as { media?: { url?: string } }).media?.url ??
-          "") as string;
-        const msgCaption = (msg.caption ?? msg.body ?? msg.text ?? "").toString().trim();
-        const msgFileName = (msg.fileName ?? msg.filename ?? msg.docName ?? "") as string;
-        const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
-        const isMedia = messageType !== "text" && msgMediaUrl;
-        const content = bodyText || (isMedia ? `[${messageType}]` : "");
-        const rawTs = msg.timestamp;
-        const sentAt =
-          rawTs != null && typeof rawTs === "number"
-            ? new Date(rawTs * 1000).toISOString()
-            : new Date().toISOString();
-        if (typeof rawTs === "number" && rawTs * 1000 > latestSentAt) latestSentAt = rawTs * 1000;
-        const extId = (msg.id ?? "").toString() || null;
-
-        if (extId) {
-          if (seenExt.has(extId)) continue;
-        } else {
-          if (seenSent.has(sentAt)) continue;
-        }
-
-        const insertPayload: Record<string, unknown> = {
-          conversation_id: conversationId,
-          direction: fromMe ? "out" : "in",
-          content: content.slice(0, 10000),
-          message_type: isMedia ? messageType : "text",
-          external_id: extId,
-          sent_at: sentAt,
-        };
-        if (isMedia && msgMediaUrl.trim()) insertPayload.media_url = msgMediaUrl.trim().slice(0, 10000);
-        if (isMedia && msgCaption) insertPayload.caption = msgCaption.slice(0, 2000);
-        if (msgFileName && typeof msgFileName === "string") insertPayload.file_name = msgFileName.slice(0, 255);
-
-        pendingInserts.push(insertPayload);
-        if (extId) seenExt.add(extId);
-        else seenSent.add(sentAt);
-
-        if (pendingInserts.length >= MESSAGE_INSERT_BATCH) {
-          await flushMessages();
-        }
-        if (chatMessagesInserted >= targetMessagesPerChat) break;
-      }
-
-      await flushMessages();
-
-      if (chatMessagesInserted >= targetMessagesPerChat) break;
-      if (typeof rawNext === "number" && rawNext > msgOffset) {
-        msgOffset = rawNext;
-      } else if (msgData?.hasMore === false) {
-        break;
-      } else {
-        msgOffset += MESSAGES_PAGE_SIZE;
+    if (resolvedChatJid?.trim()) {
+      const next = resolvedChatJid.trim();
+      if (next.toLowerCase() !== waChatid.trim().toLowerCase()) {
+        await supabase
+          .from("conversations")
+          .update({
+            wa_chat_jid: next,
+            external_id: next,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", conversationId)
+          .eq("company_id", companyId!);
       }
     }
 
-    await flushMessages();
+    if (inserted > 0) {
+      touchedConversationIds.add(conversationId);
+    }
+    messagesInserted += inserted;
+  }
 
-    if (latestSentAt > 0) {
+  if (touchedConversationIds.size > 0) {
+    const ids = [...touchedConversationIds];
+    const CHUNK = 150;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
       await supabase
         .from("conversations")
-        .update({
-          last_message_at: new Date(latestSentAt).toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", conversationId);
+        .update({ messages_snapshot: null, updated_at: new Date().toISOString() })
+        .eq("company_id", companyId!)
+        .in("id", slice);
+      await Promise.all(slice.map((convId) => invalidateConversationDetail(convId, companyId!)));
     }
   }
 

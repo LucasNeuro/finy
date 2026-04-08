@@ -1,6 +1,7 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -18,12 +19,20 @@ type ConversationMetricRow = {
 type ConversationBoardRow = {
   id: string;
   queue_id: string | null;
+  channel_id: string | null;
   assigned_to: string | null;
   status: string | null;
   customer_name: string | null;
   customer_phone: string | null;
   last_message_at: string | null;
 };
+
+function scoreTierFromLeadScore(score: number | null): "hot" | "warm" | "cold" | null {
+  if (score == null) return null;
+  if (score >= 70) return "hot";
+  if (score >= 40) return "warm";
+  return "cold";
+}
 
 function toIsoDaysAgo(days: number): string {
   const now = Date.now();
@@ -180,7 +189,7 @@ export async function GET(request: Request) {
 
   let boardQuery = supabase
     .from("conversations")
-    .select("id, queue_id, assigned_to, status, customer_name, customer_phone, last_message_at")
+    .select("id, queue_id, channel_id, assigned_to, status, customer_name, customer_phone, last_message_at")
     .eq("company_id", companyId)
     .in("queue_id", scopedQueueIds)
     .eq("kind", "ticket")
@@ -204,6 +213,44 @@ export async function GET(request: Request) {
 
   const metrics = (metricsRows ?? []) as ConversationMetricRow[];
   const boardData = (boardRows ?? []) as ConversationBoardRow[];
+
+  const scoreByPair = new Map<string, { lead_score: number | null; estimated_value_cents: number | null }>();
+  const phonesByChannel = new Map<string, Set<string>>();
+  for (const row of boardData) {
+    const ch = row.channel_id;
+    const ph = row.customer_phone;
+    if (!ch || !ph) continue;
+    const c = toCanonicalDigits(ph.replace(/\D/g, ""));
+    if (!c) continue;
+    if (!phonesByChannel.has(ch)) phonesByChannel.set(ch, new Set());
+    phonesByChannel.get(ch)!.add(c);
+  }
+
+  const OWNER_PHONE_CHUNK = 100;
+  for (const [chId, phoneSet] of phonesByChannel) {
+    const list = [...phoneSet];
+    for (let i = 0; i < list.length; i += OWNER_PHONE_CHUNK) {
+      const chunk = list.slice(i, i + OWNER_PHONE_CHUNK);
+      const { data: owners } = await admin
+        .from("commercial_contact_owners")
+        .select("channel_id, phone_canonical, lead_score, estimated_value_cents")
+        .eq("company_id", companyId)
+        .eq("channel_id", chId)
+        .in("phone_canonical", chunk);
+      for (const o of owners ?? []) {
+        const r = o as {
+          channel_id: string;
+          phone_canonical: string;
+          lead_score: number | null;
+          estimated_value_cents: number | null;
+        };
+        scoreByPair.set(`${r.channel_id}|${r.phone_canonical}`, {
+          lead_score: r.lead_score ?? null,
+          estimated_value_cents: r.estimated_value_cents ?? null,
+        });
+      }
+    }
+  }
 
   const queueById = new Map(scopedQueueIds.map((id) => [id, queues.find((q) => q.id === id) ?? null]));
   const queueToConsultants = new Map<string, string[]>();
@@ -321,14 +368,23 @@ export async function GET(request: Request) {
     };
   });
 
-  const board = boardData.map((item) => ({
-    ...item,
-    status: normalizeStatus(item.status),
-    assigned_to_name: item.assigned_to
-      ? profileByUser.get(item.assigned_to)?.full_name ?? "Sem nome"
-      : null,
-    queue_name: item.queue_id ? queueById.get(item.queue_id)?.name ?? null : null,
-  }));
+  const board = boardData.map((item) => {
+    const canon = item.customer_phone ? toCanonicalDigits(item.customer_phone.replace(/\D/g, "")) : null;
+    const extra =
+      item.channel_id && canon ? scoreByPair.get(`${item.channel_id}|${canon}`) : undefined;
+    const lead_score = extra?.lead_score ?? null;
+    return {
+      ...item,
+      status: normalizeStatus(item.status),
+      assigned_to_name: item.assigned_to
+        ? profileByUser.get(item.assigned_to)?.full_name ?? "Sem nome"
+        : null,
+      queue_name: item.queue_id ? queueById.get(item.queue_id)?.name ?? null : null,
+      lead_score,
+      estimated_value_cents: extra?.estimated_value_cents ?? null,
+      score_tier: scoreTierFromLeadScore(lead_score),
+    };
+  });
 
   const pipeline = [...pipelineMap.entries()]
     .map(([status, count]) => ({ status, count }))

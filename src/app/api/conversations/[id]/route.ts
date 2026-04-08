@@ -126,7 +126,13 @@ export async function GET(
       let messages = Array.isArray(cached.messages) ? normalizeMessageTypes(cached.messages) : cached.messages;
       messages = await enrichMessagesWithCachedMedia(companyId, id, messages as Record<string, unknown>[]);
       const slicedMessages = Array.isArray(messages)
-        ? (messages as Record<string, unknown>[]).slice(-INITIAL_MESSAGES_LIMIT)
+        ? (messages as Record<string, unknown>[])
+            .slice()
+            .sort(
+              (a, b) =>
+                new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+            )
+            .slice(-INITIAL_MESSAGES_LIMIT)
         : messages;
       const rawStatusCached = (cached.status ?? "open").toString().toLowerCase().trim();
       const effectiveStatusCached =
@@ -358,7 +364,11 @@ export async function GET(
 
   const snapshot = (conversation as { messages_snapshot?: unknown }).messages_snapshot;
   if (Array.isArray(snapshot) && snapshot.length > 0) {
-    messages = snapshot;
+    messages = [...snapshot].sort(
+      (a: unknown, b: unknown) =>
+        new Date(String((a as { sent_at?: string }).sent_at ?? 0)).getTime() -
+        new Date(String((b as { sent_at?: string }).sent_at ?? 0)).getTime()
+    );
   } else if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) {
     messages = [];
   }
@@ -443,16 +453,43 @@ export async function GET(
     return true;
   });
 
+  messages = (messages as Record<string, unknown>[]).sort(
+    (a, b) =>
+      new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+  );
+
   messages = normalizeMessageTypes(messages as Record<string, unknown>[]);
   messages = await enrichMessagesWithCachedMedia(companyId, id, messages as Record<string, unknown>[]);
 
   const { messages_snapshot: _snapshot, ...convRest } = conversation as Record<string, unknown>;
   const displayPhone = contact_phone_from_cc ?? conversation.customer_phone;
   const canonicalPhone = toCanonicalDigits(displayPhone || conversation.customer_phone) ?? displayPhone ?? conversation.customer_phone;
-  const hasMoreMessages =
-    Array.isArray(snapshot)
-      ? snapshot.length > (Array.isArray(messages) ? messages.length : 0)
-      : Array.isArray(messages) && messages.length >= MESSAGES_LIMIT;
+
+  /** Há mensagens no Postgres mais antigas que a mais antiga já exibida? (snapshot antes enganava: comparava length errado.) */
+  let hasMoreMessages = false;
+  const countClient = process.env.SUPABASE_SERVICE_ROLE_KEY ? createServiceRoleClient() : supabase;
+  const chatOnlySorted = (messages as Record<string, unknown>[])
+    .filter((m) => String(m.message_type ?? "") !== "internal_note")
+    .sort(
+      (a, b) =>
+        new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+    );
+  const oldestChatSentAt =
+    chatOnlySorted.length > 0 ? String(chatOnlySorted[0]?.sent_at ?? "").trim() : "";
+  if (oldestChatSentAt) {
+    const { count: olderCount, error: olderErr } = await countClient
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", id)
+      .lt("sent_at", oldestChatSentAt);
+    if (!olderErr) hasMoreMessages = (olderCount ?? 0) > 0;
+  } else {
+    const { count: totalCount, error: totalErr } = await countClient
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", id);
+    if (!totalErr) hasMoreMessages = (totalCount ?? 0) > 0;
+  }
 
   const payload = {
     ...convRest,

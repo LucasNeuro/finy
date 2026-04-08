@@ -1682,6 +1682,12 @@ export default function ConversaThreadPage({
 
   const claimAttemptedRef = useRef(false);
   const contactDetailsFetchedForRef = useRef<string | null>(null);
+  /** Uma tentativa silenciosa de puxar histórico da instância ao abrir conversa sem mensagens. */
+  const autoHistoryPullDoneForIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    autoHistoryPullDoneForIdRef.current = null;
+  }, [resolved?.id]);
 
   async function handleAICorrection() {
     if (!sendValue.trim()) return;
@@ -1826,7 +1832,7 @@ export default function ConversaThreadPage({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json", ...apiHeaders },
-          body: JSON.stringify({ max_messages: 1000 }),
+          body: JSON.stringify({ max_messages: 8000 }),
         });
         const pullData = (await pullRes.json().catch(() => ({}))) as { inserted?: number; error?: string };
         if (!pullRes.ok) {
@@ -1858,7 +1864,7 @@ export default function ConversaThreadPage({
     }
   }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders, queryClient]);
 
-  /** Importa mensagens da UAZAPI (/message/find paginado) até 1000 por clique no ícone de histórico ou botão vazio. */
+  /** Importa mensagens antigas via /message/find (várias páginas por clique, até o teto da API). Sem avisos quando não há novidades — só erro em falha real da API. */
   const pullWhatsAppHistory = useCallback(async () => {
     const id = resolved?.id;
     if (!id || pullingRemoteHistory) return;
@@ -1869,7 +1875,7 @@ export default function ConversaThreadPage({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", ...apiHeaders },
-        body: JSON.stringify({ max_messages: 1000 }),
+        body: JSON.stringify({ max_messages: 8000 }),
       });
       const pullData = (await pullRes.json().catch(() => ({}))) as {
         inserted?: number;
@@ -1881,30 +1887,7 @@ export default function ConversaThreadPage({
         setError(pullData?.error ?? "Não foi possível buscar histórico no WhatsApp.");
         return;
       }
-      if (!pullData.inserted || pullData.inserted <= 0) {
-        if (pullData.jid_corrected) {
-          const detailRes = await fetch(`/api/conversations/${id}?skip_cache=1`, {
-            credentials: "include",
-            headers: apiHeaders,
-          });
-          if (detailRes.ok) {
-            const detail = (await detailRes.json()) as ConversationDetail;
-            queryClient.setQueryData(queryKeys.conversation(id), detail);
-          } else {
-            await queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
-          }
-          setError(
-            "O identificador do chat foi alinhado com a UAZAPI. Clique de novo no relógio para importar as mensagens."
-          );
-          return;
-        }
-        setError(
-          pullData?.warning
-            ? String(pullData.warning)
-            : "Nenhuma mensagem nova importada. A UAZAPI só traz o que já está salvo no servidor dela (não copia automaticamente todo o histórico só do celular). Confira Conexões, UAZAPI_BASE_URL no servidor e o webhook com evento history; mensagens muito antigas podem ter sido removidas pela política da UAZ. Você pode clicar de novo no relógio."
-        );
-        return;
-      }
+
       const detailRes = await fetch(`/api/conversations/${id}?skip_cache=1`, {
         credentials: "include",
         headers: apiHeaders,
@@ -1919,6 +1902,40 @@ export default function ConversaThreadPage({
       setPullingRemoteHistory(false);
     }
   }, [resolved?.id, pullingRemoteHistory, apiHeaders, queryClient]);
+
+  /** Um só "Carregar mais": antigas no banco (paginação) ou, se não houver, lote na instância (UAZ). */
+  const handleLoadMoreChat = useCallback(async () => {
+    if (loadingOlderMessages || pullingRemoteHistory) return;
+    const id = resolved?.id;
+    const hasMsgs = (conv?.messages?.length ?? 0) > 0;
+    if (id && hasMsgs && hasMoreOlderMessages) {
+      await loadOlderMessages();
+      return;
+    }
+    await pullWhatsAppHistory();
+  }, [
+    loadingOlderMessages,
+    pullingRemoteHistory,
+    resolved?.id,
+    conv?.messages?.length,
+    hasMoreOlderMessages,
+    loadOlderMessages,
+    pullWhatsAppHistory,
+  ]);
+
+  /** Ao abrir conversa com canal e sem mensagens no banco: importa silenciosamente o que a instância já tiver (não lê o celular diretamente). */
+  useEffect(() => {
+    const cid = resolved?.id;
+    if (!cid || !conv?.channel_id || loading || !conv) return;
+    if (autoHistoryPullDoneForIdRef.current === cid) return;
+    const n = Array.isArray(conv.messages) ? conv.messages.length : 0;
+    if (n > 0) {
+      autoHistoryPullDoneForIdRef.current = cid;
+      return;
+    }
+    autoHistoryPullDoneForIdRef.current = cid;
+    void pullWhatsAppHistory();
+  }, [resolved?.id, conv?.channel_id, conv?.messages, loading, conv, pullWhatsAppHistory]);
 
   // Não atribuir ao abrir: atribuição só pelo botão "+" no minicard da lista.
 
@@ -2710,13 +2727,17 @@ export default function ConversaThreadPage({
           {conv?.channel_id && !isLoading && (
             <button
               type="button"
-              onClick={() => void pullWhatsAppHistory()}
-              disabled={pullingRemoteHistory}
+              onClick={() => void handleLoadMoreChat()}
+              disabled={loadingOlderMessages || pullingRemoteHistory}
               className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] disabled:opacity-50"
-              aria-label="Importar mensagens do WhatsApp (servidor UAZ)"
-              title="Busca mensagens deste chat na UAZAPI, grava no sistema e atualiza a tela (até 1000 por clique, várias páginas)."
+              aria-label="Carregar mais mensagens (servidor ou histórico sincronizado)"
+              title="Mesmo que Carregar mais na conversa: antigas no banco primeiro, depois importação da instância."
             >
-              {pullingRemoteHistory ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <History className="h-4 w-4" aria-hidden />}
+              {pullingRemoteHistory || loadingOlderMessages ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <History className="h-4 w-4" aria-hidden />
+              )}
             </button>
           )}
           {canTransfer && (
@@ -2905,48 +2926,42 @@ export default function ConversaThreadPage({
               </>
             ) : (
               <>
-                {mergedMessages.length === 0 && conv?.channel_id && (
-                  <div className="flex flex-col items-center justify-center gap-3 py-12 px-4 text-center">
-                    <p className="text-sm text-[#64748B]">Nenhuma mensagem carregada ainda.</p>
+                {conv?.channel_id && (
+                  <div className="mb-2 flex justify-center border-b border-transparent pb-2">
                     <button
                       type="button"
-                      onClick={() => void pullWhatsAppHistory()}
-                      disabled={pullingRemoteHistory}
-                      className="inline-flex items-center gap-2 rounded-lg border border-clicvend-orange/40 bg-white px-4 py-2 text-sm font-medium text-clicvend-orange shadow-sm hover:bg-clicvend-orange/5 disabled:opacity-50"
+                      onClick={() => void handleLoadMoreChat()}
+                      disabled={loadingOlderMessages || pullingRemoteHistory}
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-clicvend-orange hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+                      title="Mensagens mais antigas: primeiro do servidor, depois o que a instância já sincronizou. Pode clicar de novo."
                     >
-                      {pullingRemoteHistory ? (
+                      {pullingRemoteHistory || loadingOlderMessages ? (
                         <>
-                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                          Buscando no WhatsApp…
+                          <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+                          Carregando…
                         </>
                       ) : (
                         <>
-                          <History className="h-4 w-4" aria-hidden />
-                          Importar mensagens do WhatsApp
+                          <History className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
+                          Carregar mais
                         </>
                       )}
                     </button>
-                    <p className="max-w-sm text-xs text-[#94A3B8]">
-                      Traz mensagens deste chat que a UAZAPI já tem no servidor (até 1000 por vez). O que só existir no celular depende da sincronização/histórico da UAZ.
+                  </div>
+                )}
+                {mergedMessages.length === 0 && !conv?.channel_id && (
+                  <div className="flex flex-col items-center justify-center gap-2 py-12 px-4 text-center">
+                    <p className="text-sm text-[#64748B]">Nenhuma mensagem carregada ainda.</p>
+                    <p className="max-w-md text-xs text-[#94A3B8]">
+                      Esta conversa não está vinculada a um canal WhatsApp. Sem canal, não dá para pedir histórico na UAZAPI.
                     </p>
                   </div>
                 )}
-                {(conv?.messages?.length ?? 0) > 0 && hasMoreOlderMessages && (
-                  <div className="flex flex-col items-center gap-1 py-2">
-                    <button
-                      type="button"
-                      onClick={loadOlderMessages}
-                      disabled={loadingOlderMessages}
-                      className="text-sm text-clicvend-orange hover:underline disabled:opacity-50"
-                    >
-                      {pullingRemoteHistory
-                        ? "Buscando no WhatsApp…"
-                        : loadingOlderMessages
-                          ? "Carregando…"
-                          : "Carregar mensagens antigas"}
-                    </button>
-                    <p className="max-w-md text-center text-xs text-[#94A3B8]">
-                      Primeiro carrega do servidor; se não houver mais, busca na conexão e atualiza o cache.
+                {mergedMessages.length === 0 && conv?.channel_id && (
+                  <div className="flex flex-col items-center justify-center gap-2 py-8 px-4 text-center">
+                    <p className="text-sm text-[#64748B]">Nenhuma mensagem ainda.</p>
+                    <p className="max-w-sm text-xs text-[#94A3B8]">
+                      Toque em <strong>Carregar mais</strong> ou no ícone de histórico no topo.
                     </p>
                   </div>
                 )}

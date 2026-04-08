@@ -8,13 +8,17 @@ import { createClient } from "@/lib/supabase/server";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { NextResponse } from "next/server";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
+
+/** Quantas passadas completas em /message/find por clique em "Carregar mais" (cada uma até `max_messages`). */
+const MAX_SYNC_ROUNDS = 24;
 
 /**
  * POST /api/conversations/[id]/pull-remote-history
  * Busca mensagens antigas desta conversa na UAZAPI, grava no Postgres e invalida
  * cache Redis do detalhe + snapshot local (para o GET não servir lista antiga).
- * Uso: botão "Carregar mensagens antigas" no chat quando não há mais páginas só no banco.
+ * Repete em rodadas até não inserir mais nada (histórico completo disponível na instância),
+ * com teto de segurança MAX_SYNC_ROUNDS.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: conversationId } = await params;
@@ -40,7 +44,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const rawMax = Number(body.max_messages);
   const maxMessages =
-    Number.isFinite(rawMax) && rawMax > 0 ? Math.min(Math.floor(rawMax), 1000) : 500;
+    Number.isFinite(rawMax) && rawMax > 0 ? Math.min(Math.floor(rawMax), 8000) : 4000;
 
   const supabaseUser = await createClient();
   const { data: conversation, error: convError } = await supabaseUser
@@ -74,38 +78,55 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const supabase = createServiceRoleClient();
-  const { inserted, uazapiError, resolvedChatJid } = await insertHistoryMessagesFromUazapiForConversation(
-    supabase,
-    resolved.token,
-    conversationId,
-    waChatid,
-    maxMessages
-  );
+  let chatKey = waChatid;
+  let totalInserted = 0;
+  let jidWasCorrected = false;
+  let lastWarning: string | undefined;
 
-  if (uazapiError && inserted === 0) {
-    return NextResponse.json({ ok: false, inserted: 0, error: uazapiError }, { status: 502 });
-  }
+  for (let round = 0; round < MAX_SYNC_ROUNDS; round++) {
+    const { inserted, uazapiError, resolvedChatJid } = await insertHistoryMessagesFromUazapiForConversation(
+      supabase,
+      resolved.token,
+      conversationId,
+      chatKey,
+      maxMessages
+    );
 
-  if (resolvedChatJid?.trim()) {
-    const prev = waChatid.trim().toLowerCase();
-    if (resolvedChatJid.trim().toLowerCase() !== prev) {
-      await supabase
-        .from("conversations")
-        .update({
-          wa_chat_jid: resolvedChatJid.trim(),
-          external_id: resolvedChatJid.trim(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", conversationId)
-        .eq("company_id", companyId);
+    if (resolvedChatJid?.trim()) {
+      const prev = chatKey.trim().toLowerCase();
+      const next = resolvedChatJid.trim();
+      if (next.toLowerCase() !== prev) {
+        await supabase
+          .from("conversations")
+          .update({
+            wa_chat_jid: next,
+            external_id: next,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", conversationId)
+          .eq("company_id", companyId);
+        chatKey = next;
+        jidWasCorrected = true;
+      }
+    }
+
+    if (uazapiError) {
+      lastWarning = uazapiError;
+      if (inserted === 0) {
+        if (totalInserted === 0) {
+          return NextResponse.json({ ok: false, inserted: 0, error: uazapiError }, { status: 502 });
+        }
+        break;
+      }
+    }
+
+    totalInserted += inserted;
+    if (inserted === 0) {
+      break;
     }
   }
 
-  const jidWasCorrected =
-    !!resolvedChatJid?.trim() &&
-    resolvedChatJid.trim().toLowerCase() !== waChatid.trim().toLowerCase();
-
-  if (inserted > 0) {
+  if (totalInserted > 0) {
     await supabase
       .from("conversations")
       .update({ messages_snapshot: null, updated_at: new Date().toISOString() })
@@ -113,15 +134,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .eq("company_id", companyId);
   }
 
-  if (inserted > 0 || jidWasCorrected) {
+  if (totalInserted > 0 || jidWasCorrected) {
     await invalidateConversationDetail(conversationId, companyId);
     await invalidateConversationList(companyId);
   }
 
   return NextResponse.json({
     ok: true,
-    inserted,
+    inserted: totalInserted,
     jid_corrected: jidWasCorrected || undefined,
-    warning: uazapiError && inserted > 0 ? uazapiError : undefined,
+    warning: lastWarning && totalInserted > 0 ? lastWarning : undefined,
   });
 }

@@ -51,10 +51,20 @@ export async function POST(request: Request) {
   });
 
   if (!result.ok || !result.token || !result.instance) {
-    return NextResponse.json(
-      { error: result.error ?? "Failed to create UAZAPI instance" },
-      { status: 502 }
-    );
+    const raw = (result.error ?? "Failed to create UAZAPI instance").trim();
+    const lower = raw.toLowerCase();
+    let error = raw;
+    if (
+      lower.includes("maximum number of instances") ||
+      lower.includes("max instances") ||
+      lower.includes("instance limit")
+    ) {
+      error =
+        "Limite de instâncias WhatsApp no provedor UAZAPI atingido para este admintoken. " +
+        "Não é o limite de 3 canais da empresa: é o teto do plano/conta UAZ. " +
+        "Remova instâncias antigas no painel UAZ, ou aumente o plano, ou use outro UAZAPI_ADMIN_TOKEN com vagas.";
+    }
+    return NextResponse.json({ error }, { status: 502 });
   }
 
   const instanceId = result.instance.id ?? result.instance.name ?? "";

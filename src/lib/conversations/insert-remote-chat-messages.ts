@@ -1,4 +1,5 @@
 import { findChats, findMessages, type UazapiMessage } from "@/lib/uazapi/client";
+import { uazFindMessageSentAtIso } from "@/lib/uazapi/message-timestamp";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uazapiMessageBelongsToChat } from "@/lib/conversations/uazapi-message-belongs-to-chat";
 import { normalizeWhatsAppJid, phoneDigitsOnly, toCanonicalJid } from "@/lib/phone-canonical";
@@ -18,7 +19,7 @@ async function resolveChatidForUazMessageFind(token: string, canonicalWa: string
   if (digits.length < 10) return canonicalWa;
 
   const chatsRes = await findChats(token, {
-    limit: 40,
+    limit: 120,
     offset: 0,
     sort: "-wa_lastMsgTimestamp",
     wa_chatid: digits,
@@ -38,8 +39,8 @@ async function resolveChatidForUazMessageFind(token: string, canonicalWa: string
 
 const MESSAGES_PAGE_SIZE = 100;
 const MESSAGE_INSERT_BATCH = 40;
-/** Limite de páginas /message/find por conversa (evita loop se a API repetir resultados). */
-const MAX_MESSAGE_FIND_PAGES = 80;
+/** Limite total de páginas /message/find por requisição (vários JIDs somam neste teto). */
+const MAX_MESSAGE_FIND_PAGES = 100;
 
 const mediaTypeMap: Record<string, string> = {
   image: "image",
@@ -51,6 +52,16 @@ const mediaTypeMap: Record<string, string> = {
   document: "document",
   sticker: "sticker",
 };
+
+function uniqueChatIdsForFind(resolved: string, canonical: string): string[] {
+  const out: string[] = [];
+  for (const c of [resolved, canonical]) {
+    const t = (c ?? "").trim();
+    if (!t) continue;
+    if (!out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+  }
+  return out;
+}
 
 /**
  * Busca mensagens na UAZAPI para um único chat e insere na tabela `messages`
@@ -75,26 +86,28 @@ export async function insertHistoryMessagesFromUazapiForConversation(
 
   const chatidForFind = await resolveChatidForUazMessageFind(token, wa);
 
-  const cap = Math.min(Math.max(maxNewMessages, 1), 1000);
+  /** Limite alto por clique: a UAZ pagina em /message/find; percorremos até esgotar ou atingir o teto. */
+  const cap = Math.min(Math.max(maxNewMessages, 1), 8000);
 
   const { data: existMsgRows } = await supabase
     .from("messages")
     .select("external_id, sent_at")
     .eq("conversation_id", conversationId)
-    .limit(8000);
+    .limit(50_000);
 
   const seenExt = new Set<string>();
   const seenSent = new Set<string>();
   for (const r of existMsgRows ?? []) {
-    const row = r as { external_id?: string | null; sent_at?: string };
+    const row = r as { external_id?: string | null; sent_at?: string | null };
     if (row.external_id) seenExt.add(row.external_id);
     else if (row.sent_at) seenSent.add(row.sent_at);
   }
 
-  let msgOffset = 0;
   let latestSentAt = 0;
   let chatMessagesInserted = 0;
   const pendingInserts: Record<string, unknown>[] = [];
+  /** Quando a UAZ não manda timestamp, evita usar todos "agora" (quebra ordem no chat). Presume lista newest-first e afasta 1 ms por mensagem. */
+  let syntheticNoTsCounter = 0;
 
   const flushMessages = async () => {
     if (pendingInserts.length === 0) return;
@@ -110,107 +123,140 @@ export async function insertHistoryMessagesFromUazapiForConversation(
     }
   };
 
-  let pagesFetched = 0;
-  while (chatMessagesInserted < cap && pagesFetched < MAX_MESSAGE_FIND_PAGES) {
-    pagesFetched += 1;
-    const { data: msgData, ok: msgOk, error: pageErr } = await findMessages(token, chatidForFind, {
-      limit: MESSAGES_PAGE_SIZE,
-      offset: msgOffset,
-    });
-    if (!msgOk) {
-      return { inserted: chatMessagesInserted, uazapiError: pageErr ?? "Falha ao buscar mensagens na UAZAPI" };
-    }
+  let globalPagesFetched = 0;
+  const chatIdsToTry = uniqueChatIdsForFind(chatidForFind, wa);
+  let lastPageErr: string | undefined;
 
-    const rawNext =
-      msgData && typeof msgData.nextOffset === "number" && Number.isFinite(msgData.nextOffset)
-        ? msgData.nextOffset
-        : undefined;
-    const explicitNoMore = msgData?.hasMore === false;
+  for (const activeChatId of chatIdsToTry) {
+    if (chatMessagesInserted >= cap || globalPagesFetched >= MAX_MESSAGE_FIND_PAGES) break;
 
-    const messages = (msgData?.messages ?? []) as UazapiMessage[];
-    if (messages.length === 0) {
+    let msgOffset = 0;
+    while (chatMessagesInserted < cap && globalPagesFetched < MAX_MESSAGE_FIND_PAGES) {
+      globalPagesFetched += 1;
+      const { data: msgData, ok: msgOk, error: pageErr } = await findMessages(token, activeChatId, {
+        limit: MESSAGES_PAGE_SIZE,
+        offset: msgOffset,
+      });
+      if (!msgOk) {
+        lastPageErr = pageErr ?? "Falha ao buscar mensagens na UAZAPI";
+        break;
+      }
+
+      const rawNext =
+        msgData && typeof msgData.nextOffset === "number" && Number.isFinite(msgData.nextOffset)
+          ? msgData.nextOffset
+          : undefined;
+      const explicitNoMore = msgData?.hasMore === false;
+
+      const messages = (msgData?.messages ?? []) as UazapiMessage[];
+      if (messages.length === 0) {
+        if (typeof rawNext === "number" && rawNext > msgOffset) {
+          msgOffset = rawNext;
+          continue;
+        }
+        break;
+      }
+
+      for (const msg of messages) {
+        if (chatMessagesInserted >= cap) break;
+        if (!uazapiMessageBelongsToChat(msg, activeChatId) && !uazapiMessageBelongsToChat(msg, wa)) continue;
+
+        const fromMe = msg.fromMe === true;
+        const bodyText = (msg.body ?? msg.text ?? "").toString().trim();
+        const rawType = (msg.type ?? msg.mediaType ?? "") as string;
+        const msgMediaUrl = (msg.mediaUrl ??
+          msg.file ??
+          msg.url ??
+          msg.image ??
+          msg.base64 ??
+          (msg as { media?: { url?: string } }).media?.url ??
+          "") as string;
+        const msgCaption = (msg.caption ?? msg.body ?? msg.text ?? "").toString().trim();
+        const msgFileName = (msg.fileName ?? msg.filename ?? msg.docName ?? "") as string;
+        const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
+        const isMedia = messageType !== "text" && msgMediaUrl;
+        const content = bodyText || (isMedia ? `[${messageType}]` : "");
+        const msgRec = msg as Record<string, unknown>;
+        const parsedIso = uazFindMessageSentAtIso(msgRec);
+        let sentAt: string;
+        let fromRealTimestamp = false;
+        if (parsedIso) {
+          sentAt = parsedIso;
+          fromRealTimestamp = true;
+        } else {
+          syntheticNoTsCounter += 1;
+          sentAt = new Date(Date.now() - syntheticNoTsCounter).toISOString();
+        }
+        if (fromRealTimestamp) {
+          const ms = new Date(sentAt).getTime();
+          if (ms > latestSentAt) latestSentAt = ms;
+        }
+        const extId = (msg.id ?? "").toString() || null;
+
+        if (extId) {
+          if (seenExt.has(extId)) continue;
+        } else if (seenSent.has(sentAt)) {
+          continue;
+        }
+
+        const insertPayload: Record<string, unknown> = {
+          conversation_id: conversationId,
+          direction: fromMe ? "out" : "in",
+          content: content.slice(0, 10000),
+          message_type: isMedia ? messageType : "text",
+          external_id: extId,
+          sent_at: sentAt,
+        };
+        if (isMedia && msgMediaUrl.trim()) insertPayload.media_url = msgMediaUrl.trim().slice(0, 10000);
+        if (isMedia && msgCaption) insertPayload.caption = msgCaption.slice(0, 2000);
+        if (msgFileName && typeof msgFileName === "string") insertPayload.file_name = msgFileName.slice(0, 255);
+
+        pendingInserts.push(insertPayload);
+        if (extId) seenExt.add(extId);
+        else seenSent.add(sentAt);
+
+        if (pendingInserts.length >= MESSAGE_INSERT_BATCH) await flushMessages();
+      }
+
+      await flushMessages();
+
+      if (chatMessagesInserted >= cap) break;
+
       if (typeof rawNext === "number" && rawNext > msgOffset) {
         msgOffset = rawNext;
-        continue;
+      } else if (explicitNoMore) {
+        break;
+      } else {
+        msgOffset += MESSAGES_PAGE_SIZE;
       }
-      break;
-    }
-
-    for (const msg of messages) {
-      if (chatMessagesInserted >= cap) break;
-      if (!uazapiMessageBelongsToChat(msg, chatidForFind) && !uazapiMessageBelongsToChat(msg, wa)) continue;
-
-      const fromMe = msg.fromMe === true;
-      const bodyText = (msg.body ?? msg.text ?? "").toString().trim();
-      const rawType = (msg.type ?? msg.mediaType ?? "") as string;
-      const msgMediaUrl = (msg.mediaUrl ??
-        msg.file ??
-        msg.url ??
-        msg.image ??
-        msg.base64 ??
-        (msg as { media?: { url?: string } }).media?.url ??
-        "") as string;
-      const msgCaption = (msg.caption ?? msg.body ?? msg.text ?? "").toString().trim();
-      const msgFileName = (msg.fileName ?? msg.filename ?? msg.docName ?? "") as string;
-      const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
-      const isMedia = messageType !== "text" && msgMediaUrl;
-      const content = bodyText || (isMedia ? `[${messageType}]` : "");
-      const rawTs = msg.timestamp;
-      const sentAt =
-        rawTs != null && typeof rawTs === "number"
-          ? new Date(rawTs * 1000).toISOString()
-          : new Date().toISOString();
-      if (typeof rawTs === "number" && rawTs * 1000 > latestSentAt) latestSentAt = rawTs * 1000;
-      const extId = (msg.id ?? "").toString() || null;
-
-      if (extId) {
-        if (seenExt.has(extId)) continue;
-      } else if (seenSent.has(sentAt)) {
-        continue;
-      }
-
-      const insertPayload: Record<string, unknown> = {
-        conversation_id: conversationId,
-        direction: fromMe ? "out" : "in",
-        content: content.slice(0, 10000),
-        message_type: isMedia ? messageType : "text",
-        external_id: extId,
-        sent_at: sentAt,
-      };
-      if (isMedia && msgMediaUrl.trim()) insertPayload.media_url = msgMediaUrl.trim().slice(0, 10000);
-      if (isMedia && msgCaption) insertPayload.caption = msgCaption.slice(0, 2000);
-      if (msgFileName && typeof msgFileName === "string") insertPayload.file_name = msgFileName.slice(0, 255);
-
-      pendingInserts.push(insertPayload);
-      if (extId) seenExt.add(extId);
-      else seenSent.add(sentAt);
-
-      if (pendingInserts.length >= MESSAGE_INSERT_BATCH) await flushMessages();
-    }
-
-    await flushMessages();
-
-    if (chatMessagesInserted >= cap) break;
-
-    if (typeof rawNext === "number" && rawNext > msgOffset) {
-      msgOffset = rawNext;
-    } else if (explicitNoMore) {
-      break;
-    } else {
-      msgOffset += MESSAGES_PAGE_SIZE;
     }
   }
 
   await flushMessages();
 
+  if (chatMessagesInserted === 0 && lastPageErr) {
+    return { inserted: 0, uazapiError: lastPageErr };
+  }
+
+  // Histórico antigo não pode retroceder last_message_at da conversa (senão a inbox “volta no tempo”).
   if (latestSentAt > 0 && chatMessagesInserted > 0) {
-    await supabase
+    const { data: convRow } = await supabase
       .from("conversations")
-      .update({
-        last_message_at: new Date(latestSentAt).toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", conversationId);
+      .select("last_message_at")
+      .eq("id", conversationId)
+      .maybeSingle();
+    const currentLast = convRow?.last_message_at
+      ? new Date(String((convRow as { last_message_at: string }).last_message_at)).getTime()
+      : 0;
+    if (latestSentAt > currentLast) {
+      await supabase
+        .from("conversations")
+        .update({
+          last_message_at: new Date(latestSentAt).toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", conversationId);
+    }
   }
 
   const resolvedChatJid =

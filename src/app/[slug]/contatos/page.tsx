@@ -1044,12 +1044,35 @@ export default function ContatosPage() {
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            const data = JSON.parse(line) as { progress?: number; ok?: boolean; error?: string };
+            const data = JSON.parse(line) as {
+              progress?: number;
+              ok?: boolean;
+              error?: string;
+              history_sync?: {
+                enabled?: boolean;
+                ok?: boolean;
+                conversations_created?: number;
+                messages_processed?: number;
+                error?: string;
+              };
+            };
             if (typeof data.progress === "number") setSyncProgress(Math.min(100, Math.max(0, data.progress)));
             if (data.progress === 100) {
               if (data.ok) {
                 await Promise.all([mutateContacts(), mutateGroups(), mutateCommunities()]);
                 fetchChannels();
+                const hs = data.history_sync;
+                if (hs?.enabled) {
+                  if (hs.ok === false && hs.error) {
+                    setAlertMessage(`Contatos sincronizados, mas histórico falhou: ${hs.error}`);
+                  } else {
+                    const convs = Number(hs.conversations_created ?? 0);
+                    const msgs = Number(hs.messages_processed ?? 0);
+                    setAlertMessage(`Sincronização concluída: contatos e histórico (${convs} conversa(s) criada(s), ${msgs} mensagem(ns) importada(s)).`);
+                  }
+                } else {
+                  setAlertMessage("Sincronização concluída.");
+                }
               } else if (data.error) setAlertMessage(data.error);
             }
           } catch {
@@ -1059,12 +1082,35 @@ export default function ContatosPage() {
       }
       if (buffer.trim()) {
         try {
-          const data = JSON.parse(buffer) as { progress?: number; ok?: boolean; error?: string };
+          const data = JSON.parse(buffer) as {
+            progress?: number;
+            ok?: boolean;
+            error?: string;
+            history_sync?: {
+              enabled?: boolean;
+              ok?: boolean;
+              conversations_created?: number;
+              messages_processed?: number;
+              error?: string;
+            };
+          };
           if (typeof data.progress === "number") setSyncProgress(Math.min(100, Math.max(0, data.progress)));
           if (data.progress === 100) {
             if (data.ok) {
               await Promise.all([mutateContacts(), mutateGroups(), mutateCommunities()]);
               fetchChannels();
+              const hs = data.history_sync;
+              if (hs?.enabled) {
+                if (hs.ok === false && hs.error) {
+                  setAlertMessage(`Contatos sincronizados, mas histórico falhou: ${hs.error}`);
+                } else {
+                  const convs = Number(hs.conversations_created ?? 0);
+                  const msgs = Number(hs.messages_processed ?? 0);
+                  setAlertMessage(`Sincronização concluída: contatos e histórico (${convs} conversa(s) criada(s), ${msgs} mensagem(ns) importada(s)).`);
+                }
+              } else {
+                setAlertMessage("Sincronização concluída.");
+              }
             } else if (data.error) setAlertMessage(data.error);
           }
         } catch {
@@ -1973,8 +2019,8 @@ export default function ContatosPage() {
                 className="relative shrink-0 max-w-[120px] overflow-hidden rounded-md bg-clicvend-orange px-2 py-1.5 text-xs font-medium text-white hover:bg-clicvend-orange-dark disabled:opacity-60"
                 title={
                   syncing === ch.id
-                    ? "Sincronizando contatos, grupos e comunidades…"
-                    : `Sincronizar agenda (contatos, grupos e comunidades) — não importa histórico de mensagens: ${ch.name}`
+                    ? "Sincronizando contatos, grupos, comunidades e histórico de conversas…"
+                    : `Sincronizar contatos + histórico de conversas: ${ch.name}`
                 }
               >
                 <span className="relative z-10 flex items-center justify-center gap-1 truncate">
@@ -2062,7 +2108,7 @@ export default function ContatosPage() {
               href={slug ? `/${slug}/conexoes` : "/conexoes"}
               className="text-sm font-medium text-clicvend-orange hover:underline"
             >
-              Conectar um número em Conexões para sincronizar contatos, grupos e comunidades
+              Conectar um número em Conexões para sincronizar contatos e histórico de conversas
             </Link>
           )}
         </div>
@@ -2124,7 +2170,7 @@ export default function ContatosPage() {
               <Users className="mx-auto h-12 w-12 text-[#94A3B8]" />
               <p className="mt-2">Nenhum contato sincronizado.</p>
               <p className="mt-1 text-sm">
-                Conecte um número em Conexões e clique no botão da instância (ex.: IMBOX_01) para trazer contatos que têm conversa com ela — não usa agenda do celular.
+                Conecte um número em Conexões e clique em sincronizar aqui no módulo de contatos para trazer contatos e histórico de conversas da instância.
               </p>
             </div>
           ) : (
