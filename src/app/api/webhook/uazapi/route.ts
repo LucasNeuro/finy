@@ -1116,9 +1116,11 @@ async function processOneMessage(
     }
 
     let conversationId: string;
+    /** Para atualizar a conversa só após insert da mensagem (escopo fora do `if`). */
+    let reopenFromClosed = false;
     if (existingTicket) {
       conversationId = existingTicket.id;
-      const reopenFromClosed =
+      reopenFromClosed =
         String(existingTicket.status ?? "").toLowerCase() === "closed" && !isHistoryEvent;
       if (messageExternalId) {
         const { data: existingMsg } = await supabase
@@ -1132,19 +1134,7 @@ async function processOneMessage(
           return true;
         }
       }
-      await supabase
-        .from("conversations")
-        .update({
-          last_message_at: sentAt,
-          updated_at: new Date().toISOString(),
-          wa_chat_jid: canonicalExternalId,
-          external_id: canonicalExternalId,
-          customer_phone: (canonicalDigits ?? displayPhone) || undefined,
-          ...(customerName && customerName.trim() && { customer_name: customerName.trim() }),
-          ...(reopenFromClosed ? { status: "open" as const } : {}),
-        })
-        .eq("id", conversationId);
-      console.log("[WEBHOOK] Conversa existente atualizada:", { conversationId, reopenFromClosed });
+      // last_message_at e metadados da conversa só depois do insert da mensagem (evita lista com horário novo sem linha em `messages`).
       if (externalId !== canonicalExternalId) {
         await supabase.from("channel_contacts").delete().eq("channel_id", channelId).eq("jid", externalId);
       }
@@ -1307,12 +1297,31 @@ async function processOneMessage(
       return (insertedMsg.id && row.id === insertedMsg.id) || (messageExternalId && row.external_id === messageExternalId);
     });
     const newSnapshot = hasDuplicate ? prevSnapshot : [...prevSnapshot, insertedMsg].slice(-SNAPSHOT_MAX);
-    await supabase
-      .from("conversations")
-      .update({ messages_snapshot: newSnapshot, updated_at: new Date().toISOString() })
-      .eq("id", conversationId);
+    const convUpdatePayload: Record<string, unknown> = {
+      messages_snapshot: newSnapshot,
+      updated_at: new Date().toISOString(),
+    };
+    if (existingTicket) {
+      convUpdatePayload.last_message_at = sentAt;
+      convUpdatePayload.wa_chat_jid = canonicalExternalId;
+      convUpdatePayload.external_id = canonicalExternalId;
+      if (canonicalDigits ?? displayPhone) {
+        convUpdatePayload.customer_phone = (canonicalDigits ?? displayPhone) || undefined;
+      }
+      if (customerName?.trim()) {
+        convUpdatePayload.customer_name = customerName.trim();
+      }
+      if (reopenFromClosed) {
+        convUpdatePayload.status = "open";
+      }
+    }
+    await supabase.from("conversations").update(convUpdatePayload).eq("id", conversationId);
 
-    console.log("[WEBHOOK] Mensagem inserida com sucesso:", { conversationId, direction: fromMe ? "out" : "in" });
+    console.log("[WEBHOOK] Mensagem inserida com sucesso:", {
+      conversationId,
+      direction: fromMe ? "out" : "in",
+      existingTicket: !!existingTicket,
+    });
 
     if (!fromMe && !isHistoryEvent) {
       await upsertInboxNotificationsForIncomingMessage(supabase, {

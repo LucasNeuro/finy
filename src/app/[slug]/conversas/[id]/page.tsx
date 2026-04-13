@@ -1303,6 +1303,9 @@ export default function ConversaThreadPage({
   const slug = resolved?.slug ?? pathname?.split("/")[1] ?? "";
   const router = useRouter();
   const apiHeaders = slug ? { "X-Company-Slug": slug } : undefined;
+  /** Id da conversa ativa (callbacks assíncronos cancelam se o usuário trocar de chat). */
+  const activeConversationIdRef = useRef<string | null>(null);
+  activeConversationIdRef.current = resolved?.id ?? null;
 
   /** Ao abrir o chat, marca notificações desta conversa como lidas (sino no header). */
   useEffect(() => {
@@ -1684,9 +1687,12 @@ export default function ConversaThreadPage({
   const contactDetailsFetchedForRef = useRef<string | null>(null);
   /** Uma tentativa silenciosa de puxar histórico da instância ao abrir conversa sem mensagens. */
   const autoHistoryPullDoneForIdRef = useRef<string | null>(null);
+  /** Pull leve na UAZ já feito nesta visita ao ticket (evita reagendar a cada refetch). */
+  const openConversationSoftPullDoneRef = useRef<string | null>(null);
 
   useEffect(() => {
     autoHistoryPullDoneForIdRef.current = null;
+    openConversationSoftPullDoneRef.current = null;
   }, [resolved?.id]);
 
   async function handleAICorrection() {
@@ -1788,6 +1794,8 @@ export default function ConversaThreadPage({
 
   /** Quantas mensagens pedir à instância (UAZ) por clique em “Carregar mais” — depois gravamos no Postgres e lemos a página antiga. */
   const PULL_REMOTE_PER_LOAD_MORE = 400;
+  /** Pull silencioso ao abrir conversa que já tem mensagens: fecha buraco lista vs chat sem travar a UI. */
+  const OPEN_CONVERSATION_UAZ_PULL_MAX = 220;
 
   const loadOlderMessages = useCallback(async () => {
     if (!resolved?.id || !conv?.messages?.length || loadingOlderMessages || !hasMoreOlderMessages) return;
@@ -1942,6 +1950,71 @@ export default function ConversaThreadPage({
     autoHistoryPullDoneForIdRef.current = cid;
     void pullWhatsAppHistory();
   }, [resolved?.id, conv?.channel_id, conv?.messages, loading, conv, pullWhatsAppHistory]);
+
+  /** Só transição “sem mensagens → com mensagens” re-dispara o efeito; novas bolhas via realtime não cancelam o timer. */
+  const hasChatMessages = (Array.isArray(conv?.messages) ? conv.messages.length : 0) > 0;
+
+  /**
+   * Ao abrir conversa com mensagens já carregadas: após um pequeno atraso, puxa um lote recente da UAZ
+   * (sem `pullingRemoteHistory` — botões seguem habilitados) e só atualiza o cache se entrou linha nova ou JID corrigido.
+   */
+  useEffect(() => {
+    const conversationId = resolved?.id;
+    const channelId = conv?.channel_id;
+
+    if (!conversationId || !channelId || loading) return;
+    if (!hasChatMessages) return;
+    if (openConversationSoftPullDoneRef.current === conversationId) return;
+
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      if (cancelled) return;
+      openConversationSoftPullDoneRef.current = conversationId;
+      void (async () => {
+        const pullId = conversationId;
+        try {
+          const pullRes = await fetch(`/api/conversations/${pullId}/pull-remote-history`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({ max_messages: OPEN_CONVERSATION_UAZ_PULL_MAX }),
+          });
+          const pullData = (await pullRes.json().catch(() => ({}))) as {
+            inserted?: number;
+            jid_corrected?: boolean;
+          };
+          if (activeConversationIdRef.current !== pullId) return;
+          if (!pullRes.ok) return;
+          const inserted = Number(pullData.inserted) || 0;
+          if (inserted === 0 && !pullData.jid_corrected) return;
+
+          const detailRes = await fetch(`/api/conversations/${pullId}?skip_cache=1`, {
+            credentials: "include",
+            headers: apiHeaders,
+          });
+          if (activeConversationIdRef.current !== pullId) return;
+          if (detailRes.ok) {
+            const detail = (await detailRes.json()) as ConversationDetail;
+            queryClient.setQueryData(queryKeys.conversation(pullId), detail);
+          } else {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.conversation(pullId) });
+          }
+          if (slug) {
+            await queryClient.invalidateQueries({ queryKey: ["inbox", "conversations", slug] });
+          } else {
+            await queryClient.invalidateQueries({ queryKey: ["inbox", "conversations"] });
+          }
+        } catch {
+          /* silencioso — não bloqueia o chat */
+        }
+      })();
+    }, 700);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [resolved?.id, conv?.channel_id, loading, hasChatMessages, apiHeaders, queryClient, slug]);
 
   // Não atribuir ao abrir: atribuição só pelo botão "+" no minicard da lista.
 
