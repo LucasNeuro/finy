@@ -1786,6 +1786,9 @@ export default function ConversaThreadPage({
     }
   }
 
+  /** Quantas mensagens pedir à instância (UAZ) por clique em “Carregar mais” — depois gravamos no Postgres e lemos a página antiga. */
+  const PULL_REMOTE_PER_LOAD_MORE = 400;
+
   const loadOlderMessages = useCallback(async () => {
     if (!resolved?.id || !conv?.messages?.length || loadingOlderMessages || !hasMoreOlderMessages) return;
     const first = conv.messages[0] as { sent_at?: string };
@@ -1793,6 +1796,11 @@ export default function ConversaThreadPage({
     if (!before) return;
     const id = resolved.id;
     const url = `/api/conversations/${id}/messages?before=${encodeURIComponent(before)}&limit=50`;
+
+    const sortBySentAt = (list: Message[]) =>
+      [...list].sort(
+        (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+      );
 
     const mergeOlderBatch = (older: Message[]) => {
       if (older.length === 0) return;
@@ -1802,7 +1810,7 @@ export default function ConversaThreadPage({
       queryClient.setQueryData<ConversationDetail>(queryKeys.conversation(id), (c) => {
         if (!c) return c;
         const existing = Array.isArray(c.messages) ? c.messages : [];
-        return { ...c, messages: [...older, ...existing] };
+        return { ...c, messages: sortBySentAt([...older, ...existing]) };
       });
       requestAnimationFrame(() => {
         if (scrollEl) {
@@ -1814,6 +1822,26 @@ export default function ConversaThreadPage({
 
     setLoadingOlderMessages(true);
     try {
+      // 1) Primeiro: sincronizar lote mais antigo da instância (WhatsApp via UAZ) → Postgres
+      if (conv?.channel_id) {
+        setPullingRemoteHistory(true);
+        try {
+          const pullRes = await fetch(`/api/conversations/${id}/pull-remote-history`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json", ...apiHeaders },
+            body: JSON.stringify({ max_messages: PULL_REMOTE_PER_LOAD_MORE }),
+          });
+          const pullData = (await pullRes.json().catch(() => ({}))) as { inserted?: number; error?: string };
+          if (!pullRes.ok) {
+            setError(pullData?.error ?? "Não foi possível buscar histórico no WhatsApp.");
+          }
+        } finally {
+          setPullingRemoteHistory(false);
+        }
+      }
+
+      // 2) Depois: carregar página mais antiga já persistida (ordem cronológica corrigida no GET)
       const res = await fetch(url, { credentials: "include", headers: apiHeaders });
       if (!res.ok) return;
       const data = await res.json();
@@ -1821,48 +1849,26 @@ export default function ConversaThreadPage({
 
       if (older.length > 0) {
         mergeOlderBatch(older as Message[]);
-        if (!data?.has_more || older.length < 50) setHasMoreOlderMessages(false);
+        setHasMoreOlderMessages(Boolean(data?.has_more));
         return;
       }
 
-      // Sem mensagens mais antigas só no banco: buscar na UAZAPI (só esta conversa) e gravar no Postgres + invalidar Redis
-      setPullingRemoteHistory(true);
-      try {
-        const pullRes = await fetch(`/api/conversations/${id}/pull-remote-history`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json", ...apiHeaders },
-          body: JSON.stringify({ max_messages: 8000 }),
-        });
-        const pullData = (await pullRes.json().catch(() => ({}))) as { inserted?: number; error?: string };
-        if (!pullRes.ok) {
-          setError(pullData?.error ?? "Não foi possível buscar histórico no WhatsApp.");
-          setHasMoreOlderMessages(false);
-          return;
-        }
-        if (!pullData.inserted || pullData.inserted <= 0) {
-          setHasMoreOlderMessages(false);
-          return;
-        }
-      } finally {
-        setPullingRemoteHistory(false);
-      }
-
-      const res2 = await fetch(url, { credentials: "include", headers: apiHeaders });
-      if (!res2.ok) return;
-      const data2 = await res2.json();
-      const older2 = Array.isArray(data2?.messages) ? data2.messages : [];
-      if (older2.length === 0) {
+      setHasMoreOlderMessages(false);
+      if (conv?.channel_id) {
         await queryClient.invalidateQueries({ queryKey: queryKeys.conversation(id) });
-        setHasMoreOlderMessages(false);
-        return;
       }
-      mergeOlderBatch(older2 as Message[]);
-      if (!data2?.has_more || older2.length < 50) setHasMoreOlderMessages(false);
     } finally {
       setLoadingOlderMessages(false);
     }
-  }, [resolved?.id, conv?.messages, loadingOlderMessages, hasMoreOlderMessages, apiHeaders, queryClient]);
+  }, [
+    resolved?.id,
+    conv?.messages,
+    conv?.channel_id,
+    loadingOlderMessages,
+    hasMoreOlderMessages,
+    apiHeaders,
+    queryClient,
+  ]);
 
   /** Importa mensagens antigas via /message/find (várias páginas por clique, até o teto da API). Sem avisos quando não há novidades — só erro em falha real da API. */
   const pullWhatsAppHistory = useCallback(async () => {
@@ -1903,7 +1909,7 @@ export default function ConversaThreadPage({
     }
   }, [resolved?.id, pullingRemoteHistory, apiHeaders, queryClient]);
 
-  /** Um só "Carregar mais": antigas no banco (paginação) ou, se não houver, lote na instância (UAZ). */
+  /** Um só "Carregar mais": com mensagens já na tela, puxa lote na UAZ e depois página antiga do banco; sem mensagens, só import inicial. */
   const handleLoadMoreChat = useCallback(async () => {
     if (loadingOlderMessages || pullingRemoteHistory) return;
     const id = resolved?.id;
@@ -2731,7 +2737,7 @@ export default function ConversaThreadPage({
               disabled={loadingOlderMessages || pullingRemoteHistory}
               className="rounded p-2 text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1E293B] disabled:opacity-50"
               aria-label="Carregar mais mensagens (servidor ou histórico sincronizado)"
-              title="Mesmo que Carregar mais na conversa: antigas no banco primeiro, depois importação da instância."
+              title="Sincroniza um lote do WhatsApp (instância) e carrega mensagens mais antigas no chat."
             >
               {pullingRemoteHistory || loadingOlderMessages ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -2933,7 +2939,7 @@ export default function ConversaThreadPage({
                       onClick={() => void handleLoadMoreChat()}
                       disabled={loadingOlderMessages || pullingRemoteHistory}
                       className="inline-flex items-center gap-1.5 text-sm font-medium text-clicvend-orange hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
-                      title="Mensagens mais antigas: primeiro do servidor, depois o que a instância já sincronizou. Pode clicar de novo."
+                      title="Sincroniza com a instância (WhatsApp) e traz mensagens mais antigas. Pode clicar de novo."
                     >
                       {pullingRemoteHistory || loadingOlderMessages ? (
                         <>

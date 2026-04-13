@@ -1,6 +1,10 @@
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
+import {
+  clampMessagesPerChat,
+  getSyncHistoryMessagesPerChatFromEnv,
+} from "@/lib/channels/sync-history-config";
 import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
@@ -13,7 +17,7 @@ export const maxDuration = 300;
  * POST /api/channels/[id]/sync-history
  * Sincroniza histórico de mensagens via UAZAPI (lista de chats e mensagens por chat).
  * Por padrão só preenche conversas que já existem. Com body { create_missing: true } ou
- * ?create_missing=1, cria conversa/contato faltante e importa até messages_per_chat (default alto, max 8000).
+ * ?create_missing=1, cria conversa/contato faltante e importa até messages_per_chat (default 200 textos/chat, max 8000).
  * Auth: usuário com channels.manage, ou chamada interna com X-Internal-Sync-Secret (cron / integrações externas).
  */
 export async function POST(
@@ -68,16 +72,11 @@ export async function POST(
   const createMissingConversations =
     String(body.create_missing ?? url.searchParams.get("create_missing") ?? "").toLowerCase() === "true" ||
     String(body.create_missing ?? url.searchParams.get("create_missing") ?? "") === "1";
-  const envDefault = Number(process.env.SYNC_HISTORY_MAX_MESSAGES_PER_CHAT);
-  const defaultPerChat =
-    Number.isFinite(envDefault) && envDefault > 0 ? Math.min(8000, Math.floor(envDefault)) : 4000;
+  const envDefault = getSyncHistoryMessagesPerChatFromEnv();
   const targetMessagesPerChatRaw = Number(
-    body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? defaultPerChat
+    body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? envDefault
   );
-  const targetMessagesPerChat =
-    Number.isFinite(targetMessagesPerChatRaw) && targetMessagesPerChatRaw > 0
-      ? Math.min(Math.max(Math.floor(targetMessagesPerChatRaw), 1), 8000)
-      : 4000;
+  const targetMessagesPerChat = clampMessagesPerChat(targetMessagesPerChatRaw, envDefault);
 
   const result = await runSyncChannelHistory({
     channelId,

@@ -13,6 +13,7 @@ import { isUazInstanceWebhookRedisCacheEnabled } from "@/lib/redis/uaz-instance-
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { isCommercialQueue, getCommercialContactOwner } from "@/lib/queue/commercial";
 import { getNextAgentForQueue } from "@/lib/queue/round-robin";
+import { getSyncHistoryMessagesPerChatFromEnv } from "@/lib/channels/sync-history-config";
 import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
 import { parseLooseTimeToMs, UAZ_MIN_MESSAGE_TIME_MS } from "@/lib/uazapi/message-timestamp";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
@@ -162,9 +163,9 @@ function detectConsentActionFromText(
 }
 
 /**
- * Dispara sincronização de histórico em background quando o WhatsApp conecta.
- * Só roda se ENABLE_SYNC_HISTORY_ON_CONNECT=true (por padrão desligado: fluxo é só fila por chamado;
- * histórico/contatos antigos entram apenas quando o usuário clicar em Sincronizar).
+ * Dispara sincronização de histórico em background quando o WhatsApp reconecta (evento connection/connected).
+ * Só roda se ENABLE_SYNC_HISTORY_ON_CONNECT=true. Importa chats em falta + últimas N mensagens de texto por chat
+ * (mídias ignoradas no sync em massa; mensagens novas continuam pelo webhook).
  */
 function triggerSyncHistoryForInstance(instanceId: string): void {
   if (process.env.ENABLE_SYNC_HISTORY_ON_CONNECT !== "true") return;
@@ -191,15 +192,13 @@ function triggerSyncHistoryForInstance(instanceId: string): void {
       const resolved = await getChannelToken(channelId, companyId);
       if (!resolved) return;
 
-      const envDefault = Number(process.env.SYNC_HISTORY_MAX_MESSAGES_PER_CHAT);
-      const defaultPerChat =
-        Number.isFinite(envDefault) && envDefault > 0 ? Math.min(8000, Math.floor(envDefault)) : 4000;
+      const defaultPerChat = getSyncHistoryMessagesPerChatFromEnv();
 
       await runSyncChannelHistory({
         channelId,
         companyId,
         token: resolved.token,
-        createMissingConversations: false,
+        createMissingConversations: true,
         targetMessagesPerChat: defaultPerChat,
       });
     } catch {
@@ -215,7 +214,7 @@ function triggerSyncHistoryForInstance(instanceId: string): void {
  * - messages          → processamos: cria/atualiza conversa, insere mensagem, distribui fila (até 80 itens/request).
  * - messages_update   → só 200 (status lido/entregue; não grava no nosso DB para não sobrecarregar).
  * - contacts, groups, chats, chat_labels, leads → só 200 (não processamos; evita gargalo).
- * - connection / connected / onconnection → 200 (não dispara mais sync automático; histórico só ao clicar em Sincronizar).
+ * - connection / connected / onconnection → 200; se ENABLE_SYNC_HISTORY_ON_CONNECT=true, ressincroniza histórico (texto) em background.
  * - history           → processamos só para conversas que JÁ EXISTEM (não criamos conversa nem contato; evita encher Novos/Contatos ao conectar). Novas conversas/contatos só quando chega evento "messages".
  *
  * Manter "wasSentByApi" excluído no painel para não entrar em loop.

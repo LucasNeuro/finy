@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { syncCommercialLeadsAfterChannelContactsSync } from "@/lib/crm/sync-commercial-leads-from-contacts";
+import { clampMessagesPerChat, getSyncHistoryMessagesPerChatFromEnv } from "@/lib/channels/sync-history-config";
 import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
@@ -83,9 +84,9 @@ export async function POST(
   const createMissing =
     String(body.create_missing ?? url.searchParams.get("create_missing") ?? "1").toLowerCase() !== "false" &&
     String(body.create_missing ?? url.searchParams.get("create_missing") ?? "1") !== "0";
-  const perChatRaw = Number(body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? 4000);
-  const messagesPerChat =
-    Number.isFinite(perChatRaw) && perChatRaw > 0 ? Math.min(Math.floor(perChatRaw), 8000) : 4000;
+  const envDefault = getSyncHistoryMessagesPerChatFromEnv();
+  const perChatRaw = Number(body.messages_per_chat ?? url.searchParams.get("messages_per_chat") ?? envDefault);
+  const messagesPerChat = clampMessagesPerChat(perChatRaw, envDefault);
 
   try {
     const companyId = await getCompanyIdFromRequest(request);
@@ -174,7 +175,7 @@ async function runSync(
   clearFirst = false,
   syncHistory = true,
   createMissing = true,
-  messagesPerChat = 4000,
+  messagesPerChat = getSyncHistoryMessagesPerChatFromEnv(),
   _request?: Request
 ): Promise<SyncContactsResult> {
   const supabase = await createClient();

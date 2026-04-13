@@ -2,6 +2,7 @@ import { insertHistoryMessagesFromUazapiForConversation } from "@/lib/conversati
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { toCanonicalJid } from "@/lib/phone-canonical";
+import { getSyncHistoryMaxTotalMessagesInserted } from "@/lib/channels/sync-history-config";
 import { findChats, type UazapiChat } from "@/lib/uazapi/client";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 
@@ -16,6 +17,14 @@ export type RunSyncChannelHistoryResult = {
 /**
  * Sincroniza histórico de mensagens (UAZAPI) para todas as conversas do canal.
  * Mesma lógica de POST /api/channels/[id]/sync-history — uso in-process evita fetch+APP_URL+INTERNAL_SYNC_SECRET no Render.
+ *
+ * **Quais conversas entram:** lista paginada de chats da instância (até 50 × 100 = 5000 chats), ordenação UAZ
+ * `sort: -wa_lastMsgTimestamp` (última atividade no WhatsApp, parecido com a lista de chats do celular).
+ * Para cada chat, importa até `targetMessagesPerChat` mensagens de texto (mídias ignoradas no insert em massa).
+ * Com `createMissingConversations: true`, cria conversa/contato em falta; com `false`, só preenche histórico das que já existem.
+ *
+ * **Ordem dos cards no painel:** não vem da ordem do loop de sync; a inbox ordena por `last_message_at` + regra “novos primeiro”
+ * em `GET /api/conversations` (ver `sortQueuesListNewFirst`).
  */
 export async function runSyncChannelHistory(params: {
   channelId: string;
@@ -109,6 +118,17 @@ export async function runSyncChannelHistory(params: {
 
   const convKey = (externalId: string, kind: "group" | "ticket") => `${externalId}\t${kind}`;
 
+  /** Alinha ordem da lista com o WhatsApp (usa timestamp do último evento no chat). */
+  function lastMessageAtFromChat(chat: UazapiChat): string {
+    const raw = chat.wa_lastMsgTimestamp;
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+      return new Date().toISOString();
+    }
+    const ms = raw < 1e12 ? raw * 1000 : raw;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+
   function pickQueueId(isGroup: boolean): string | null {
     let queueId: string | null = null;
     if (isGroup) {
@@ -141,7 +161,7 @@ export async function runSyncChannelHistory(params: {
     return queueId;
   }
 
-  const MAX_MESSAGES_PER_INSTANCE = 15_000;
+  const MAX_MESSAGES_PER_INSTANCE = getSyncHistoryMaxTotalMessagesInserted(targetMessagesPerChat);
   let conversationsCreated = 0;
   let messagesInserted = 0;
   const touchedConversationIds = new Set<string>();
@@ -193,7 +213,7 @@ export async function runSyncChannelHistory(params: {
             queue_id: queueId,
             status: "open",
             assigned_to: null,
-            last_message_at: new Date().toISOString(),
+            last_message_at: lastMessageAtFromChat(chat),
           })
           .select("id")
           .single();
@@ -232,7 +252,7 @@ export async function runSyncChannelHistory(params: {
             queue_id: queueId,
             assigned_to: null,
             status: "open",
-            last_message_at: new Date().toISOString(),
+            last_message_at: lastMessageAtFromChat(chat),
           })
           .select("id")
           .single();
@@ -254,7 +274,8 @@ export async function runSyncChannelHistory(params: {
       token,
       conversationId,
       waChatid,
-      budget
+      budget,
+      { skipMedia: true }
     );
 
     if (resolvedChatJid?.trim()) {

@@ -53,6 +53,17 @@ const mediaTypeMap: Record<string, string> = {
   sticker: "sticker",
 };
 
+/** No sync em massa: não importa mídia; só conta mensagens de texto para o limite N. */
+function shouldSkipMediaOnlyHistoryImport(
+  messageType: string,
+  msgMediaUrl: string
+): boolean {
+  const t = messageType;
+  if (["image", "video", "document", "audio", "ptt", "sticker", "ptv"].includes(t)) return true;
+  if (msgMediaUrl.trim() && t === "text") return true;
+  return false;
+}
+
 function uniqueChatIdsForFind(resolved: string, canonical: string): string[] {
   const out: string[] = [];
   for (const c of [resolved, canonical]) {
@@ -72,8 +83,10 @@ export async function insertHistoryMessagesFromUazapiForConversation(
   token: string,
   conversationId: string,
   waChatid: string,
-  maxNewMessages: number
+  maxNewMessages: number,
+  options?: { skipMedia?: boolean }
 ): Promise<{ inserted: number; uazapiError?: string; resolvedChatJid?: string }> {
+  const skipMedia = options?.skipMedia === true;
   const rawWa = waChatid.trim();
   if (!rawWa) return { inserted: 0, uazapiError: "JID do chat inválido" };
   const isGroup = rawWa.toLowerCase().endsWith("@g.us");
@@ -86,21 +99,31 @@ export async function insertHistoryMessagesFromUazapiForConversation(
 
   const chatidForFind = await resolveChatidForUazMessageFind(token, wa);
 
-  /** Limite alto por clique: a UAZ pagina em /message/find; percorremos até esgotar ou atingir o teto. */
+  /** Com skipMedia, o teto é de mensagens de texto inseridas; sem skip, inclui mídia. */
   const cap = Math.min(Math.max(maxNewMessages, 1), 8000);
 
   const { data: existMsgRows } = await supabase
     .from("messages")
-    .select("external_id, sent_at")
+    .select("external_id, sent_at, direction, content")
     .eq("conversation_id", conversationId)
     .limit(50_000);
 
   const seenExt = new Set<string>();
-  const seenSent = new Set<string>();
+  /** Sem external_id, só sent_at duplicava mensagens diferentes no mesmo segundo. */
+  const seenNoExtKey = new Set<string>();
   for (const r of existMsgRows ?? []) {
-    const row = r as { external_id?: string | null; sent_at?: string | null };
+    const row = r as {
+      external_id?: string | null;
+      sent_at?: string | null;
+      direction?: string | null;
+      content?: string | null;
+    };
     if (row.external_id) seenExt.add(row.external_id);
-    else if (row.sent_at) seenSent.add(row.sent_at);
+    else if (row.sent_at) {
+      const dir = row.direction === "out" ? "o" : "i";
+      const c = String(row.content ?? "").slice(0, 160);
+      seenNoExtKey.add(`${row.sent_at}|${dir}|${c}`);
+    }
   }
 
   let latestSentAt = 0;
@@ -175,6 +198,9 @@ export async function insertHistoryMessagesFromUazapiForConversation(
         const msgFileName = (msg.fileName ?? msg.filename ?? msg.docName ?? "") as string;
         const messageType = rawType ? (mediaTypeMap[String(rawType).toLowerCase()] ?? "text") : "text";
         const isMedia = messageType !== "text" && msgMediaUrl;
+        if (skipMedia && shouldSkipMediaOnlyHistoryImport(messageType, String(msgMediaUrl ?? ""))) {
+          continue;
+        }
         const content = bodyText || (isMedia ? `[${messageType}]` : "");
         const msgRec = msg as Record<string, unknown>;
         const parsedIso = uazFindMessageSentAtIso(msgRec);
@@ -195,8 +221,10 @@ export async function insertHistoryMessagesFromUazapiForConversation(
 
         if (extId) {
           if (seenExt.has(extId)) continue;
-        } else if (seenSent.has(sentAt)) {
-          continue;
+        } else {
+          const dir = fromMe ? "o" : "i";
+          const noExtKey = `${sentAt}|${dir}|${content.slice(0, 160)}`;
+          if (seenNoExtKey.has(noExtKey)) continue;
         }
 
         const insertPayload: Record<string, unknown> = {
@@ -213,7 +241,10 @@ export async function insertHistoryMessagesFromUazapiForConversation(
 
         pendingInserts.push(insertPayload);
         if (extId) seenExt.add(extId);
-        else seenSent.add(sentAt);
+        else {
+          const dir = fromMe ? "o" : "i";
+          seenNoExtKey.add(`${sentAt}|${dir}|${content.slice(0, 160)}`);
+        }
 
         if (pendingInserts.length >= MESSAGE_INSERT_BATCH) await flushMessages();
       }

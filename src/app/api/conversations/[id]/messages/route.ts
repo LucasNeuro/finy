@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { sendText, sendMedia } from "@/lib/uazapi/client";
 import { normalizePhoneForSend } from "@/lib/phone-canonical";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
 const MEDIA_TYPES = ["image", "video", "audio", "ptt", "myaudio", "ptv", "document", "sticker"] as const;
@@ -42,73 +43,96 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  /**
+   * Paginação "Carregar mais" (before = sent_at da mensagem mais antiga visível):
+   * precisamos das N mensagens imediatamente **anteriores** a `before`, não as N mais antigas do chat.
+   * Logo: filtrar sent_at < before, ordenar DESC, limit N, depois inverter → cronológico crescente.
+   */
   let messages: unknown[] = [];
+  const fetchMessagePage = async (client: SupabaseClient) => {
+    let q = client
+      .from("messages")
+      .select(MESSAGES_SELECT)
+      .eq("conversation_id", conversationId)
+      .order("sent_at", { ascending: false })
+      .limit(limit);
+    if (before) q = q.lt("sent_at", before);
+    const res = await q;
+    if (res.error) throw new Error(res.error.message);
+    const rows = Array.isArray(res.data) ? res.data : [];
+    return [...rows].reverse();
+  };
+
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
     try {
       const adminSupabase = createServiceRoleClient();
-      let q = adminSupabase
-        .from("messages")
-        .select(MESSAGES_SELECT)
-        .eq("conversation_id", conversationId)
-        .order("sent_at", { ascending: true })
-        .limit(limit);
-      if (before) q = q.lt("sent_at", before);
-      const res = await q;
-      if (!res.error && res.data) messages = Array.isArray(res.data) ? res.data : [];
+      messages = await fetchMessagePage(adminSupabase);
     } catch {
       // fallback below
     }
   }
   if (messages.length === 0) {
-    let q = supabase
-      .from("messages")
-      .select(MESSAGES_SELECT)
-      .eq("conversation_id", conversationId)
-      .order("sent_at", { ascending: true })
-      .limit(limit);
-    if (before) q = q.lt("sent_at", before);
-    const res = await q;
-    if (res.error) {
-      return NextResponse.json({ error: res.error.message }, { status: 500 });
+    try {
+      messages = await fetchMessagePage(supabase);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao carregar mensagens";
+      return NextResponse.json({ error: msg }, { status: 500 });
     }
-    messages = Array.isArray(res.data) ? res.data : [];
   }
 
-  // Buscar internal_notes e mesclar
-  const notesClient = process.env.SUPABASE_SERVICE_ROLE_KEY 
-    ? createServiceRoleClient() 
-    : supabase;
+  const chatBatch = [...messages];
+  const notesClient = process.env.SUPABASE_SERVICE_ROLE_KEY ? createServiceRoleClient() : supabase;
 
-  const { data: notes } = await notesClient
-    .from("internal_notes")
-    .select("id, content, created_at, author_id")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
-    .limit(limit);
+  /** Notas só no intervalo desta página (entre a mensagem de chat mais antiga do lote e o cursor), para não embaralhar ordem. */
+  let noteRows: { id: string; content: string; created_at: string; author_id: string }[] = [];
+  if (before && chatBatch.length > 0) {
+    const oldestBatch = String((chatBatch[0] as { sent_at?: string }).sent_at ?? "").trim();
+    if (oldestBatch) {
+      const { data: nrows } = await notesClient
+        .from("internal_notes")
+        .select("id, content, created_at, author_id")
+        .eq("conversation_id", conversationId)
+        .gte("created_at", oldestBatch)
+        .lt("created_at", before)
+        .order("created_at", { ascending: true });
+      noteRows = (nrows ?? []) as typeof noteRows;
+    }
+  } else if (!before) {
+    const { data: nrows } = await notesClient
+      .from("internal_notes")
+      .select("id, content, created_at, author_id")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true })
+      .limit(limit);
+    noteRows = (nrows ?? []) as typeof noteRows;
+  }
 
-  if (notes && notes.length > 0) {
-    const formattedNotes = notes.map((n: { id: string; content: string; created_at: string; author_id: string }) => ({
+  if (noteRows.length > 0) {
+    const formattedNotes = noteRows.map((n) => ({
       id: n.id,
       direction: "out",
       content: n.content,
       sent_at: n.created_at,
       message_type: "internal_note",
       created_at: n.created_at,
-      // Se necessário, você pode adicionar o author_id para identificar quem escreveu a nota
     }));
-    
-    // Mesclar e ordenar por data
-    messages = [...messages, ...formattedNotes].sort((a: any, b: any) => 
-      new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+    messages = [...chatBatch, ...formattedNotes].sort(
+      (a: unknown, b: unknown) =>
+        new Date(String((a as { sent_at?: string }).sent_at ?? 0)).getTime() -
+        new Date(String((b as { sent_at?: string }).sent_at ?? 0)).getTime()
     );
-    
-    // Se tiver limite e paginação, aplicar novamente após mesclar (simplificado)
-    if (messages.length > limit) {
-      messages = messages.slice(-limit);
-    }
+  } else {
+    messages = chatBatch;
   }
 
-  const payload = { messages, has_more: Array.isArray(messages) ? messages.length >= limit : false };
+  const hasMoreChat =
+    before && chatBatch.length > 0
+      ? chatBatch.length >= limit
+      : !before && chatBatch.length > 0
+        ? chatBatch.length >= limit
+        : false;
+
+  const payload = { messages, has_more: hasMoreChat };
   const res = NextResponse.json(payload);
   return withMetricsHeaders(res, {
     cacheHit: false,

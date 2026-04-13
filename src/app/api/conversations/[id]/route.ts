@@ -20,7 +20,43 @@ import { NextResponse } from "next/server";
 
 const VIDEO_EXT = /\.(mp4|webm|mov|avi|mkv|m4v|3gp)(\?|$)/i;
 const AUDIO_EXT = /\.(mp3|ogg|m4a|wav|opus|aac|oga|weba)(\?|$)/i;
-const INITIAL_MESSAGES_LIMIT = 50;
+/** Janela inicial no chat — alinhar melhor ao que o usuário vê no WhatsApp (antes 50 cortava o fio). */
+const INITIAL_MESSAGES_LIMIT = 80;
+
+const MESSAGES_LIST_SELECT =
+  "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
+
+/** Fonte de verdade: tabela `messages` (não usar só messages_snapshot — fica desatualizado vs webhook/import). */
+async function fetchRecentMessagesFromDb(
+  conversationId: string,
+  limit: number,
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<unknown[]> {
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const admin = createServiceRoleClient();
+      const res = await admin
+        .from("messages")
+        .select(MESSAGES_LIST_SELECT)
+        .eq("conversation_id", conversationId)
+        .order("sent_at", { ascending: false })
+        .limit(limit);
+      if (!res.error && res.data && res.data.length > 0) {
+        return [...res.data].reverse();
+      }
+    } catch {
+      // fallback abaixo
+    }
+  }
+  const res = await supabase
+    .from("messages")
+    .select(MESSAGES_LIST_SELECT)
+    .eq("conversation_id", conversationId)
+    .order("sent_at", { ascending: false })
+    .limit(limit);
+  if (res.error) return [];
+  return Array.isArray(res.data) ? [...res.data].reverse() : [];
+}
 
 const MEDIA_MESSAGE_TYPES = ["image", "video", "audio", "ptt", "document", "sticker"] as const;
 
@@ -123,8 +159,64 @@ export async function GET(
   if (!skipCache) {
       const cached = await getCachedConversationDetail(companyId, id);
     if (cached) {
-      let messages = Array.isArray(cached.messages) ? normalizeMessageTypes(cached.messages) : cached.messages;
-      messages = await enrichMessagesWithCachedMedia(companyId, id, messages as Record<string, unknown>[]);
+      const supabaseFresh = await createClient();
+      let messages = (await fetchRecentMessagesFromDb(id, INITIAL_MESSAGES_LIMIT, supabaseFresh)) as Record<
+        string,
+        unknown
+      >[];
+
+      const notesClientCached = process.env.SUPABASE_SERVICE_ROLE_KEY ? createServiceRoleClient() : supabaseFresh;
+      const { data: notesCached } = await notesClientCached
+        .from("internal_notes")
+        .select("id, content, created_at, author_id")
+        .eq("conversation_id", id)
+        .order("created_at", { ascending: false })
+        .limit(INITIAL_MESSAGES_LIMIT);
+      if (notesCached && notesCached.length > 0) {
+        const formattedNotes = notesCached.map(
+          (n: { id: string; content: string; created_at: string; author_id: string }) => ({
+            id: n.id,
+            direction: "out",
+            content: n.content,
+            sent_at: n.created_at,
+            message_type: "internal_note",
+            created_at: n.created_at,
+          })
+        );
+        messages = [...messages, ...formattedNotes].sort(
+          (a, b) =>
+            new Date(String((a as { sent_at?: string }).sent_at ?? 0)).getTime() -
+            new Date(String((b as { sent_at?: string }).sent_at ?? 0)).getTime()
+        ) as Record<string, unknown>[];
+      }
+
+      const seenIdsC = new Set<string>();
+      const seenExternalC = new Set<string>();
+      const seenContentKeyC = new Set<string>();
+      messages = (messages as Record<string, unknown>[]).filter((m) => {
+        const mid = m?.id as string | undefined;
+        const ext = m?.external_id as string | undefined;
+        if (mid && seenIdsC.has(mid)) return false;
+        if (mid) seenIdsC.add(mid);
+        if (ext && ext.trim()) {
+          const key = `${String(ext)}|${m?.sent_at}|${m?.direction}`;
+          if (seenExternalC.has(key)) return false;
+          seenExternalC.add(key);
+        }
+        const sentAt = String(m?.sent_at ?? "");
+        const contentKey = `${m?.direction}|${String(m?.content ?? m?.caption ?? "").trim().slice(0, 100)}|${sentAt.slice(0, 19)}`;
+        if (seenContentKeyC.has(contentKey)) return false;
+        seenContentKeyC.add(contentKey);
+        return true;
+      });
+
+      messages = (messages as Record<string, unknown>[]).sort(
+        (a, b) =>
+          new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+      );
+
+      messages = normalizeMessageTypes(messages as unknown[]) as Record<string, unknown>[];
+      messages = await enrichMessagesWithCachedMedia(companyId, id, messages);
       const slicedMessages = Array.isArray(messages)
         ? (messages as Record<string, unknown>[])
             .slice()
@@ -181,10 +273,31 @@ export async function GET(
         messages: slicedMessages,
         ticket_status_name: ticket_status_name_cached,
         ticket_status_color_hex: ticket_status_color_hex_cached,
-        has_more_messages: Boolean(
-          (cached as { has_more_messages?: unknown })?.has_more_messages ??
-          (Array.isArray(messages) ? messages.length > (slicedMessages as unknown[]).length : false)
-        ),
+        has_more_messages: await (async () => {
+          const chatOnly = (slicedMessages as Record<string, unknown>[]).filter(
+            (m) => String(m.message_type ?? "") !== "internal_note"
+          );
+          const sorted = [...chatOnly].sort(
+            (a, b) =>
+              new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+          );
+          const oldest = sorted.length > 0 ? String(sorted[0]?.sent_at ?? "").trim() : "";
+          if (!oldest) {
+            const client = process.env.SUPABASE_SERVICE_ROLE_KEY ? createServiceRoleClient() : supabaseFresh;
+            const { count } = await client
+              .from("messages")
+              .select("id", { count: "exact", head: true })
+              .eq("conversation_id", id);
+            return (count ?? 0) > 0;
+          }
+          const client = process.env.SUPABASE_SERVICE_ROLE_KEY ? createServiceRoleClient() : supabaseFresh;
+          const { count } = await client
+            .from("messages")
+            .select("id", { count: "exact", head: true })
+            .eq("conversation_id", id)
+            .lt("sent_at", oldest);
+          return (count ?? 0) > 0;
+        })(),
       });
       return withMetricsHeaders(res, { cacheHit: true, startTime, route: "/api/conversations/[id]", payload: { messages: Array.isArray(slicedMessages) ? slicedMessages.length : 0 } });
     }
@@ -307,7 +420,9 @@ export async function GET(
         const detailRes = await getChatDetails(resolved.token, numberForApi, { preview: true });
         const data = detailRes.data;
         const fetchedName = extractContactNameFromDetails(data);
-        const fetchedImage = (data?.imagePreview ?? data?.image ?? data?.picture)?.trim() || null;
+        const fetchedImage =
+          String(data?.imagePreview ?? data?.image ?? data?.picture ?? "")
+            .trim() || null;
 
         if (fetchedName || fetchedImage) {
           if (fetchedName) contact_name_from_cc = fetchedName;
@@ -359,52 +474,16 @@ export async function GET(
   }
 
   const MESSAGES_LIMIT = INITIAL_MESSAGES_LIMIT;
-  const messagesSelect = "id, direction, content, external_id, sent_at, created_at, message_type, media_url, caption, file_name, reaction";
-  let messages: unknown[] = [];
-
-  const snapshot = (conversation as { messages_snapshot?: unknown }).messages_snapshot;
-  if (Array.isArray(snapshot) && snapshot.length > 0) {
-    messages = [...snapshot].sort(
-      (a: unknown, b: unknown) =>
+  let messages: unknown[] = await fetchRecentMessagesFromDb(id, MESSAGES_LIMIT, supabase);
+  if (messages.length > 0) {
+    const SNAPSHOT_MAX = 1000;
+    const asc = [...messages].sort(
+      (a, b) =>
         new Date(String((a as { sent_at?: string }).sent_at ?? 0)).getTime() -
         new Date(String((b as { sent_at?: string }).sent_at ?? 0)).getTime()
     );
-  } else if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) {
-    messages = [];
-  }
-
-  if (messages.length === 0) {
-    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      try {
-        const adminSupabase = createServiceRoleClient();
-        const res = await adminSupabase
-          .from("messages")
-          .select(messagesSelect)
-          .eq("conversation_id", id)
-          .order("sent_at", { ascending: false })
-          .limit(MESSAGES_LIMIT);
-        if (!res.error && res.data) messages = Array.isArray(res.data) ? [...res.data].reverse() : [];
-      } catch {
-        // fallback to user client below
-      }
-    }
-    if (messages.length === 0) {
-      const res = await supabase
-        .from("messages")
-        .select(messagesSelect)
-        .eq("conversation_id", id)
-        .order("sent_at", { ascending: false })
-        .limit(MESSAGES_LIMIT);
-      if (res.error) {
-        return NextResponse.json({ error: res.error.message }, { status: 500 });
-      }
-      messages = Array.isArray(res.data) ? [...res.data].reverse() : [];
-    }
-    if (messages.length > 0) {
-      const SNAPSHOT_MAX = 1000;
-      const toStore = messages.slice(-SNAPSHOT_MAX);
-      await supabase.from("conversations").update({ messages_snapshot: toStore, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
-    }
+    const toStore = asc.slice(-SNAPSHOT_MAX);
+    await supabase.from("conversations").update({ messages_snapshot: toStore, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
   }
   // Buscar internal_notes e mesclar
   const notesClient = process.env.SUPABASE_SERVICE_ROLE_KEY 

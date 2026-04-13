@@ -114,16 +114,24 @@ async function enrichWithStatusVisuals<T extends { status?: string; queue_id?: s
   }
 }
 
-/** Chamados novos = não atribuídos e status open. Ordenação estilo Zendesk/Intercom: novos no topo, depois por última mensagem. */
-function sortQueuesListNewFirst<T extends { assigned_to?: string | null; status?: string; last_message_at: string }>(
-  list: T[]
-): T[] {
+/**
+ * Cards da inbox / filas: (1) conversas “novas” (sem atendente + open/in_queue) no topo;
+ * (2) demais por última mensagem, mais recente primeiro; (3) empate em data → id estável.
+ * Não replica a ordem exata do app WhatsApp (lá há fixar/arquivar); aqui é prioridade de atendimento + recência.
+ */
+function sortQueuesListNewFirst<
+  T extends { id?: string; assigned_to?: string | null; status?: string; last_message_at: string },
+>(list: T[]): T[] {
   return [...list].sort((a, b) => {
     const aNew = (a.assigned_to == null || a.assigned_to === "") && (a.status === "open" || a.status === "in_queue");
     const bNew = (b.assigned_to == null || b.assigned_to === "") && (b.status === "open" || b.status === "in_queue");
     if (aNew && !bNew) return -1;
     if (!aNew && bNew) return 1;
-    return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+    const byTime = new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+    if (byTime !== 0) return byTime;
+    const aid = typeof a.id === "string" ? a.id : "";
+    const bid = typeof b.id === "string" ? b.id : "";
+    return bid.localeCompare(aid);
   });
 }
 
@@ -276,7 +284,8 @@ export async function GET(request: Request) {
     .from("conversations")
     .select(selectFields, { count: "exact" })
     .eq("company_id", companyId)
-    .order("last_message_at", { ascending: false });
+    .order("last_message_at", { ascending: false })
+    .order("id", { ascending: false });
 
   if (allowedQueueIds !== null) {
     if (allowedGroupKeys.length === 0) {
@@ -310,7 +319,8 @@ export async function GET(request: Request) {
         .select(selectFields, { count: "exact" })
         .eq("company_id", companyId)
         .in("external_id", groupJids)
-        .order("last_message_at", { ascending: false });
+        .order("last_message_at", { ascending: false })
+        .order("id", { ascending: false });
       const filteredByChannel = (rows: ConvRow[]) => rows.filter((c) => allowedGroupKeys.some((k) => k.channel_id === c.channel_id && k.group_jid === c.external_id));
       const statusFilter = status ? q.eq("status", status) : q.in("status", statusesForList);
       const { data: groupData, error: groupErr } = await statusFilter.range(offset, offset + limit - 1);

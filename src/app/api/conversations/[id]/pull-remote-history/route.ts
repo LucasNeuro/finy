@@ -15,6 +15,7 @@ const MAX_SYNC_ROUNDS = 24;
 
 /**
  * POST /api/conversations/[id]/pull-remote-history
+ * Body opcional: { "max_messages": number, "skip_media": true } — skip_media importa só texto (como o sync em massa).
  * Busca mensagens antigas desta conversa na UAZAPI, grava no Postgres e invalida
  * cache Redis do detalhe + snapshot local (para o GET não servir lista antiga).
  * Repete em rodadas até não inserir mais nada (histórico completo disponível na instância),
@@ -36,15 +37,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: readErr.error }, { status: readErr.status });
   }
 
-  let body: { max_messages?: number } = {};
+  let body: { max_messages?: number; skip_media?: boolean } = {};
   try {
-    body = (await request.json()) as { max_messages?: number };
+    body = (await request.json()) as { max_messages?: number; skip_media?: boolean };
   } catch {
     body = {};
   }
   const rawMax = Number(body.max_messages);
   const maxMessages =
     Number.isFinite(rawMax) && rawMax > 0 ? Math.min(Math.floor(rawMax), 8000) : 4000;
+  const skipMedia = body.skip_media === true;
 
   const supabaseUser = await createClient();
   const { data: conversation, error: convError } = await supabaseUser
@@ -89,7 +91,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       resolved.token,
       conversationId,
       chatKey,
-      maxMessages
+      maxMessages,
+      skipMedia ? { skipMedia: true } : undefined
     );
 
     if (resolvedChatJid?.trim()) {
