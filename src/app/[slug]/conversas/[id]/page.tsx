@@ -2855,15 +2855,16 @@ export default function ConversaThreadPage({
               type="button"
               onClick={() => void handleStatusChange(closedStatusSlug)}
               disabled={!!chatActionLoading}
-              className="rounded p-2 text-[#64748B] hover:bg-[#ECFDF5] hover:text-[#15803D] disabled:opacity-50"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 shadow-sm transition-colors hover:bg-red-50 hover:border-red-400 hover:text-red-700 disabled:opacity-50"
               title="Encerrar chamado (vai para o status Encerrado no Kanban)"
               aria-label="Encerrar chamado"
             >
               {chatActionLoading === "status" ? (
-                <Loader2 className="h-4 w-4 animate-spin text-[#15803D]" aria-hidden />
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-red-600" aria-hidden />
               ) : (
-                <CircleCheck className="h-4 w-4" aria-hidden />
+                <CircleCheck className="h-4 w-4 shrink-0 text-red-600" aria-hidden />
               )}
+              <span>Encerrar</span>
             </button>
           )}
           {isTicketClosed && canTransfer && canReopen && conv && !isLoading && (
