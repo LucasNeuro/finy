@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot, History } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot, History, CircleCheck, RotateCcw } from "lucide-react";
 import { compareMessagesChronologically } from "@/lib/conversations/message-order";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
@@ -1491,6 +1491,19 @@ export default function ConversaThreadPage({
     staleTime: 30_000,
   });
 
+  const closedStatusSlug = useMemo(() => {
+    const closed = availableTicketStatuses.find((s) => s.is_closed);
+    return closed?.slug ?? "closed";
+  }, [availableTicketStatuses]);
+
+  const isTicketClosed = useMemo(() => {
+    if (!conv?.status) return false;
+    const st = String(conv.status).toLowerCase();
+    const match = availableTicketStatuses.find((s) => String(s.slug ?? "").toLowerCase() === st);
+    if (match) return !!match.is_closed;
+    return st === "closed";
+  }, [conv?.status, availableTicketStatuses]);
+
   const { data: companyQueues = [] } = useQuery({
     queryKey: ["conversation-transfer-queues", slug],
     queryFn: async () => {
@@ -2072,6 +2085,7 @@ export default function ConversaThreadPage({
   const canSendMessages = Boolean(conv && currentUserId && conv.assigned_to === currentUserId);
   const canChangeStatus = perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets");
   const canClose = perms.includes("inbox.close");
+  const canReopen = perms.includes("inbox.reopen");
 
   async function handleClaim() {
     if (!resolved?.id) return;
@@ -2836,6 +2850,36 @@ export default function ConversaThreadPage({
           >
             <User className="h-4 w-4" />
           </button>
+          {canClose && !isTicketClosed && conv && !isLoading && (
+            <button
+              type="button"
+              onClick={() => void handleStatusChange(closedStatusSlug)}
+              disabled={!!chatActionLoading}
+              className="rounded p-2 text-[#64748B] hover:bg-[#ECFDF5] hover:text-[#15803D] disabled:opacity-50"
+              title="Encerrar chamado (vai para o status Encerrado no Kanban)"
+              aria-label="Encerrar chamado"
+            >
+              {chatActionLoading === "status" ? (
+                <Loader2 className="h-4 w-4 animate-spin text-[#15803D]" aria-hidden />
+              ) : (
+                <CircleCheck className="h-4 w-4" aria-hidden />
+              )}
+            </button>
+          )}
+          {isTicketClosed && canTransfer && canReopen && conv && !isLoading && (
+            <button
+              type="button"
+              onClick={() => {
+                openTransferSideOver();
+              }}
+              disabled={!!chatActionLoading}
+              className="rounded p-2 text-[#64748B] hover:bg-[#EFF6FF] hover:text-[#1D4ED8] disabled:opacity-50"
+              title="Reabrir: escolha uma fila para devolver o ticket ao atendimento"
+              aria-label="Reabrir chamado"
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden />
+            </button>
+          )}
           <div className="relative">
             <button
               type="button"
