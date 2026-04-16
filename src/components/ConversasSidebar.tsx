@@ -40,6 +40,29 @@ function formatLastMessageTime(iso: string): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
+/** Badge: ícone do canal (ex.: WhatsApp) + horário da última mensagem */
+function ChannelTimeBadge({
+  channelName,
+  lastMessageAt,
+}: {
+  channelName?: string | null;
+  lastMessageAt: string;
+}) {
+  const conn = (channelName ?? "").trim();
+  const title = conn
+    ? `Conexão: ${conn} · Última atividade ${formatLastMessageTime(lastMessageAt)}`
+    : `WhatsApp · ${formatLastMessageTime(lastMessageAt)}`;
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#E2E8F0] bg-gradient-to-b from-white to-[#F8FAFC] py-0.5 pl-0.5 pr-2 shadow-sm ring-1 ring-black/[0.03]"
+      title={title}
+    >
+      <ChannelIcon variant="colored" provider="generic" channelName={channelName} size={20} title={conn || "WhatsApp"} />
+      <span className="text-[11px] font-semibold text-[#475569] tabular-nums">{formatLastMessageTime(lastMessageAt)}</span>
+    </span>
+  );
+}
+
 /** Corrige Brasil: DDD+0+8 dígitos → DDD+9+8 (celular). */
 function fixBrazilMobileZero(d: string): string {
   if (d.length === 11 && !d.startsWith("55")) {
@@ -265,12 +288,7 @@ const ConversationListItem = memo(function ConversationListItem({
                   )}
                   <span className="truncate">{c.customer_name || formatPhoneBrazil(c.customer_phone)}</span>
                 </p>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  <ChannelIcon variant="outline" provider="generic" channelName={c.channel_name} size={20} title={c.channel_name ?? "WhatsApp"} />
-                  <span className="text-xs font-medium text-[#64748B] tabular-nums">
-                    {formatLastMessageTime(c.last_message_at)}
-                  </span>
-                </span>
+                <ChannelTimeBadge channelName={c.channel_name} lastMessageAt={c.last_message_at} />
               </div>
               <p className="mt-1 truncate text-xs text-[#64748B]">
                 {isGroup && (
@@ -297,6 +315,12 @@ const ConversationListItem = memo(function ConversationListItem({
               <Hash className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
               <span className="font-mono font-medium tracking-wide">{shortId}</span>
             </span>
+            {c.channel_name?.trim() && (
+              <span className="inline-flex min-w-0 items-center gap-1" title={`Instância / conexão: ${c.channel_name.trim()}`}>
+                <Plug className="h-3.5 w-3.5 shrink-0 text-[#22C55E]" aria-hidden />
+                <span className="truncate max-w-[min(140px,40vw)] font-medium text-[#475569]">{c.channel_name.trim()}</span>
+              </span>
+            )}
             {c.queue_name && (
               <span className="inline-flex items-center gap-1" title={`Fila: ${c.queue_name}`}>
                 <Layers className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
@@ -516,12 +540,7 @@ const BroadcastQueueListItem = memo(function BroadcastQueueListItem({
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <p className="truncate text-sm font-semibold text-[#1E293B]">{displayName}</p>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  <ChannelIcon variant="outline" provider="generic" channelName={item.channel_name} size={20} title={item.channel_name ?? "WhatsApp"} />
-                  <span className="text-xs font-medium text-[#64748B] tabular-nums">
-                    {formatLastMessageTime(item.created_at)}
-                  </span>
-                </span>
+                <ChannelTimeBadge channelName={item.channel_name} lastMessageAt={item.created_at} />
               </div>
               <p className="mt-0.5 truncate text-xs text-[#64748B]">
                 {formatPhoneBrazil(contact?.phone ?? contact?.jid)}
@@ -533,10 +552,10 @@ const BroadcastQueueListItem = memo(function BroadcastQueueListItem({
               <Hash className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
               <span className="font-mono font-medium tracking-wide">{shortId}</span>
             </span>
-            {item.channel_name && (
-              <span className="inline-flex items-center gap-1" title={`Conexão: ${item.channel_name}`}>
-                <Layers className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" />
-                <span className="truncate max-w-[100px]">{item.channel_name}</span>
+            {item.channel_name?.trim() && (
+              <span className="inline-flex min-w-0 items-center gap-1" title={`Instância / conexão: ${item.channel_name.trim()}`}>
+                <Plug className="h-3.5 w-3.5 shrink-0 text-[#22C55E]" aria-hidden />
+                <span className="truncate max-w-[min(140px,40vw)] font-medium text-[#475569]">{item.channel_name.trim()}</span>
               </span>
             )}
             <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">
