@@ -14,6 +14,7 @@ import { toCanonicalDigits } from "@/lib/phone-canonical";
 import { isCommercialQueue } from "@/lib/queue/commercial";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { compareMessagesChronologically } from "@/lib/conversations/message-order";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { getChatDetails, extractContactNameFromDetails } from "@/lib/uazapi/client";
 import { NextResponse } from "next/server";
@@ -40,6 +41,7 @@ async function fetchRecentMessagesFromDb(
         .select(MESSAGES_LIST_SELECT)
         .eq("conversation_id", conversationId)
         .order("sent_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(limit);
       if (!res.error && res.data && res.data.length > 0) {
         return [...res.data].reverse();
@@ -53,6 +55,7 @@ async function fetchRecentMessagesFromDb(
     .select(MESSAGES_LIST_SELECT)
     .eq("conversation_id", conversationId)
     .order("sent_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(limit);
   if (res.error) return [];
   return Array.isArray(res.data) ? [...res.data].reverse() : [];
@@ -183,10 +186,11 @@ export async function GET(
             created_at: n.created_at,
           })
         );
-        messages = [...messages, ...formattedNotes].sort(
-          (a, b) =>
-            new Date(String((a as { sent_at?: string }).sent_at ?? 0)).getTime() -
-            new Date(String((b as { sent_at?: string }).sent_at ?? 0)).getTime()
+        messages = [...messages, ...formattedNotes].sort((a, b) =>
+          compareMessagesChronologically(
+            a as { sent_at?: string; id?: string },
+            b as { sent_at?: string; id?: string }
+          )
         ) as Record<string, unknown>[];
       }
 
@@ -210,9 +214,11 @@ export async function GET(
         return true;
       });
 
-      messages = (messages as Record<string, unknown>[]).sort(
-        (a, b) =>
-          new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+      messages = (messages as Record<string, unknown>[]).sort((a, b) =>
+        compareMessagesChronologically(
+          a as { sent_at?: string; id?: string },
+          b as { sent_at?: string; id?: string }
+        )
       );
 
       messages = normalizeMessageTypes(messages as unknown[]) as Record<string, unknown>[];
@@ -220,9 +226,11 @@ export async function GET(
       const slicedMessages = Array.isArray(messages)
         ? (messages as Record<string, unknown>[])
             .slice()
-            .sort(
-              (a, b) =>
-                new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+            .sort((a, b) =>
+              compareMessagesChronologically(
+                a as { sent_at?: string; id?: string },
+                b as { sent_at?: string; id?: string }
+              )
             )
             .slice(-INITIAL_MESSAGES_LIMIT)
         : messages;
@@ -277,9 +285,11 @@ export async function GET(
           const chatOnly = (slicedMessages as Record<string, unknown>[]).filter(
             (m) => String(m.message_type ?? "") !== "internal_note"
           );
-          const sorted = [...chatOnly].sort(
-            (a, b) =>
-              new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+          const sorted = [...chatOnly].sort((a, b) =>
+            compareMessagesChronologically(
+              a as { sent_at?: string; id?: string },
+              b as { sent_at?: string; id?: string }
+            )
           );
           const oldest = sorted.length > 0 ? String(sorted[0]?.sent_at ?? "").trim() : "";
           if (!oldest) {
@@ -477,10 +487,11 @@ export async function GET(
   let messages: unknown[] = await fetchRecentMessagesFromDb(id, MESSAGES_LIMIT, supabase);
   if (messages.length > 0) {
     const SNAPSHOT_MAX = 1000;
-    const asc = [...messages].sort(
-      (a, b) =>
-        new Date(String((a as { sent_at?: string }).sent_at ?? 0)).getTime() -
-        new Date(String((b as { sent_at?: string }).sent_at ?? 0)).getTime()
+    const asc = [...messages].sort((a, b) =>
+      compareMessagesChronologically(
+        a as { sent_at?: string; id?: string },
+        b as { sent_at?: string; id?: string }
+      )
     );
     const toStore = asc.slice(-SNAPSHOT_MAX);
     await supabase.from("conversations").update({ messages_snapshot: toStore, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
@@ -506,8 +517,11 @@ export async function GET(
       message_type: "internal_note",
       created_at: n.created_at,
     }));
-    messages = [...messages, ...formattedNotes].sort((a: any, b: any) => 
-      new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
+    messages = [...messages, ...formattedNotes].sort((a: any, b: any) =>
+      compareMessagesChronologically(
+        a as { sent_at?: string; id?: string },
+        b as { sent_at?: string; id?: string }
+      )
     );
   }
 
@@ -532,9 +546,11 @@ export async function GET(
     return true;
   });
 
-  messages = (messages as Record<string, unknown>[]).sort(
-    (a, b) =>
-      new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+  messages = (messages as Record<string, unknown>[]).sort((a, b) =>
+    compareMessagesChronologically(
+      a as { sent_at?: string; id?: string },
+      b as { sent_at?: string; id?: string }
+    )
   );
 
   messages = normalizeMessageTypes(messages as Record<string, unknown>[]);
@@ -549,9 +565,11 @@ export async function GET(
   const countClient = process.env.SUPABASE_SERVICE_ROLE_KEY ? createServiceRoleClient() : supabase;
   const chatOnlySorted = (messages as Record<string, unknown>[])
     .filter((m) => String(m.message_type ?? "") !== "internal_note")
-    .sort(
-      (a, b) =>
-        new Date(String(a.sent_at ?? 0)).getTime() - new Date(String(b.sent_at ?? 0)).getTime()
+    .sort((a, b) =>
+      compareMessagesChronologically(
+        a as { sent_at?: string; id?: string },
+        b as { sent_at?: string; id?: string }
+      )
     );
   const oldestChatSentAt =
     chatOnlySorted.length > 0 ? String(chatOnlySorted[0]?.sent_at ?? "").trim() : "";

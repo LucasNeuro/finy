@@ -2,6 +2,14 @@
  * Defaults para sincronização de histórico (UAZAPI → Postgres).
  * Últimas N mensagens **somente texto** por chat (mídias não entram na contagem nem são gravadas neste fluxo).
  */
+
+/**
+ * Quando a UAZ não envia `wa_lastMsgTimestamp`, não usar a data atual como `last_message_at`:
+ * ao importar histórico antigo, a regra "não retroceder last_message_at" deixaria o card no topo da inbox.
+ * Com este placeholder, o primeiro lote importado define a data real (max sent_at).
+ */
+export const FALLBACK_LAST_MESSAGE_AT_ISO = "1970-01-01T00:00:00.000Z";
+
 export const SYNC_HISTORY_DEFAULT_MESSAGES_PER_CHAT = 200;
 
 const MAX_CAP = 8000;

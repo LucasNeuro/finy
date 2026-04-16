@@ -116,8 +116,8 @@ async function enrichWithStatusVisuals<T extends { status?: string; queue_id?: s
 
 /**
  * Cards da inbox / filas: (1) conversas “novas” (sem atendente + open/in_queue) no topo;
- * (2) demais por última mensagem, mais recente primeiro; (3) empate em data → id estável.
- * Não replica a ordem exata do app WhatsApp (lá há fixar/arquivar); aqui é prioridade de atendimento + recência.
+ * (2) demais por última mensagem (WhatsApp / banco), mais recente primeiro; (3) empate em data → id estável.
+ * Sync de histórico usa `last_message_at` real; placeholder sem timestamp na UAZ não deve ser “agora” (ver sync-history-config).
  */
 function sortQueuesListNewFirst<
   T extends { id?: string; assigned_to?: string | null; status?: string; last_message_at: string },

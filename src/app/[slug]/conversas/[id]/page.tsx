@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot, History } from "lucide-react";
+import { compareMessagesChronologically } from "@/lib/conversations/message-order";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
 import { SideOver } from "@/components/SideOver";
@@ -1523,8 +1524,8 @@ export default function ConversaThreadPage({
       );
       return !hasMatch;
     });
-    return [...deduped, ...toAdd].sort(
-      (a, b) => new Date((a as Message).sent_at).getTime() - new Date((b as Message).sent_at).getTime()
+    return [...deduped, ...toAdd].sort((a, b) =>
+      compareMessagesChronologically(a as Message, b as Message)
     ) as Message[];
   }, [conv?.messages, optimisticMessages]);
 
@@ -1806,9 +1807,7 @@ export default function ConversaThreadPage({
     const url = `/api/conversations/${id}/messages?before=${encodeURIComponent(before)}&limit=50`;
 
     const sortBySentAt = (list: Message[]) =>
-      [...list].sort(
-        (a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
-      );
+      [...list].sort((a, b) => compareMessagesChronologically(a, b));
 
     const mergeOlderBatch = (older: Message[]) => {
       if (older.length === 0) return;

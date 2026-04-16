@@ -1,3 +1,4 @@
+import { compareMessagesChronologically } from "@/lib/conversations/message-order";
 import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
@@ -55,6 +56,7 @@ export async function GET(
       .select(MESSAGES_SELECT)
       .eq("conversation_id", conversationId)
       .order("sent_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(limit);
     if (before) q = q.lt("sent_at", before);
     const res = await q;
@@ -116,10 +118,11 @@ export async function GET(
       message_type: "internal_note",
       created_at: n.created_at,
     }));
-    messages = [...chatBatch, ...formattedNotes].sort(
-      (a: unknown, b: unknown) =>
-        new Date(String((a as { sent_at?: string }).sent_at ?? 0)).getTime() -
-        new Date(String((b as { sent_at?: string }).sent_at ?? 0)).getTime()
+    messages = [...chatBatch, ...formattedNotes].sort((a: unknown, b: unknown) =>
+      compareMessagesChronologically(
+        a as { sent_at?: string; id?: string },
+        b as { sent_at?: string; id?: string }
+      )
     );
   } else {
     messages = chatBatch;

@@ -2,7 +2,10 @@ import { insertHistoryMessagesFromUazapiForConversation } from "@/lib/conversati
 import { invalidateConversationDetail, invalidateConversationList } from "@/lib/redis/inbox-state";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { toCanonicalJid } from "@/lib/phone-canonical";
-import { getSyncHistoryMaxTotalMessagesInserted } from "@/lib/channels/sync-history-config";
+import {
+  FALLBACK_LAST_MESSAGE_AT_ISO,
+  getSyncHistoryMaxTotalMessagesInserted,
+} from "@/lib/channels/sync-history-config";
 import { findChats, type UazapiChat } from "@/lib/uazapi/client";
 import { isQueueOpen, type BusinessHoursItem, type SpecialDateItem } from "@/lib/queue-hours";
 
@@ -122,11 +125,11 @@ export async function runSyncChannelHistory(params: {
   function lastMessageAtFromChat(chat: UazapiChat): string {
     const raw = chat.wa_lastMsgTimestamp;
     if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
-      return new Date().toISOString();
+      return FALLBACK_LAST_MESSAGE_AT_ISO;
     }
     const ms = raw < 1e12 ? raw * 1000 : raw;
     const d = new Date(ms);
-    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+    return Number.isNaN(d.getTime()) ? FALLBACK_LAST_MESSAGE_AT_ISO : d.toISOString();
   }
 
   function pickQueueId(isGroup: boolean): string | null {
