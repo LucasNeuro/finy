@@ -927,76 +927,8 @@ async function processOneMessage(
         if (byPhone55) existingTicket = byPhone55;
       }
     }
-    // Mesmo JID/telefone em chamado encerrado: reutilizar para não duplicar quando o cliente volta a falar (ou eco celular vs painel).
-    if (!existingTicket) {
-      const { data: closedByExternal } = await supabase
-        .from("conversations")
-        .select("id, status")
-        .eq("channel_id", channelId)
-        .eq("external_id", canonicalExternalId)
-        .eq("kind", "ticket")
-        .eq("status", "closed")
-        .order("last_message_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (closedByExternal) existingTicket = closedByExternal;
-    }
-    if (!existingTicket) {
-      const { data: closedByWaChat } = await supabase
-        .from("conversations")
-        .select("id, status")
-        .eq("channel_id", channelId)
-        .eq("wa_chat_jid", canonicalExternalId)
-        .eq("kind", "ticket")
-        .eq("status", "closed")
-        .order("last_message_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (closedByWaChat) existingTicket = closedByWaChat;
-    }
-    if (!existingTicket && canonicalDigits) {
-      const { data: closedByPhone } = await supabase
-        .from("conversations")
-        .select("id, status")
-        .eq("channel_id", channelId)
-        .eq("company_id", companyId)
-        .eq("customer_phone", canonicalDigits)
-        .eq("kind", "ticket")
-        .eq("status", "closed")
-        .order("last_message_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (closedByPhone) existingTicket = closedByPhone;
-      if (!existingTicket && canonicalDigits.length === 12 && canonicalDigits.startsWith("55")) {
-        const without55 = canonicalDigits.slice(2);
-        const { data: closedByPhoneAlt } = await supabase
-          .from("conversations")
-          .select("id, status")
-          .eq("channel_id", channelId)
-          .eq("company_id", companyId)
-          .eq("customer_phone", without55)
-          .eq("kind", "ticket")
-          .eq("status", "closed")
-          .order("last_message_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (closedByPhoneAlt) existingTicket = closedByPhoneAlt;
-      }
-      if (!existingTicket && !canonicalDigits.startsWith("55") && canonicalDigits.length >= 10) {
-        const { data: closedByPhone55 } = await supabase
-          .from("conversations")
-          .select("id, status")
-          .eq("channel_id", channelId)
-          .eq("company_id", companyId)
-          .eq("customer_phone", `55${canonicalDigits}`)
-          .eq("kind", "ticket")
-          .eq("status", "closed")
-          .order("last_message_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (closedByPhone55) existingTicket = closedByPhone55;
-      }
-    }
+    /** Chamados encerrados não são reutilizados: novo contato do cliente cria nova linha em `conversations`
+     * (o encerramento libera o par único channel_id+external_id via tombstone no PATCH). */
 
     /**
      * Último recurso: mesmo contato no WhatsApp com duas linhas no banco (LID vs PN, sync com JID
@@ -1173,12 +1105,8 @@ async function processOneMessage(
     }
 
     let conversationId: string;
-    /** Para atualizar a conversa só após insert da mensagem (escopo fora do `if`). */
-    let reopenFromClosed = false;
     if (existingTicket) {
       conversationId = existingTicket.id;
-      reopenFromClosed =
-        String(existingTicket.status ?? "").toLowerCase() === "closed" && !isHistoryEvent;
       if (messageExternalId) {
         const { data: existingMsg } = await supabase
           .from("messages")
@@ -1367,9 +1295,6 @@ async function processOneMessage(
       }
       if (customerName?.trim()) {
         convUpdatePayload.customer_name = customerName.trim();
-      }
-      if (reopenFromClosed) {
-        convUpdatePayload.status = "open";
       }
     }
     await supabase.from("conversations").update(convUpdatePayload).eq("id", conversationId);

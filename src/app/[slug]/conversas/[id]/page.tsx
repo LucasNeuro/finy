@@ -3,7 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot, History, CircleCheck, RotateCcw } from "lucide-react";
+import { ArrowLeft, Send, Search, ArrowRightLeft, MoreVertical, CheckCheck, Phone, User, UserCheck, Paperclip, Mic, Square, Archive, ArchiveX, Bell, BellOff, Pin, PinOff, Trash2, Check, Download, Play, Pause, Smile, FileText, Image, Video, Music, Volume2, MoreVertical as MoreVerticalIcon, Bold, AlignLeft, AlignCenter, AlignRight, MessageSquare, Zap, Sparkles, Copy, ChevronUp, ChevronDown, ChevronsUp, X, Bot, History, CircleCheck } from "lucide-react";
 import { compareMessagesChronologically } from "@/lib/conversations/message-order";
 import { queryKeys } from "@/lib/query-keys";
 import { useInboxStore } from "@/stores/inbox-store";
@@ -216,6 +216,18 @@ function resolveConversationStatusVisual(conv: ConversationDetail | null | undef
           ? "bg-[#F59E0B]/15 text-[#B45309]"
           : "bg-[#22C55E]/15 text-[#16A34A]";
   return { statusKey: effectiveStatus, label: name, colorHex, badgeClass };
+}
+
+/** Rótulo amigável para slugs de status na timeline do atendimento. */
+function timelineStatusLabelPt(slug: string): string {
+  const s = (slug || "").toLowerCase().trim();
+  if (!s) return "—";
+  if (s === "closed") return "Encerrado";
+  if (s === "open") return "Novo / Aberto";
+  if (s === "in_progress") return "Em atendimento";
+  if (s === "in_queue") return "Na fila";
+  if (s === "waiting") return "Aguardando";
+  return slug;
 }
 
 /** Barra de preview do áudio gravado antes de enviar (miniplayer com degradê roxo claro, igual ao mini player da conversa). */
@@ -1262,6 +1274,7 @@ export default function ConversaThreadPage({
   const [transferQueueId, setTransferQueueId] = useState<string>("");
   const [transferSaving, setTransferSaving] = useState(false);
   const [transferToast, setTransferToast] = useState<string | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const [messageSearchOpen, setMessageSearchOpen] = useState(false);
   const [messageSearchTerm, setMessageSearchTerm] = useState("");
   const [messageSearchIndex, setMessageSearchIndex] = useState(0);
@@ -1516,8 +1529,48 @@ export default function ConversaThreadPage({
       if (!Array.isArray(list)) return [] as QueueOption[];
       return list as QueueOption[];
     },
-    enabled: !!slug && canTransfer,
+    enabled: !!slug && (canTransfer || transferOpen),
     staleTime: 60_000,
+  });
+
+  const transferQueueOptions = useMemo(() => {
+    const ticketQueues = companyQueues.filter((q) => q.kind !== "group");
+    const others = ticketQueues.filter((q) => q.id !== (conv?.queue_id ?? null));
+    return others.length > 0 ? others : ticketQueues;
+  }, [companyQueues, conv?.queue_id]);
+
+  const { data: timelineData, isLoading: timelineLoading } = useQuery({
+    queryKey: ["conversation-timeline", resolved?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/conversations/${resolved!.id}/timeline`, {
+        credentials: "include",
+        headers: apiHeaders ?? {},
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error((j as { error?: string })?.error ?? "Falha ao carregar histórico");
+      }
+      return (await res.json()) as {
+        conversation: {
+          created_at: string;
+          channel_name: string | null;
+          queue_name: string | null;
+          assigned_to_name: string | null;
+          status: string | null;
+          customer_name: string | null;
+          customer_phone: string | null;
+        };
+        status_changes: Array<{
+          id: string;
+          from_status: string;
+          to_status: string;
+          changed_by_name: string | null;
+          created_at: string;
+        }>;
+      };
+    },
+    enabled: !!resolved?.id && timelineOpen,
+    staleTime: 30_000,
   });
 
   const mergedMessages = useMemo(() => {
@@ -2085,7 +2138,6 @@ export default function ConversaThreadPage({
   const canSendMessages = Boolean(conv && currentUserId && conv.assigned_to === currentUserId);
   const canChangeStatus = perms.includes("inbox.assign") || perms.includes("inbox.manage_tickets");
   const canClose = perms.includes("inbox.close");
-  const canReopen = perms.includes("inbox.reopen");
 
   async function handleClaim() {
     if (!resolved?.id) return;
@@ -2141,7 +2193,9 @@ export default function ConversaThreadPage({
 
   function openTransferSideOver() {
     const currentQueueId = conv?.queue_id ?? "";
-    const firstOption = companyQueues.find((q) => q.id !== currentQueueId && q.kind !== "group")?.id ?? "";
+    const ticketQueues = companyQueues.filter((q) => q.kind !== "group");
+    const other = ticketQueues.find((q) => q.id !== currentQueueId);
+    const firstOption = other?.id ?? ticketQueues[0]?.id ?? "";
     setTransferQueueId(firstOption);
     setTransferOpen(true);
     setChatMenuOpen(false);
@@ -2867,20 +2921,6 @@ export default function ConversaThreadPage({
               <span>Encerrar</span>
             </button>
           )}
-          {isTicketClosed && canTransfer && canReopen && conv && !isLoading && (
-            <button
-              type="button"
-              onClick={() => {
-                openTransferSideOver();
-              }}
-              disabled={!!chatActionLoading}
-              className="rounded p-2 text-[#64748B] hover:bg-[#EFF6FF] hover:text-[#1D4ED8] disabled:opacity-50"
-              title="Reabrir: escolha uma fila para devolver o ticket ao atendimento"
-              aria-label="Reabrir chamado"
-            >
-              <RotateCcw className="h-4 w-4" aria-hidden />
-            </button>
-          )}
           <div className="relative">
             <button
               type="button"
@@ -2956,6 +2996,13 @@ export default function ConversaThreadPage({
           </div>
         </div>
       </header>
+
+      {isTicketClosed && conv && !isLoading && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-950">
+          <strong>Ticket encerrado.</strong> Este chamado não é reaberto. Quando o cliente mandar mensagem de novo, o sistema abre um{" "}
+          <strong>novo atendimento</strong> (nova linha na lista).
+        </div>
+      )}
 
       {messageSearchOpen && (
         <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-2">
@@ -3130,6 +3177,20 @@ export default function ConversaThreadPage({
               onSend={sendRecordedAudio}
               onDiscard={discardRecordedAudio}
             />
+          ) : isTicketClosed ? (
+          <div className="border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-5">
+            <p className="mb-3 text-sm leading-relaxed text-[#475569]">
+              Este chamado já foi <strong>encerrado</strong>. Não é possível enviar mensagens neste ticket.
+            </p>
+            <button
+              type="button"
+              onClick={() => setTimelineOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-[#E2E8F0] bg-white px-4 py-2.5 text-sm font-medium text-[#1E293B] shadow-sm transition-colors hover:bg-[#F1F5F9]"
+            >
+              <History className="h-4 w-4 shrink-0" aria-hidden />
+              Ver histórico do atendimento
+            </button>
+          </div>
           ) : (
           <>
 <div className={`flex flex-col bg-white overflow-hidden ${!canSendMessages ? "opacity-60 pointer-events-none" : ""}`}>
@@ -3583,16 +3644,15 @@ export default function ConversaThreadPage({
               className="w-full rounded-lg border border-[#E2E8F0] px-3 py-2 text-sm text-[#1E293B]"
             >
               <option value="">Selecione uma fila</option>
-              {companyQueues
-                .filter((q) => q.kind !== "group" && q.id !== (conv?.queue_id ?? null))
-                .map((q) => (
-                  <option key={q.id} value={q.id}>
-                    {q.name}
-                  </option>
-                ))}
+              {transferQueueOptions.map((q) => (
+                <option key={q.id} value={q.id}>
+                  {q.name}
+                  {q.id === conv?.queue_id ? " (fila atual)" : ""}
+                </option>
+              ))}
             </select>
-            {companyQueues.filter((q) => q.kind !== "group" && q.id !== (conv?.queue_id ?? null)).length === 0 && (
-              <p className="mt-2 text-xs text-[#94A3B8]">Nenhuma outra fila disponível para transferência.</p>
+            {transferQueueOptions.length === 0 && (
+              <p className="mt-2 text-xs text-[#94A3B8]">Nenhuma fila disponível. Cadastre filas em Filas (caixas de entrada).</p>
             )}
           </div>
 
@@ -3615,6 +3675,81 @@ export default function ConversaThreadPage({
               Transferir
             </button>
           </div>
+        </div>
+      </SideOver>
+
+      <SideOver
+        open={timelineOpen}
+        onClose={() => setTimelineOpen(false)}
+        title="Histórico do atendimento"
+        width={520}
+      >
+        <div className="space-y-4 text-sm text-[#1E293B]">
+          {timelineLoading ? (
+            <div className="flex items-center gap-2 text-[#64748B]">
+              <Loader2 className="h-5 w-5 animate-spin shrink-0" aria-hidden />
+              Carregando…
+            </div>
+          ) : timelineData ? (
+            <>
+              <div className="space-y-2 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#64748B]">Resumo</p>
+                <ul className="space-y-1.5 text-[#334155]">
+                  <li>
+                    <span className="text-[#64748B]">Aberto em:</span>{" "}
+                    {new Date(timelineData.conversation.created_at).toLocaleString("pt-BR")}
+                  </li>
+                  {timelineData.conversation.channel_name ? (
+                    <li>
+                      <span className="text-[#64748B]">Conexão (instância):</span> {timelineData.conversation.channel_name}
+                    </li>
+                  ) : null}
+                  {timelineData.conversation.queue_name ? (
+                    <li>
+                      <span className="text-[#64748B]">Fila:</span> {timelineData.conversation.queue_name}
+                    </li>
+                  ) : null}
+                  <li>
+                    <span className="text-[#64748B]">Atendente (atribuição atual):</span>{" "}
+                    {timelineData.conversation.assigned_to_name ?? "—"}
+                  </li>
+                  <li>
+                    <span className="text-[#64748B]">Status atual:</span>{" "}
+                    {timelineStatusLabelPt(timelineData.conversation.status ?? "")}
+                  </li>
+                </ul>
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#64748B]">
+                  Linha do tempo — mudanças de status
+                </p>
+                {timelineData.status_changes.length === 0 ? (
+                  <p className="text-[#64748B]">
+                    Nenhuma mudança de status registrada neste ticket (histórico pode ser anterior ao registro automático).
+                  </p>
+                ) : (
+                  <ul className="relative space-y-4 border-l-2 border-[#E2E8F0] pl-4">
+                    {timelineData.status_changes.map((row) => (
+                      <li key={row.id} className="relative">
+                        <span className="absolute -left-[9px] top-1.5 h-3 w-3 rounded-full bg-clicvend-orange ring-2 ring-white" />
+                        <p className="text-xs text-[#94A3B8]">
+                          {new Date(row.created_at).toLocaleString("pt-BR")}
+                        </p>
+                        <p className="font-medium text-[#1E293B]">
+                          {timelineStatusLabelPt(row.from_status)} → {timelineStatusLabelPt(row.to_status)}
+                        </p>
+                        <p className="text-xs text-[#64748B]">
+                          {row.changed_by_name ? `Por: ${row.changed_by_name}` : "Registro automático / sistema"}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-[#64748B]">Não foi possível carregar o histórico.</p>
+          )}
         </div>
       </SideOver>
 

@@ -1034,6 +1034,7 @@ export function ConversasSidebar() {
       .map(([key, v]) => ({ key, ...v }))
       .sort((a, b) => b.count - a.count);
   })();
+  const displayStatusOptions = activeTab === "mine_closed" ? [] : statusOptions;
   const showStatusFilters = activeTab !== "contacts" && activeTab !== "groups" && activeTab !== "broadcast_queue";
 
   const searchLower = search.trim().toLowerCase();
@@ -1309,7 +1310,7 @@ export function ConversasSidebar() {
                     </span>
                   </button>
                 ))}
-              {statusOptions.map((opt) => (
+              {displayStatusOptions.map((opt) => (
                 <button
                   key={opt.key}
                   type="button"

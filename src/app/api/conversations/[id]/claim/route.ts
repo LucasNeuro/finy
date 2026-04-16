@@ -49,6 +49,25 @@ export async function POST(
     return NextResponse.json({ error: "Conversa não encontrada" }, { status: 404 });
   }
 
+  const statusSlug = String(conversation.status || "").toLowerCase();
+  const { data: statusRow } = await supabase
+    .from("company_ticket_statuses")
+    .select("is_closed")
+    .eq("company_id", companyId)
+    .eq("slug", statusSlug)
+    .limit(1)
+    .maybeSingle();
+  const isClosedStatus = statusRow?.is_closed === true || statusSlug === "closed";
+  if (isClosedStatus) {
+    return NextResponse.json(
+      {
+        error:
+          "Ticket encerrado não pode ser assumido. Novas mensagens do cliente abrem um novo atendimento.",
+      },
+      { status: 400 }
+    );
+  }
+
   if (conversation.assigned_to != null) {
     return NextResponse.json(
       { error: "Chamado já está atribuído a outro atendente." },

@@ -630,7 +630,7 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser();
   const { data: existing, error: fetchError } = await supabase
     .from("conversations")
-    .select("id, status, assigned_to, queue_id")
+    .select("id, status, assigned_to, queue_id, external_id, wa_chat_jid, kind, is_group")
     .eq("id", id)
     .eq("company_id", companyId)
     .single();
@@ -650,8 +650,6 @@ export async function PATCH(
     }
   }
 
-  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  let shouldSendConsentOnClose = false;
   const resolveStatusMeta = async (slug: string, queueId: string | null) => {
     const base = supabase
       .from("company_ticket_statuses")
@@ -663,6 +661,46 @@ export async function PATCH(
       : base.is("queue_id", null).limit(1).maybeSingle());
     return (data as { slug: string; is_closed?: boolean } | null) ?? null;
   };
+
+  const existingStatusMeta = await resolveStatusMeta(String(existing.status || "").toLowerCase(), existing.queue_id ?? null);
+  const existingIsClosed = existingStatusMeta
+    ? !!existingStatusMeta.is_closed
+    : String(existing.status || "").toLowerCase() === "closed";
+
+  const closedTicketError =
+    "Ticket encerrado não pode ser alterado ou reaberto. Novas mensagens do cliente abrem um novo atendimento.";
+
+  if (existingIsClosed) {
+    if (body.queue_id !== undefined) {
+      const newQueue = body.queue_id === null || body.queue_id === "" ? null : body.queue_id;
+      if (newQueue !== existing.queue_id) {
+        return NextResponse.json({ error: closedTicketError }, { status: 400 });
+      }
+    }
+    if (body.assigned_to !== undefined) {
+      const newAssigned =
+        body.assigned_to === null || body.assigned_to === "" ? null : body.assigned_to;
+      if (newAssigned !== existing.assigned_to) {
+        return NextResponse.json({ error: closedTicketError }, { status: 400 });
+      }
+    }
+    if (body.status !== undefined && typeof body.status === "string" && body.status.trim()) {
+      const newStatus = body.status.trim().toLowerCase();
+      if (newStatus !== String(existing.status || "").toLowerCase()) {
+        const nextQueueId =
+          body.queue_id !== undefined
+            ? (body.queue_id === null || body.queue_id === "" ? null : body.queue_id)
+            : (existing.queue_id ?? null);
+        const newStatusMeta = await resolveStatusMeta(newStatus, nextQueueId);
+        if (!newStatusMeta?.is_closed) {
+          return NextResponse.json({ error: closedTicketError }, { status: 400 });
+        }
+      }
+    }
+  }
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  let shouldSendConsentOnClose = false;
 
   // Controle de permissão por tipo de atualização
   if (body.status !== undefined && typeof body.status === "string" && body.status.trim()) {
@@ -676,15 +714,10 @@ export async function PATCH(
       if (!newStatusMeta) {
         return NextResponse.json({ error: "Status inválido para esta fila." }, { status: 400 });
       }
-      const existingStatusMeta = await resolveStatusMeta(String(existing.status || "").toLowerCase(), existing.queue_id ?? null);
-      const existingIsClosed = existingStatusMeta ? !!existingStatusMeta.is_closed : String(existing.status || "").toLowerCase() === "closed";
       const newIsClosed = !!newStatusMeta.is_closed;
       shouldSendConsentOnClose = !existingIsClosed && newIsClosed;
       if (newIsClosed) {
         const err = await requirePermission(companyId, PERMISSIONS.inbox.close);
-        if (err) return NextResponse.json({ error: err.error }, { status: err.status });
-      } else if (existingIsClosed) {
-        const err = await requirePermission(companyId, PERMISSIONS.inbox.reopen);
         if (err) return NextResponse.json({ error: err.error }, { status: err.status });
       } else if (["in_progress", "in_queue", "waiting", "open"].includes(newStatus)) {
         const errAssign = await requirePermission(companyId, PERMISSIONS.inbox.assign);
@@ -696,6 +729,12 @@ export async function PATCH(
         if (errManage && errAssign) return NextResponse.json({ error: errManage.error }, { status: errManage.status });
       }
       updates.status = newStatus;
+      if (newIsClosed && !existingIsClosed && existing.kind === "ticket" && !existing.is_group) {
+        const prevExt = String(existing.external_id ?? "").trim();
+        if (!prevExt.startsWith("closed:")) {
+          updates.external_id = `closed:${id}:${Date.now()}`;
+        }
+      }
     }
   }
   if (body.assigned_to !== undefined) {
