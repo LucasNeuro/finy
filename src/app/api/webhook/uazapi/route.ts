@@ -15,6 +15,8 @@ import { isCommercialQueue, getCommercialContactOwner } from "@/lib/queue/commer
 import { getNextAgentForQueue } from "@/lib/queue/round-robin";
 import { getSyncHistoryMessagesPerChatFromEnv } from "@/lib/channels/sync-history-config";
 import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
+import { mergeConversationsInto } from "@/lib/conversations/merge-conversations";
+import { canonicalDigitsFromConversationRow } from "@/lib/conversations/open-ticket-lookup";
 import { parseLooseTimeToMs, UAZ_MIN_MESSAGE_TIME_MS } from "@/lib/uazapi/message-timestamp";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { NextResponse } from "next/server";
@@ -993,6 +995,61 @@ async function processOneMessage(
           .limit(1)
           .maybeSingle();
         if (closedByPhone55) existingTicket = closedByPhone55;
+      }
+    }
+
+    /**
+     * Último recurso: mesmo contato no WhatsApp com duas linhas no banco (LID vs PN, sync com JID
+     * diferente, telefone gravado só em um dos campos). Varre tickets abertos e alinha pelo número canônico.
+     * Se houver mais de um ticket aberto para o mesmo número, mescla mensagens no mais recente e remove o extra.
+     */
+    if (!existingTicket && !isGroup && canonicalDigits) {
+      const { data: openIdentityRows } = await supabase
+        .from("conversations")
+        .select("id, status, external_id, wa_chat_jid, customer_phone, last_message_at")
+        .eq("channel_id", channelId)
+        .eq("company_id", companyId)
+        .eq("kind", "ticket")
+        .neq("status", "closed")
+        .order("last_message_at", { ascending: false })
+        .limit(600);
+      const rows = (openIdentityRows ?? []) as {
+        id: string;
+        status?: string | null;
+        external_id?: string | null;
+        wa_chat_jid?: string | null;
+        customer_phone?: string | null;
+        last_message_at?: string | null;
+      }[];
+      const matches = rows.filter(
+        (r) => canonicalDigitsFromConversationRow(r) === canonicalDigits
+      );
+      if (matches.length > 0) {
+        const keep = matches[0];
+        existingTicket = { id: keep.id, status: keep.status ?? undefined };
+        for (const dup of matches.slice(1)) {
+          await mergeConversationsInto({
+            supabase,
+            keepId: keep.id,
+            dropId: dup.id,
+            companyId,
+            invalidateCaches: false,
+          });
+        }
+        await supabase
+          .from("conversations")
+          .update({
+            external_id: canonicalExternalId,
+            wa_chat_jid: canonicalExternalId,
+            customer_phone: canonicalDigits,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", keep.id)
+          .eq("company_id", companyId);
+        if (matches.length > 1) {
+          await invalidateConversationDetail(keep.id, companyId);
+          await invalidateConversationList(companyId);
+        }
       }
     }
 
