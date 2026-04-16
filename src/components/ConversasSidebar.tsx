@@ -116,9 +116,15 @@ function withAlpha(hex: string, alphaHex = "1A"): string | null {
   return `${v}${alphaHex}`;
 }
 
+/** Contagem exata no badge (sem teto artificial 99+). */
+function inboxBadgeText(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "0";
+  return Math.floor(n).toLocaleString("pt-BR");
+}
+
 type ViewMode = "mine" | "queues" | "unassigned" | "mine_closed";
 type ConversationTypeFilter = "all" | "individual" | "group";
-/** Tab ativa: Novos, Filas, Meus, Meus encerrado, Contatos, Grupos, Envio em fila */
+/** Tab ativa: Novos, Pendente (visão geral das filas), Meus, Meus encerrado, Contatos, Grupos, Envio em fila */
 type TabId = "novos" | "queues" | "mine" | "mine_closed" | "contacts" | "groups" | "broadcast_queue";
 
 /** Contato da API /api/contacts (mesma lista do módulo Contatos) */
@@ -769,6 +775,7 @@ export function ConversasSidebar() {
     staleTime: 45 * 1000,
     refetchInterval: 20 * 1000,
     refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
   const counts = {
     mine: typeof countsData?.mine === "number" ? countsData.mine : 0,
@@ -1064,7 +1071,7 @@ export function ConversasSidebar() {
           />
         </div>
       </div>
-      {/* Tabs: Novos, Filas, Meus, Contatos, Grupos — scroll horizontal se não couber */}
+      {/* Tabs: Novos, Pendente, Meus, Contatos, Grupos — scroll horizontal se não couber */}
       <div className="flex shrink-0 w-full border-b border-[#E2E8F0]/60 px-3 py-0.5 items-center gap-1 min-w-0">
         <button
           type="button"
@@ -1093,8 +1100,8 @@ export function ConversasSidebar() {
             <Inbox className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Novos</span>
             {counts.unassigned > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
-                {counts.unassigned > 99 ? "99+" : counts.unassigned}
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] max-w-[4.5rem] items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold tabular-nums text-white shadow-sm ring-1 ring-white/20">
+                {inboxBadgeText(counts.unassigned)}
               </span>
             )}
           </button>
@@ -1106,14 +1113,14 @@ export function ConversasSidebar() {
                 ? "bg-sky-50 text-sky-800 shadow-md shadow-sky-200/60 border border-sky-200/70"
                 : "text-[#64748B] hover:bg-slate-50 hover:text-[#1E293B]"
             }`}
-            title="Filas"
-            aria-label="Filas"
+            title="Pendente — todos os atendimentos ativos nas suas filas"
+            aria-label="Pendente"
           >
             <Inbox className="h-5 w-5 shrink-0" />
-            <span className="truncate text-xs font-semibold">Filas</span>
+            <span className="truncate text-xs font-semibold">Pendente</span>
             {counts.queues > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-sky-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
-                {counts.queues > 99 ? "99+" : counts.queues}
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] max-w-[4.5rem] items-center justify-center rounded-full bg-sky-500 px-1 text-[10px] font-bold tabular-nums text-white shadow-sm ring-1 ring-white/20">
+                {inboxBadgeText(counts.queues)}
               </span>
             )}
           </button>
@@ -1131,8 +1138,8 @@ export function ConversasSidebar() {
             <UserCheck className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Meus</span>
             {counts.mine > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-violet-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
-                {counts.mine > 99 ? "99+" : counts.mine}
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] max-w-[4.5rem] items-center justify-center rounded-full bg-violet-500 px-1 text-[10px] font-bold tabular-nums text-white shadow-sm ring-1 ring-white/20">
+                {inboxBadgeText(counts.mine)}
               </span>
             )}
           </button>
@@ -1150,8 +1157,8 @@ export function ConversasSidebar() {
             <Archive className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Encerrados</span>
             {counts.mine_closed > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
-                {counts.mine_closed > 99 ? "99+" : counts.mine_closed}
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] max-w-[4.5rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold tabular-nums text-white shadow-sm ring-1 ring-white/20">
+                {inboxBadgeText(counts.mine_closed)}
               </span>
             )}
           </button>
@@ -1183,8 +1190,8 @@ export function ConversasSidebar() {
             <Users className="h-5 w-5 shrink-0" />
             <span className="truncate text-xs font-semibold">Grupos</span>
             {counts.groups > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-slate-500 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
-                {counts.groups > 99 ? "99+" : counts.groups}
+              <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] max-w-[4.5rem] items-center justify-center rounded-full bg-slate-500 px-1 text-[10px] font-bold tabular-nums text-white shadow-sm ring-1 ring-white/20">
+                {inboxBadgeText(counts.groups)}
               </span>
             )}
           </button>
@@ -1203,8 +1210,8 @@ export function ConversasSidebar() {
               <Send className="h-5 w-5 shrink-0" />
               <span className="truncate text-xs font-semibold">Envio em fila</span>
               {broadcastQueueItems.length > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white shadow-sm ring-1 ring-white/20">
-                  {broadcastQueueItems.length > 99 ? "99+" : broadcastQueueItems.length}
+                <span className="absolute -right-0.5 -top-0.5 flex h-4.5 min-w-[1.125rem] max-w-[4.5rem] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-bold tabular-nums text-white shadow-sm ring-1 ring-white/20">
+                  {inboxBadgeText(broadcastQueueItems.length)}
                 </span>
               )}
             </button>
@@ -1464,12 +1471,12 @@ export function ConversasSidebar() {
             <p className="font-semibold text-[#1E293B] text-base">Nenhuma conversa</p>
             <p className="mt-2 text-xs leading-relaxed">
               {activeTab === "mine" && "Você não tem conversas atribuídas. Novas conversas entram automaticamente pelas filas (não precisa sincronizar em Conexões)."}
-              {activeTab === "queues" && "Nenhuma conversa nas suas filas no momento."}
+              {activeTab === "queues" && "Nenhuma conversa pendente no momento."}
               {activeTab === "novos" && "Novos chamados aparecem aqui. Clique em Pegar para assumir."}
               {activeTab === "mine_closed" && "Nenhum chamado encerrado por você ainda. Ao fechar atendimentos, eles aparecerão aqui."}
             </p>
             <p className="mt-3 text-xs leading-relaxed">
-              Se você já tem contatos/conversas, confira a aba <strong>Filas</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline font-medium">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline font-medium">Conexões</Link> recebem mensagens e histórico em segundo plano.
+              Se você já tem contatos/conversas, confira a aba <strong>Pendente</strong> ou as <Link href={`${base}/filas`} className="text-clicvend-orange hover:underline font-medium">Atribuições</Link>. Números conectados em <Link href={`${base}/conexoes`} className="text-clicvend-orange hover:underline font-medium">Conexões</Link> recebem mensagens e histórico em segundo plano.
             </p>
           </div>
         ) : (

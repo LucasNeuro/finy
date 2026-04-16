@@ -39,8 +39,8 @@ async function resolveStatusSlugs(
 
 /**
  * GET /api/conversations/counts
- * Retorna contagens por aba: mine, queues, individual, groups.
- * Usado para badges nos ícones da sidebar (Filas, Meus atendimentos, Contatos, Grupos).
+ * Retorna contagens por aba: mine, queues (badge “Pendente”), individual, groups, unassigned, mine_closed.
+ * Query: nocache=1 ou skip_cache=1 ignora Redis/Supabase e recalcula no Postgres.
  */
 export async function GET(request: Request) {
   const startTime = performance.now();
@@ -52,6 +52,10 @@ export async function GET(request: Request) {
   if (readErr) {
     return NextResponse.json({ error: readErr.error }, { status: readErr.status });
   }
+
+  const skipCache =
+    new URL(request.url).searchParams.get("nocache") === "1" ||
+    new URL(request.url).searchParams.get("skip_cache") === "1";
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -91,7 +95,7 @@ export async function GET(request: Request) {
   }
 
   const userId = user?.id ?? "";
-  if (userId) {
+  if (userId && !skipCache) {
     const cachedRedis = await getCachedCounts(companyId, userId);
     if (cachedRedis) {
       const res = NextResponse.json(cachedRedis);
