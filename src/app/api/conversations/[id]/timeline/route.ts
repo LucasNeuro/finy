@@ -15,6 +15,8 @@ export type TimelineStatusChange = {
 };
 
 export type TimelinePayload = {
+  /** slug (minúsculo) → nome exibido no Kanban (company_ticket_statuses.name) */
+  status_labels_by_slug: Record<string, string>;
   conversation: {
     id: string;
     created_at: string;
@@ -64,6 +66,18 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const { data: statusRows } = await supabase
+    .from("company_ticket_statuses")
+    .select("slug, name")
+    .eq("company_id", companyId);
+  const status_labels_by_slug: Record<string, string> = {};
+  for (const r of statusRows ?? []) {
+    const row = r as { slug?: string; name?: string };
+    const sk = String(row.slug ?? "").trim().toLowerCase();
+    const nm = String(row.name ?? "").trim();
+    if (sk && nm) status_labels_by_slug[sk] = nm;
+  }
+
   const { data: hist } = await supabase
     .from("conversation_status_history")
     .select("id, from_status, to_status, changed_by, created_at")
@@ -71,19 +85,23 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     .order("created_at", { ascending: true });
 
   const userIds = [...new Set((hist ?? []).map((h) => h.changed_by).filter(Boolean))] as string[];
+  const assignedUid = (conv as { assigned_to?: string | null }).assigned_to;
+  const allProfileIds = [...new Set([...userIds, ...(assignedUid ? [assignedUid] : [])])];
 
   const admin = createServiceRoleClient();
   let profileMap: Record<string, string> = {};
-  if (userIds.length > 0) {
+  if (allProfileIds.length > 0) {
     const { data: profiles } = await admin
       .from("profiles")
-      .select("user_id, full_name")
+      .select("user_id, full_name, email")
       .eq("company_id", companyId)
-      .in("user_id", userIds);
+      .in("user_id", allProfileIds);
     for (const p of profiles ?? []) {
       const uid = (p as { user_id: string }).user_id;
       const name = ((p as { full_name?: string }).full_name ?? "").trim();
-      profileMap[uid] = name || "—";
+      const email = ((p as { email?: string }).email ?? "").trim();
+      const label = name || email;
+      if (label) profileMap[uid] = label;
     }
   }
 
@@ -101,13 +119,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   let assignedName: string | null = null;
   if (conv.assigned_to) {
-    const { data: p } = await admin
-      .from("profiles")
-      .select("full_name")
-      .eq("company_id", companyId)
-      .eq("user_id", conv.assigned_to)
-      .maybeSingle();
-    assignedName = ((p as { full_name?: string } | null)?.full_name ?? "").trim() || null;
+    assignedName = profileMap[String(conv.assigned_to)] ?? null;
   }
 
   const status_changes: TimelineStatusChange[] = (hist ?? []).map((h) => ({
@@ -120,6 +132,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }));
 
   const payload: TimelinePayload = {
+    status_labels_by_slug,
     conversation: {
       id: conv.id as string,
       created_at: String(conv.created_at ?? ""),

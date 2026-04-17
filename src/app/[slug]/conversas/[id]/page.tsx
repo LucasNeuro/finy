@@ -230,6 +230,18 @@ function timelineStatusLabelPt(slug: string): string {
   return slug;
 }
 
+/** Prefer nome do Kanban (company_ticket_statuses); senão fallback PT dos slugs padrão. */
+function resolveTimelineStatusDisplay(
+  slug: string,
+  labelsBySlug: Record<string, string> | undefined
+): string {
+  const k = String(slug).toLowerCase().trim();
+  if (!k) return "—";
+  const fromCompany = labelsBySlug?.[k];
+  if (fromCompany) return fromCompany;
+  return timelineStatusLabelPt(slug);
+}
+
 /** Barra de preview do áudio gravado antes de enviar (miniplayer com degradê roxo claro, igual ao mini player da conversa). */
 function RecordingPreviewBar({
   src,
@@ -1551,6 +1563,7 @@ export default function ConversaThreadPage({
         throw new Error((j as { error?: string })?.error ?? "Falha ao carregar histórico");
       }
       return (await res.json()) as {
+        status_labels_by_slug: Record<string, string>;
         conversation: {
           created_at: string;
           channel_name: string | null;
@@ -1564,6 +1577,7 @@ export default function ConversaThreadPage({
           id: string;
           from_status: string;
           to_status: string;
+          changed_by: string | null;
           changed_by_name: string | null;
           created_at: string;
         }>;
@@ -3715,7 +3729,10 @@ export default function ConversaThreadPage({
                   </li>
                   <li>
                     <span className="text-[#64748B]">Status atual:</span>{" "}
-                    {timelineStatusLabelPt(timelineData.conversation.status ?? "")}
+                    {resolveTimelineStatusDisplay(
+                      timelineData.conversation.status ?? "",
+                      timelineData.status_labels_by_slug ?? {}
+                    )}
                   </li>
                 </ul>
               </div>
@@ -3736,10 +3753,15 @@ export default function ConversaThreadPage({
                           {new Date(row.created_at).toLocaleString("pt-BR")}
                         </p>
                         <p className="font-medium text-[#1E293B]">
-                          {timelineStatusLabelPt(row.from_status)} → {timelineStatusLabelPt(row.to_status)}
+                          {resolveTimelineStatusDisplay(row.from_status, timelineData.status_labels_by_slug ?? {})} →{" "}
+                          {resolveTimelineStatusDisplay(row.to_status, timelineData.status_labels_by_slug ?? {})}
                         </p>
                         <p className="text-xs text-[#64748B]">
-                          {row.changed_by_name ? `Por: ${row.changed_by_name}` : "Registro automático / sistema"}
+                          {row.changed_by
+                            ? row.changed_by_name?.trim()
+                              ? `Por: ${row.changed_by_name}`
+                              : "Alteração registrada sem nome no perfil (use e-mail ou nome completo no cadastro do usuário)."
+                            : "Sistema / automação (sem usuário associado ao registro)"}
                         </p>
                       </li>
                     ))}

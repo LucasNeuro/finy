@@ -17,6 +17,11 @@ import { getSyncHistoryMessagesPerChatFromEnv } from "@/lib/channels/sync-histor
 import { runSyncChannelHistory } from "@/lib/channels/run-sync-channel-history";
 import { mergeConversationsInto } from "@/lib/conversations/merge-conversations";
 import { canonicalDigitsFromConversationRow } from "@/lib/conversations/open-ticket-lookup";
+import {
+  excludeClosedTicketStatuses,
+  fetchClosedTicketStatusSlugs,
+  isConversationStatusClosed,
+} from "@/lib/ticket-statuses/closed-slugs";
 import { parseLooseTimeToMs, UAZ_MIN_MESSAGE_TIME_MS } from "@/lib/uazapi/message-timestamp";
 import { getChannelToken } from "@/lib/uazapi/channel-token";
 import { NextResponse } from "next/server";
@@ -856,41 +861,52 @@ async function processOneMessage(
     const canonicalExternalId = toCanonicalJid(externalId, isGroup) || externalId;
     const canonicalDigits = toCanonicalPhone(digitsForCanonical, isGroup) || phoneDigitsOnly(canonicalExternalId);
 
+    const closedTicketStatusSlugs = await fetchClosedTicketStatusSlugs(supabase, companyId);
+
+    /** Evita TS2589 (inferência profunda) nas cadeias longas do client neste bloco. */
+    const sb = supabase as any;
+
     let existingTicket: { id: string; status?: string } | null = null;
-    const { data: byExternal } = await supabase
-      .from("conversations")
-      .select("id, status")
-      .eq("channel_id", channelId)
-      .eq("external_id", canonicalExternalId)
-      .eq("kind", "ticket")
-      .neq("status", "closed")
+    const { data: byExternal } = await excludeClosedTicketStatuses(
+      sb
+        .from("conversations")
+        .select("id, status")
+        .eq("channel_id", channelId)
+        .eq("external_id", canonicalExternalId)
+        .eq("kind", "ticket"),
+      closedTicketStatusSlugs
+    )
       .order("last_message_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (byExternal) existingTicket = byExternal;
     // external_id antigo (ex.: LID) pode divergir; wa_chat_jid costuma bater com o chat canônico do PN.
     if (!existingTicket) {
-      const { data: byWaChat } = await supabase
-        .from("conversations")
-        .select("id, status")
-        .eq("channel_id", channelId)
-        .eq("wa_chat_jid", canonicalExternalId)
-        .eq("kind", "ticket")
-        .neq("status", "closed")
+      const { data: byWaChat } = await excludeClosedTicketStatuses(
+        sb
+          .from("conversations")
+          .select("id, status")
+          .eq("channel_id", channelId)
+          .eq("wa_chat_jid", canonicalExternalId)
+          .eq("kind", "ticket"),
+        closedTicketStatusSlugs
+      )
         .order("last_message_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (byWaChat) existingTicket = byWaChat;
     }
     if (!existingTicket && canonicalDigits) {
-      const { data: byPhone } = await supabase
-        .from("conversations")
-        .select("id, status")
-        .eq("channel_id", channelId)
-        .eq("company_id", companyId)
-        .eq("customer_phone", canonicalDigits)
-        .eq("kind", "ticket")
-        .neq("status", "closed")
+      const { data: byPhone } = await excludeClosedTicketStatuses(
+        sb
+          .from("conversations")
+          .select("id, status")
+          .eq("channel_id", channelId)
+          .eq("company_id", companyId)
+          .eq("customer_phone", canonicalDigits)
+          .eq("kind", "ticket"),
+        closedTicketStatusSlugs
+      )
         .order("last_message_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -898,14 +914,16 @@ async function processOneMessage(
       // Mesmo contato pode estar gravado sem 55 (ex.: 4184727733) — evita duplicata na lista
       if (!existingTicket && canonicalDigits.length === 12 && canonicalDigits.startsWith("55")) {
         const without55 = canonicalDigits.slice(2);
-        const { data: byPhoneAlt } = await supabase
-          .from("conversations")
-          .select("id, status")
-          .eq("channel_id", channelId)
-          .eq("company_id", companyId)
-          .eq("customer_phone", without55)
-          .eq("kind", "ticket")
-          .neq("status", "closed")
+        const { data: byPhoneAlt } = await excludeClosedTicketStatuses(
+          sb
+            .from("conversations")
+            .select("id, status")
+            .eq("channel_id", channelId)
+            .eq("company_id", companyId)
+            .eq("customer_phone", without55)
+            .eq("kind", "ticket"),
+          closedTicketStatusSlugs
+        )
           .order("last_message_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -913,14 +931,16 @@ async function processOneMessage(
       }
       // Legado: só DDD+número sem 55
       if (!existingTicket && !canonicalDigits.startsWith("55") && canonicalDigits.length >= 10) {
-        const { data: byPhone55 } = await supabase
-          .from("conversations")
-          .select("id, status")
-          .eq("channel_id", channelId)
-          .eq("company_id", companyId)
-          .eq("customer_phone", `55${canonicalDigits}`)
-          .eq("kind", "ticket")
-          .neq("status", "closed")
+        const { data: byPhone55 } = await excludeClosedTicketStatuses(
+          sb
+            .from("conversations")
+            .select("id, status")
+            .eq("channel_id", channelId)
+            .eq("company_id", companyId)
+            .eq("customer_phone", `55${canonicalDigits}`)
+            .eq("kind", "ticket"),
+          closedTicketStatusSlugs
+        )
           .order("last_message_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -936,13 +956,15 @@ async function processOneMessage(
      * Se houver mais de um ticket aberto para o mesmo número, mescla mensagens no mais recente e remove o extra.
      */
     if (!existingTicket && !isGroup && canonicalDigits) {
-      const { data: openIdentityRows } = await supabase
-        .from("conversations")
-        .select("id, status, external_id, wa_chat_jid, customer_phone, last_message_at")
-        .eq("channel_id", channelId)
-        .eq("company_id", companyId)
-        .eq("kind", "ticket")
-        .neq("status", "closed")
+      const { data: openIdentityRows } = await excludeClosedTicketStatuses(
+        sb
+          .from("conversations")
+          .select("id, status, external_id, wa_chat_jid, customer_phone, last_message_at")
+          .eq("channel_id", channelId)
+          .eq("company_id", companyId)
+          .eq("kind", "ticket"),
+        closedTicketStatusSlugs
+      )
         .order("last_message_at", { ascending: false })
         .limit(600);
       const rows = (openIdentityRows ?? []) as {
@@ -968,7 +990,7 @@ async function processOneMessage(
             invalidateCaches: false,
           });
         }
-        await supabase
+        await sb
           .from("conversations")
           .update({
             external_id: canonicalExternalId,
@@ -982,6 +1004,20 @@ async function processOneMessage(
           await invalidateConversationDetail(keep.id, companyId);
           await invalidateConversationList(companyId);
         }
+      }
+    }
+
+    /** Slugs no PostgREST são case-sensitive: se `conversations.status` estiver com caixa diferente do slug, o filtro .neq pode falhar — confirma pelo valor real. */
+    if (existingTicket) {
+      const { data: convStatusRow } = await sb
+        .from("conversations")
+        .select("status")
+        .eq("id", existingTicket.id)
+        .eq("company_id", companyId)
+        .maybeSingle();
+      const rawStatus = (convStatusRow as { status?: string | null } | null)?.status;
+      if (isConversationStatusClosed(rawStatus, closedTicketStatusSlugs)) {
+        existingTicket = null;
       }
     }
 

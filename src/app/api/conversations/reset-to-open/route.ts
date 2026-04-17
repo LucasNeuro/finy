@@ -2,6 +2,10 @@ import { getCompanyIdFromRequest } from "@/lib/auth/get-company";
 import { getProfileForCompany, requirePermission } from "@/lib/auth/get-profile";
 import { PERMISSIONS } from "@/lib/auth/permissions";
 import { invalidateConversationList } from "@/lib/redis/inbox-state";
+import {
+  excludeClosedTicketStatuses,
+  fetchClosedTicketStatusSlugs,
+} from "@/lib/ticket-statuses/closed-slugs";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 
@@ -37,14 +41,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let q = supabase
-    .from("conversations")
-    .update({
-      status: "open",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("company_id", companyId)
-    .neq("status", "closed");
+  const closedSlugs = await fetchClosedTicketStatusSlugs(supabase, companyId);
+  let q = excludeClosedTicketStatuses(
+    supabase
+      .from("conversations")
+      .update({
+        status: "open",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("company_id", companyId),
+    closedSlugs
+  );
 
   if (filter === "mine") {
     q = q.eq("assigned_to", user.id);
