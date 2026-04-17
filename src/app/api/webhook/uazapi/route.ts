@@ -20,6 +20,7 @@ import { canonicalDigitsFromConversationRow } from "@/lib/conversations/open-tic
 import {
   excludeClosedTicketStatuses,
   fetchClosedTicketStatusSlugs,
+  isClosedTicketTombstoneExternalId,
   isConversationStatusClosed,
 } from "@/lib/ticket-statuses/closed-slugs";
 import { parseLooseTimeToMs, UAZ_MIN_MESSAGE_TIME_MS } from "@/lib/uazapi/message-timestamp";
@@ -976,7 +977,9 @@ async function processOneMessage(
         last_message_at?: string | null;
       }[];
       const matches = rows.filter(
-        (r) => canonicalDigitsFromConversationRow(r) === canonicalDigits
+        (r) =>
+          !isClosedTicketTombstoneExternalId(r.external_id) &&
+          canonicalDigitsFromConversationRow(r) === canonicalDigits
       );
       if (matches.length > 0) {
         const keep = matches[0];
@@ -1007,16 +1010,25 @@ async function processOneMessage(
       }
     }
 
-    /** Slugs no PostgREST são case-sensitive: se `conversations.status` estiver com caixa diferente do slug, o filtro .neq pode falhar — confirma pelo valor real. */
+    /**
+     * Confirma no banco: (1) slug encerrado; (2) tombstone `closed:...` em external_id.
+     * Encerrar troca external_id mas mantém wa_chat_jid/telefone — buscas por JID/phone ainda acham a linha
+     * se o filtro .neq(status) falhar (slug divergente, legado).
+     */
     if (existingTicket) {
       const { data: convStatusRow } = await sb
         .from("conversations")
-        .select("status")
+        .select("status, external_id")
         .eq("id", existingTicket.id)
         .eq("company_id", companyId)
         .maybeSingle();
-      const rawStatus = (convStatusRow as { status?: string | null } | null)?.status;
-      if (isConversationStatusClosed(rawStatus, closedTicketStatusSlugs)) {
+      const row = convStatusRow as { status?: string | null; external_id?: string | null } | null;
+      const rawStatus = row?.status;
+      const rawExt = row?.external_id;
+      if (
+        isConversationStatusClosed(rawStatus, closedTicketStatusSlugs) ||
+        isClosedTicketTombstoneExternalId(rawExt)
+      ) {
         existingTicket = null;
       }
     }

@@ -49,3 +49,8 @@ export function isConversationStatusClosed(
   if (!s) return false;
   return closedSlugsLowercase.includes(s);
 }
+
+/** PATCH de encerramento grava tombstone `closed:<conversation_id>:<ts>` — não reutilizar esse ticket pelo webhook. */
+export function isClosedTicketTombstoneExternalId(externalId: string | null | undefined): boolean {
+  return String(externalId ?? "").trim().toLowerCase().startsWith("closed:");
+}
