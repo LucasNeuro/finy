@@ -4,6 +4,7 @@ import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { toCanonicalJid } from "@/lib/phone-canonical";
 import {
   FALLBACK_LAST_MESSAGE_AT_ISO,
+  getSyncHistoryIncludeMediaFromEnv,
   getSyncHistoryMaxTotalMessagesInserted,
 } from "@/lib/channels/sync-history-config";
 import { findChats, type UazapiChat } from "@/lib/uazapi/client";
@@ -23,7 +24,7 @@ export type RunSyncChannelHistoryResult = {
  *
  * **Quais conversas entram:** lista paginada de chats da instância (até 50 × 100 = 5000 chats), ordenação UAZ
  * `sort: -wa_lastMsgTimestamp` (última atividade no WhatsApp, parecido com a lista de chats do celular).
- * Para cada chat, importa até `targetMessagesPerChat` mensagens de texto (mídias ignoradas no insert em massa).
+ * Para cada chat, importa até `targetMessagesPerChat` mensagens (texto e, por padrão, também mídias).
  * Com `createMissingConversations: true`, cria conversa/contato em falta; com `false`, só preenche histórico das que já existem.
  *
  * **Ordem dos cards no painel:** não vem da ordem do loop de sync; a inbox ordena por `last_message_at` + regra “novos primeiro”
@@ -35,8 +36,16 @@ export async function runSyncChannelHistory(params: {
   token: string;
   createMissingConversations: boolean;
   targetMessagesPerChat: number;
+  includeMedia?: boolean;
 }): Promise<RunSyncChannelHistoryResult> {
-  const { channelId, companyId, token, createMissingConversations, targetMessagesPerChat } = params;
+  const {
+    channelId,
+    companyId,
+    token,
+    createMissingConversations,
+    targetMessagesPerChat,
+    includeMedia = getSyncHistoryIncludeMediaFromEnv(),
+  } = params;
   const supabase = createServiceRoleClient();
 
   const CHAT_PAGE_SIZE = 100;
@@ -278,7 +287,7 @@ export async function runSyncChannelHistory(params: {
       conversationId,
       waChatid,
       budget,
-      { skipMedia: true }
+      includeMedia ? undefined : { skipMedia: true }
     );
 
     if (resolvedChatJid?.trim()) {

@@ -43,3 +43,12 @@ export function getSyncHistoryMaxTotalMessagesInserted(targetMessagesPerChat: nu
   const per = Math.max(1, Math.min(MAX_CAP, Math.floor(targetMessagesPerChat)));
   return Math.min(120_000, Math.max(35_000, per * 180));
 }
+
+/**
+ * Se true, o sync em massa também importa mídia (quando disponível pela UAZAPI).
+ * Pode aumentar tempo/carga; desative com SYNC_HISTORY_INCLUDE_MEDIA=0.
+ */
+export function getSyncHistoryIncludeMediaFromEnv(): boolean {
+  const raw = String(process.env.SYNC_HISTORY_INCLUDE_MEDIA ?? "1").trim().toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "no");
+}
