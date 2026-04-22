@@ -111,6 +111,59 @@ export async function GET(request: Request) {
       offset += pageSize;
     }
 
+    // Fallback histórico: se não houver contatos vivos do canal, exibir contatos preservados da empresa.
+    if (allRows.length === 0) {
+      let hOffset = 0;
+      let hHasMore = true;
+      while (hHasMore) {
+        let hq = supabase
+          .from("company_contacts")
+          .select("id, source_channel_id, jid, phone, contact_name, first_name, avatar_url, synced_at")
+          .eq("company_id", companyId)
+          .order("contact_name")
+          .order("phone")
+          .range(hOffset, hOffset + pageSize - 1);
+
+        if (channelId) {
+          hq = hq.eq("source_channel_id", channelId);
+        }
+
+        const { data: hData, error: hError } = await hq;
+        if (hError) {
+          return NextResponse.json({ error: hError.message }, { status: 500 });
+        }
+
+        const hChunk = (hData ?? []) as Array<{
+          id: string;
+          source_channel_id: string | null;
+          jid: string;
+          phone: string | null;
+          contact_name: string | null;
+          first_name: string | null;
+          avatar_url: string | null;
+          synced_at: string;
+        }>;
+
+        const normalized = hChunk.map((row) => ({
+          id: row.id,
+          channel_id: row.source_channel_id ?? "historical",
+          jid: row.jid,
+          phone: normalizePhoneForDisplay(row.phone) ?? row.phone,
+          contact_name: row.contact_name,
+          first_name: row.first_name,
+          avatar_url: row.avatar_url,
+          opt_in_at: null,
+          opt_out_at: null,
+          opt_in_source: null,
+          synced_at: row.synced_at,
+        }));
+
+        allRows.push(...normalized);
+        hHasMore = hChunk.length === pageSize;
+        hOffset += pageSize;
+      }
+    }
+
     // 1) Deduplicação robusta por canal + telefone canônico (ou jid quando não houver telefone)
     const byKey = new Map<string, ContactRow>();
     for (const row of allRows) {

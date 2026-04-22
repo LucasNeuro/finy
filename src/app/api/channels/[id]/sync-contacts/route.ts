@@ -242,6 +242,23 @@ async function runSync(
       contactsCount = allContactRows.length;
       syncedJids = allContactRows.map((r) => r.jid);
     }
+
+    // Camada histórica por empresa: preserva contatos mesmo se o canal for removido depois.
+    await supabase
+      .from("company_contacts")
+      .upsert(
+        allContactRows.map((r) => ({
+          company_id: companyId,
+          source_channel_id: channelId,
+          jid: r.jid,
+          phone: r.phone,
+          contact_name: r.contact_name,
+          first_name: r.first_name,
+          synced_at: new Date().toISOString(),
+          last_seen_at: new Date().toISOString(),
+        })),
+        { onConflict: "company_id,jid", ignoreDuplicates: false }
+      );
   }
   if (process.env.NODE_ENV !== "test" && contactsCount > 0) {
     console.log("[sync-contacts] trazidos", contactsCount, "contatos da instância (chats)");
