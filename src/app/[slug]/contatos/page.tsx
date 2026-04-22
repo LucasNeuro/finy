@@ -1358,7 +1358,17 @@ export default function ContatosPage() {
           return (
             <div className="flex items-center gap-3">
               <ContactListAvatar avatarUrl={avatarUrl} name={name} />
-              <span className="font-medium text-[#1E293B]">{name}</span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-[#1E293B]">{name}</span>
+                {c.is_historical ? (
+                  <span
+                    className="inline-flex items-center rounded-md bg-[#F1F5F9] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#64748B]"
+                    title="Contato da camada histórica (sem vínculo ativo de conexão)"
+                  >
+                    Historico
+                  </span>
+                ) : null}
+              </div>
             </div>
           );
         },

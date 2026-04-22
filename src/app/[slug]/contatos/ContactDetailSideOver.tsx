@@ -17,6 +17,7 @@ export type Contact = {
   opt_in_source?: string | null;
   queue_names?: string[];
   tag_names?: string[];
+  is_historical?: boolean;
   synced_at: string;
 };
 
@@ -464,7 +465,17 @@ export function ContactDetailSideOver({
                   )}
                 </div>
                 <div className="text-center">
-                  <p className="font-semibold text-[#1E293B]">{displayName}</p>
+                  <div className="inline-flex items-center gap-2">
+                    <p className="font-semibold text-[#1E293B]">{displayName}</p>
+                    {contact.is_historical ? (
+                      <span
+                        className="inline-flex items-center rounded-md bg-[#F1F5F9] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#64748B]"
+                        title="Contato da camada histórica (sem vínculo ativo de conexão)"
+                      >
+                        Historico
+                      </span>
+                    ) : null}
+                  </div>
                   <p className="text-sm text-[#64748B]">{displayPhone}</p>
                   <p className="mt-1 text-xs text-[#94A3B8]">{channelName}</p>
                   {details && (

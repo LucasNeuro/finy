@@ -66,6 +66,7 @@ export async function GET(request: Request) {
       synced_at: string;
       queue_names?: string[];
       tag_names?: string[];
+      is_historical?: boolean;
     };
     const allRows: ContactRow[] = [];
     let offset = 0;
@@ -104,7 +105,7 @@ export async function GET(request: Request) {
           synced_at: string;
         };
         const normalizedPhone = normalizePhoneForDisplay(r.phone) ?? r.phone;
-        return { ...r, phone: normalizedPhone };
+        return { ...r, phone: normalizedPhone, is_historical: false };
       });
       allRows.push(...normalized);
       hasMore = chunk.length === pageSize;
@@ -155,6 +156,7 @@ export async function GET(request: Request) {
           opt_in_at: null,
           opt_out_at: null,
           opt_in_source: null,
+          is_historical: true,
           synced_at: row.synced_at,
         }));
 
@@ -271,6 +273,7 @@ export async function GET(request: Request) {
         ...c,
         queue_names: Array.from(contactKeyToQueues.get(key) ?? []),
         tag_names: tagsByContact.get(c.id) ?? [],
+        is_historical: c.is_historical === true,
       };
     });
 
