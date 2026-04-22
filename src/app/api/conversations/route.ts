@@ -36,6 +36,24 @@ function normalizePhoneForDisplay(raw: string | null | undefined): string | null
   return toCanonicalDigits(raw) ?? raw;
 }
 
+/** Chave estável para deduplicar o mesmo contato quando phone/jid variam de formato. */
+function conversationIdentityKey(c: {
+  channel_id?: string | null;
+  customer_phone?: string | null;
+  wa_chat_jid?: string | null;
+  external_id?: string | null;
+}): string {
+  const channel = c.channel_id ?? "";
+  const phoneNorm = toCanonicalDigits(c.customer_phone ?? "") ?? "";
+  const waNorm = toCanonicalDigits((c.wa_chat_jid ?? "").replace(/@.*$/, "")) ?? "";
+  const extNorm = toCanonicalDigits((c.external_id ?? "").replace(/@.*$/, "")) ?? "";
+  const bestDigits = phoneNorm || waNorm || extNorm;
+  if (bestDigits) return `${channel}|${bestDigits}`;
+  const waRaw = String(c.wa_chat_jid ?? "").trim().toLowerCase();
+  const extRaw = String(c.external_id ?? "").trim().toLowerCase();
+  return `${channel}|${waRaw || extRaw}`;
+}
+
 async function resolveStatusSlugsForList(
   supabase: Awaited<ReturnType<typeof createClient>>,
   companyId: string,
@@ -234,8 +252,12 @@ export async function GET(request: Request) {
       const seen = new Set<string>();
       sorted = sorted.filter((c) => {
         if (c.is_group === true) return true;
-        const norm = (toCanonicalDigits(c.customer_phone) ?? (c.customer_phone ?? "").replace(/\D/g, "").trim()) || "";
-        const key = `${c.channel_id ?? ""}|${norm}`;
+        const key = conversationIdentityKey(c as {
+          channel_id?: string | null;
+          customer_phone?: string | null;
+          wa_chat_jid?: string | null;
+          external_id?: string | null;
+        });
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -501,8 +523,12 @@ export async function GET(request: Request) {
   const seenTicketKey = new Set<string>();
   listWithPreview = listWithPreview.filter((c) => {
     if (c.is_group === true) return true;
-    const norm = (toCanonicalDigits(c.customer_phone) ?? (c.customer_phone ?? "").replace(/\D/g, "").trim()) || "";
-    const key = `${c.channel_id}|${norm}`;
+    const key = conversationIdentityKey(c as {
+      channel_id?: string | null;
+      customer_phone?: string | null;
+      wa_chat_jid?: string | null;
+      external_id?: string | null;
+    });
     if (seenTicketKey.has(key)) return false;
     seenTicketKey.add(key);
     return true;
