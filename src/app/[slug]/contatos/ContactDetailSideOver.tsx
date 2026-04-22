@@ -470,7 +470,7 @@ export function ContactDetailSideOver({
                     {contact.is_historical ? (
                       <span
                         className="inline-flex items-center rounded-md bg-[#F1F5F9] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#64748B]"
-                        title="Contato da camada histórica (sem vínculo ativo de conexão)"
+                        title="Contato histórico (sem conexão ativa)"
                       >
                         Historico
                       </span>
