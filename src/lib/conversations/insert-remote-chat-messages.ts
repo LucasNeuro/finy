@@ -149,6 +149,7 @@ export async function insertHistoryMessagesFromUazapiForConversation(
   let globalPagesFetched = 0;
   const chatIdsToTry = uniqueChatIdsForFind(chatidForFind, wa);
   let lastPageErr: string | undefined;
+  let discardedByChatMismatch = 0;
 
   for (const activeChatId of chatIdsToTry) {
     if (chatMessagesInserted >= cap || globalPagesFetched >= MAX_MESSAGE_FIND_PAGES) break;
@@ -182,7 +183,10 @@ export async function insertHistoryMessagesFromUazapiForConversation(
 
       for (const msg of messages) {
         if (chatMessagesInserted >= cap) break;
-        if (!uazapiMessageBelongsToChat(msg, activeChatId) && !uazapiMessageBelongsToChat(msg, wa)) continue;
+        if (!uazapiMessageBelongsToChat(msg, activeChatId) && !uazapiMessageBelongsToChat(msg, wa)) {
+          discardedByChatMismatch += 1;
+          continue;
+        }
 
         const fromMe = msg.fromMe === true;
         const bodyText = (msg.body ?? msg.text ?? "").toString().trim();
@@ -264,6 +268,14 @@ export async function insertHistoryMessagesFromUazapiForConversation(
   }
 
   await flushMessages();
+
+  if (discardedByChatMismatch > 0) {
+    console.warn("[SYNC][message/find] Mensagens descartadas por chat divergente", {
+      conversationId,
+      waChatid: wa,
+      discardedByChatMismatch,
+    });
+  }
 
   if (chatMessagesInserted === 0 && lastPageErr) {
     return { inserted: 0, uazapiError: lastPageErr };
