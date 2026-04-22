@@ -125,6 +125,12 @@ export async function sendAutoConsentIfNeeded(params: {
     return { sent: false, skipped: "consent_auto_disabled" };
   }
 
+  // Regra de produto: não disparar mais consentimento automático nos fluxos de atendimento.
+  // Mantemos apenas o envio explícito/manual (ex.: ação em massa de consentimento).
+  if (params.reason !== "manual_bulk") {
+    return { sent: false, skipped: "consent_auto_blocked_for_non_manual_reason" };
+  }
+
   const digits = normalizeDigits(params.phoneOrJid);
   if (!digits) return { sent: false, skipped: "invalid_phone" };
 

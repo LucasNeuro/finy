@@ -234,12 +234,10 @@ async function runSync(
   }
 
   if (allContactRows.length > 0) {
-    await supabase
+    // Mantém contatos históricos já salvos no banco: sincronização viva faz merge por (channel_id, jid).
+    const { error: err } = await supabase
       .from("channel_contacts")
-      .delete()
-      .eq("channel_id", channelId)
-      .eq("company_id", companyId);
-    const { error: err } = await supabase.from("channel_contacts").insert(allContactRows);
+      .upsert(allContactRows, { onConflict: "channel_id,jid", ignoreDuplicates: false });
     if (!err) {
       contactsCount = allContactRows.length;
       syncedJids = allContactRows.map((r) => r.jid);
@@ -334,13 +332,8 @@ async function runSync(
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
-    await supabase
-      .from("channel_groups")
-      .delete()
-      .eq("channel_id", channelId)
-      .eq("company_id", companyId);
-
     if (rows.length > 0) {
+      // Mesmo princípio dos contatos: não apagar histórico local ao sincronizar novamente.
       const { error: err } = await supabase
         .from("channel_groups")
         .upsert(rows, { onConflict: "channel_id,jid", ignoreDuplicates: false });

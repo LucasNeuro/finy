@@ -10,7 +10,8 @@
  */
 export const FALLBACK_LAST_MESSAGE_AT_ISO = "1970-01-01T00:00:00.000Z";
 
-export const SYNC_HISTORY_DEFAULT_MESSAGES_PER_CHAT = 200;
+// Mais histórico já na carga inicial pós-reset (ainda com teto absoluto por chat).
+export const SYNC_HISTORY_DEFAULT_MESSAGES_PER_CHAT = 1200;
 
 const MAX_CAP = 8000;
 
